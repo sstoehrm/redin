@@ -1,4 +1,4 @@
-.PHONY: build run clean fennel
+.PHONY: build run clean fennel test
 
 ODIN := odin
 BUILD_DIR := build
@@ -22,6 +22,10 @@ fennel: $(FNL_OUT)
 $(BUILD_DIR)/%.lua: %.fnl
 	@mkdir -p $(dir $@)
 	lua -e 'local f=require("vendor.fennel.fennel"); local h=io.open("$<"); local s=h:read("*a"); h:close(); local out,_=f.compileString(s,{filename="$<"}); print(out)' > $@
+
+# Run tests
+test:
+	$(ODIN) test src/host
 
 clean:
 	rm -rf $(BUILD_DIR)

@@ -13,12 +13,12 @@ main :: proc() {
 	defer lua_destroy(L)
 
 	// Load Fennel compiler
-	if !fennel_load(L) {
-		fmt.eprintln("Failed to load Fennel compiler")
+	if err, has_err := fennel_load(L).?; has_err {
+		fmt.eprintfln("Failed to load Fennel: %s", lua_error_format(err))
 		return
 	}
 
-	// Test Fennel compilation
+	// Self-test
 	fennel_test(L)
 
 	// Initialize Raylib window
