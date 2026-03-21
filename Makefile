@@ -13,7 +13,7 @@ $(BUILD_DIR)/redin: $(wildcard src/host/*.odin)
 	$(ODIN) build src/host -out:$(BUILD_DIR)/redin
 
 # Run the host binary (dev mode)
-run: build
+run: build fennel
 	./$(BUILD_DIR)/redin
 
 # Compile Fennel -> Lua

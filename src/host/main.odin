@@ -12,8 +12,9 @@ main :: proc() {
 	}
 	defer lua_destroy(L)
 
-	// Load Fennel compiler
-	if !fennel_load(L) {
+	// Find project root and load Fennel compiler
+	project_root := _find_project_root()
+	if !fennel_load(L, project_root) {
 		fmt.eprintln("Failed to load Fennel compiler")
 		return
 	}

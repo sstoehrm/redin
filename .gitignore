@@ -1,1 +1,6 @@
 build/
+*.o
+.ols-cache/
+*~
+*.swp
+.DS_Store
