@@ -1,0 +1,884 @@
+package bridge
+
+import "core:fmt"
+import "core:os"
+import "core:path/filepath"
+import "core:strings"
+import "core:time"
+import "core:unicode/utf8"
+import "base:runtime"
+import "../types"
+import rl "vendor:raylib"
+
+Bridge :: struct {
+	L:              ^Lua_State,
+	paths:          [dynamic]types.Path,
+	nodes:          [dynamic]types.Node,
+	parent_indices: [dynamic]int,
+	children_list:  [dynamic]types.Children,
+	theme:          map[string]types.Theme,
+	http_client:    Http_Client,
+	hot_reload:     Hot_Reload,
+	dev_server:     Dev_Server,
+	frame_changed:  bool,
+	dev_mode:       bool,
+}
+
+g_bridge: ^Bridge
+
+init :: proc(b: ^Bridge, dev_mode: bool) {
+	g_bridge = b
+	b.dev_mode = dev_mode
+	http_client_init(&b.http_client)
+	b.L = luaL_newstate()
+	luaL_openlibs(b.L)
+
+	exe_dir := filepath.dir(string(os.args[0]))
+	lua_pushstring(b.L, strings.clone_to_cstring(exe_dir))
+	lua_setglobal(b.L, "_redin_exe_dir")
+
+	setup_lua_paths(b.L)
+
+	// Create redin global table with host functions
+	lua_newtable(b.L)
+	register_cfunc(b.L, "push", redin_push)
+	register_cfunc(b.L, "set_theme", redin_set_theme)
+	register_cfunc(b.L, "log", redin_log)
+	register_cfunc(b.L, "now", redin_now)
+	register_cfunc(b.L, "measure_text", redin_measure_text)
+	register_cfunc(b.L, "http", redin_http)
+	register_cfunc(b.L, "json_encode", redin_json_encode)
+	register_cfunc(b.L, "json_decode", redin_json_decode)
+	lua_setglobal(b.L, "redin")
+
+	// Also expose redin_http as a flat global for the effect system
+	lua_pushcfunction(b.L, redin_http)
+	lua_setglobal(b.L, "redin_http")
+
+	load_fennel(b.L)
+	load_runtime(b.L)
+
+	if dev_mode {
+		hotreload_init(&b.hot_reload)
+		devserver_init(&b.dev_server, b)
+	}
+}
+
+destroy :: proc(b: ^Bridge) {
+	if b.dev_mode {
+		devserver_destroy(&b.dev_server)
+		hotreload_destroy(&b.hot_reload)
+	}
+	http_client_destroy(&b.http_client)
+	clear_frame(b)
+	for k in b.theme {
+		delete(k)
+	}
+	delete(b.theme)
+	lua_close(b.L)
+}
+
+poll_devserver :: proc(b: ^Bridge, events: ^[dynamic]types.InputEvent) {
+	if !b.dev_mode do return
+	devserver_poll(&b.dev_server)
+	devserver_drain_events(&b.dev_server, events)
+}
+
+is_shutdown_requested :: proc(b: ^Bridge) -> bool {
+	return b.dev_mode && b.dev_server.shutdown_requested
+}
+
+check_hotreload :: proc(b: ^Bridge) {
+	if !b.dev_mode do return
+	if hotreload_check(&b.hot_reload) {
+		hotreload_execute(b)
+		b.frame_changed = true
+	}
+}
+
+clear_frame :: proc(b: ^Bridge) {
+	for &p in b.paths {
+		delete(p.value)
+	}
+	delete(b.paths)
+	delete(b.nodes)
+	delete(b.parent_indices)
+	for &c in b.children_list {
+		delete(c.value)
+	}
+	delete(b.children_list)
+}
+
+// ---------------------------------------------------------------------------
+// Host functions (Lua C callbacks)
+// ---------------------------------------------------------------------------
+
+redin_log :: proc "c" (L: ^Lua_State) -> i32 {
+	context = runtime.default_context()
+	n := lua_gettop(L)
+	for i: i32 = 1; i <= n; i += 1 {
+		if i > 1 do fmt.print("\t")
+		t := lua_type(L, i)
+		switch t {
+		case LUA_TSTRING:
+			fmt.print(string(lua_tostring_raw(L, i)))
+		case LUA_TNUMBER:
+			fmt.print(lua_tonumber(L, i))
+		case LUA_TBOOLEAN:
+			fmt.print(lua_toboolean(L, i) != 0 ? "true" : "false")
+		case LUA_TNIL:
+			fmt.print("nil")
+		case:
+			fmt.print(lua_typename(L, t))
+		}
+	}
+	fmt.println()
+	return 0
+}
+
+redin_now :: proc "c" (L: ^Lua_State) -> i32 {
+	context = runtime.default_context()
+	t := time.now()
+	secs := f64(time.to_unix_nanoseconds(t)) / 1e9
+	lua_pushnumber(L, secs)
+	return 1
+}
+
+redin_measure_text :: proc "c" (L: ^Lua_State) -> i32 {
+	context = runtime.default_context()
+	text := lua_tostring_raw(L, 1)
+	font_size := i32(lua_tonumber(L, 2))
+	font := rl.GetFontDefault()
+	size := rl.MeasureTextEx(font, text, f32(font_size), max(f32(font_size) / 10, 1))
+	lua_pushnumber(L, f64(size.x))
+	lua_pushnumber(L, f64(size.y))
+	return 2
+}
+
+// redin.push(frame) — convert Lua frame table to flat parallel arrays
+redin_push :: proc "c" (L: ^Lua_State) -> i32 {
+	context = runtime.default_context()
+	if g_bridge == nil do return 0
+
+	clear_frame(g_bridge)
+
+	if lua_istable(L, 1) {
+		cur: [dynamic]u8
+		defer delete(cur)
+		lua_flatten_node(L, 1, &cur, g_bridge, -1)
+	}
+
+	g_bridge.frame_changed = true
+	return 0
+}
+
+// redin.set_theme(theme) — convert Lua theme table to map[string]Theme
+redin_set_theme :: proc "c" (L: ^Lua_State) -> i32 {
+	context = runtime.default_context()
+	if g_bridge == nil do return 0
+	if lua_istable(L, 1) {
+		// Clear old theme
+		for k in g_bridge.theme {
+			delete(k)
+		}
+		delete(g_bridge.theme)
+		g_bridge.theme = lua_to_theme(L, 1)
+	}
+	return 0
+}
+
+// redin.http(id, url, method, headers, body, timeout) — queue async HTTP request
+redin_http :: proc "c" (L: ^Lua_State) -> i32 {
+	context = runtime.default_context()
+	if g_bridge == nil do return 0
+
+	req: Http_Request
+	req.headers = make(map[string]string)
+
+	if lua_isstring(L, 1) do req.id = strings.clone_from_cstring(lua_tostring_raw(L, 1))
+	if lua_isstring(L, 2) do req.url = strings.clone_from_cstring(lua_tostring_raw(L, 2))
+	if lua_isstring(L, 3) {
+		req.method = strings.clone_from_cstring(lua_tostring_raw(L, 3))
+	} else {
+		req.method = strings.clone("GET")
+	}
+	if lua_istable(L, 4) {
+		headers_idx := i32(4)
+		lua_pushnil(L)
+		for lua_next(L, headers_idx) != 0 {
+			if lua_isstring(L, -2) && lua_isstring(L, -1) {
+				k := strings.clone_from_cstring(lua_tostring_raw(L, -2))
+				v := strings.clone_from_cstring(lua_tostring_raw(L, -1))
+				req.headers[k] = v
+			}
+			lua_pop(L, 1)
+		}
+	}
+	if lua_isstring(L, 5) {
+		req.body = strings.clone_from_cstring(lua_tostring_raw(L, 5))
+	} else {
+		req.body = strings.clone("")
+	}
+
+	http_client_request(&g_bridge.http_client, req)
+	return 0
+}
+
+// Poll HTTP responses and deliver to Lua. Called each frame from main loop.
+poll_http :: proc(b: ^Bridge) {
+	results: [dynamic]Http_Response
+	defer delete(results)
+	http_client_poll(&b.http_client, &results)
+	for &resp in results {
+		deliver_http_response(b, &resp)
+		http_response_destroy(&resp)
+	}
+}
+
+deliver_http_response :: proc(b: ^Bridge, resp: ^Http_Response) {
+	L := b.L
+
+	lua_getglobal(L, "redin_events")
+	if lua_isnil(L, -1) {
+		lua_pop(L, 1)
+		return
+	}
+
+	// Build events table with 1 entry: [":http-response", {id, status, body, headers, error}]
+	lua_createtable(L, 1, 0)
+	lua_createtable(L, 2, 0)
+
+	lua_pushstring(L, ":http-response")
+	lua_rawseti(L, -2, 1)
+
+	// Response data table
+	lua_createtable(L, 0, 5)
+
+	if len(resp.id) > 0 {
+		cid := strings.clone_to_cstring(resp.id)
+		lua_pushstring(L, cid)
+		delete(cid)
+		lua_setfield(L, -2, "id")
+	}
+
+	lua_pushnumber(L, f64(resp.status))
+	lua_setfield(L, -2, "status")
+
+	if len(resp.body) > 0 {
+		lua_pushlstring(L, cstring(raw_data(transmute([]u8)resp.body)), uint(len(resp.body)))
+		lua_setfield(L, -2, "body")
+	}
+
+	if len(resp.error_msg) > 0 {
+		cerr := strings.clone_to_cstring(resp.error_msg)
+		lua_pushstring(L, cerr)
+		delete(cerr)
+		lua_setfield(L, -2, "error")
+	}
+
+	if len(resp.headers) > 0 {
+		lua_createtable(L, 0, i32(len(resp.headers)))
+		for k, v in resp.headers {
+			ck := strings.clone_to_cstring(k)
+			cv := strings.clone_to_cstring(v)
+			lua_pushstring(L, cv)
+			lua_setfield(L, -2, ck)
+			delete(ck)
+			delete(cv)
+		}
+		lua_setfield(L, -2, "headers")
+	}
+
+	lua_rawseti(L, -2, 2)
+	lua_rawseti(L, -2, 1)
+
+	if lua_pcall(L, 1, 0, 0) != 0 {
+		msg := lua_tostring_raw(L, -1)
+		fmt.eprintfln("HTTP response delivery error: %s", msg)
+		lua_pop(L, 1)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Lua table → flat parallel arrays (DFS traversal)
+// ---------------------------------------------------------------------------
+
+lua_flatten_node :: proc(L: ^Lua_State, index: i32, cur: ^[dynamic]u8, b: ^Bridge, parent_idx: int) {
+	abs_idx := index < 0 ? lua_gettop(L) + index + 1 : index
+	my_idx := len(b.nodes)
+
+	// Store path
+	p := make([]u8, len(cur))
+	copy(p, cur[:])
+	append(&b.paths, types.Path{value = p, length = u8(len(p))})
+	append(&b.parent_indices, parent_idx)
+	append(&b.children_list, types.Children{})
+
+	// Position 1: tag (keyword string)
+	lua_rawgeti(L, abs_idx, 1)
+	tag: string
+	if lua_isstring(L, -1) {
+		tag = string(lua_tostring_raw(L, -1))
+	}
+	lua_pop(L, 1)
+
+	// Position 2: attrs (table)
+	attrs_idx: i32 = 0
+	lua_rawgeti(L, abs_idx, 2)
+	if lua_istable(L, -1) {
+		attrs_idx = lua_gettop(L)
+	} else {
+		lua_pop(L, 1) // not a table, discard
+	}
+
+	// Read text content from position 3 if it's a string
+	text_content: string
+	lua_rawgeti(L, abs_idx, 3)
+	if lua_isstring(L, -1) {
+		text_content = strings.clone_from_cstring(lua_tostring_raw(L, -1))
+	}
+	lua_pop(L, 1)
+
+	// Build node based on tag
+	node := lua_read_node(L, tag, attrs_idx, text_content)
+	append(&b.nodes, node)
+
+	// Pop attrs
+	if attrs_idx != 0 do lua_pop(L, 1)
+
+	// Position 3+: children (skip string we already read)
+	n := i32(lua_objlen(L, abs_idx))
+	child_indices: [dynamic]i32
+	defer delete(child_indices)
+
+	for i: i32 = 3; i <= n; i += 1 {
+		lua_rawgeti(L, abs_idx, i)
+		if lua_istable(L, -1) {
+			// Check if it's a frame (position 1 is a string tag) or a list of frames
+			lua_rawgeti(L, -1, 1)
+			if lua_isstring(L, -1) {
+				// It's a child frame
+				lua_pop(L, 1)
+				child_idx := i32(len(b.nodes))
+				append(&child_indices, child_idx)
+				append(cur, u8(len(child_indices) - 1))
+				lua_flatten_node(L, lua_gettop(L), cur, b, my_idx)
+				pop(cur)
+			} else {
+				lua_pop(L, 1)
+			}
+		}
+		lua_pop(L, 1)
+	}
+
+	// Store children
+	if len(child_indices) > 0 {
+		cv := make([]i32, len(child_indices))
+		copy(cv, child_indices[:])
+		b.children_list[my_idx] = types.Children{value = cv, length = i32(len(child_indices))}
+	}
+}
+
+lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: string) -> types.Node {
+	switch tag {
+	case "stack":
+		return types.NodeStack{}
+
+	case "canvas":
+		c: types.NodeCanvas
+		if attrs_idx > 0 {
+			c.provider = lua_get_string_field(L, attrs_idx, "provider")
+			c.aspect = lua_get_string_field(L, attrs_idx, "aspect")
+			lua_getfield(L, attrs_idx, "width")
+			if lua_isstring(L, -1) {
+				s := string(lua_tostring_raw(L, -1))
+				if s == "full" do c.width = types.SizeValue.FULL
+			} else if lua_isnumber(L, -1) {
+				c.width = f16(lua_tonumber(L, -1))
+			}
+			lua_pop(L, 1)
+			lua_getfield(L, attrs_idx, "height")
+			if lua_isstring(L, -1) {
+				s := string(lua_tostring_raw(L, -1))
+				if s == "full" do c.height = types.SizeValue.FULL
+			} else if lua_isnumber(L, -1) {
+				c.height = f16(lua_tonumber(L, -1))
+			}
+			lua_pop(L, 1)
+		}
+		return c
+
+	case "vbox":
+		v: types.NodeVbox
+		if attrs_idx > 0 {
+			v.overflow = lua_get_string_field(L, attrs_idx, "overflow")
+			v.aspect = lua_get_string_field(L, attrs_idx, "aspect")
+			// vbox uses f16 unions — read as f32 then convert
+			lua_getfield(L, attrs_idx, "width")
+			if lua_isstring(L, -1) {
+				s := string(lua_tostring_raw(L, -1))
+				if s == "full" do v.width = types.SizeValue.FULL
+			} else if lua_isnumber(L, -1) {
+				v.width = f16(lua_tonumber(L, -1))
+			}
+			lua_pop(L, 1)
+			lua_getfield(L, attrs_idx, "height")
+			if lua_isstring(L, -1) {
+				s := string(lua_tostring_raw(L, -1))
+				if s == "full" do v.height = types.SizeValue.FULL
+			} else if lua_isnumber(L, -1) {
+				v.height = f16(lua_tonumber(L, -1))
+			}
+			lua_pop(L, 1)
+			layout := lua_get_string_field_raw(L, attrs_idx, "layout")
+			switch layout {
+			case "center":
+				v.layoutX = .CENTER
+				v.layoutY = .CENTER
+			case "left":
+				v.layoutX = .LEFT
+			case "right":
+				v.layoutX = .RIGHT
+			}
+		}
+		return v
+
+	case "hbox":
+		h: types.NodeHbox
+		if attrs_idx > 0 {
+			h.overflow = lua_get_string_field(L, attrs_idx, "overflow")
+			h.aspect = lua_get_string_field(L, attrs_idx, "aspect")
+			h.width = lua_get_size_f32(L, attrs_idx, "width")
+			h.height = lua_get_size_f32(L, attrs_idx, "height")
+			layout := lua_get_string_field_raw(L, attrs_idx, "layout")
+			switch layout {
+			case "center":
+				h.layoutX = .CENTER
+				h.layoutY = .CENTER
+			case "left":
+				h.layoutX = .LEFT
+			case "right":
+				h.layoutX = .RIGHT
+			}
+		}
+		return h
+
+	case "input":
+		inp: types.NodeInput
+		if attrs_idx > 0 {
+			inp.aspect = lua_get_string_field(L, attrs_idx, "aspect")
+			inp.change = lua_get_string_field(L, attrs_idx, "change")
+			inp.key = lua_get_string_field(L, attrs_idx, "key")
+			inp.width = lua_get_size_f32(L, attrs_idx, "width")
+			inp.height = lua_get_size_f32(L, attrs_idx, "height")
+		}
+		return inp
+
+	case "button":
+		btn: types.NodeButton
+		if attrs_idx > 0 {
+			btn.aspect = lua_get_string_field(L, attrs_idx, "aspect")
+			btn.click = lua_get_string_field(L, attrs_idx, "click")
+			btn.width = lua_get_size_f32(L, attrs_idx, "width")
+			btn.height = lua_get_size_f32(L, attrs_idx, "height")
+		}
+		if len(text_content) > 0 do btn.label = text_content
+		return btn
+
+	case "text":
+		t: types.NodeText
+		if attrs_idx > 0 {
+			t.aspect = lua_get_string_field(L, attrs_idx, "aspect")
+			t.width = lua_get_size_f32(L, attrs_idx, "width")
+			t.height = lua_get_size_f32(L, attrs_idx, "height")
+			layout := lua_get_string_field_raw(L, attrs_idx, "layout")
+			switch layout {
+			case "center":
+				t.layoutX = .CENTER
+				t.layoutY = .CENTER
+			case "left":
+				t.layoutX = .LEFT
+			case "right":
+				t.layoutX = .RIGHT
+			}
+		}
+		if len(text_content) > 0 do t.content = text_content
+		return t
+
+	case "image":
+		img: types.NodeImage
+		if attrs_idx > 0 {
+			img.aspect = lua_get_string_field(L, attrs_idx, "aspect")
+			img.width = lua_get_size_f32(L, attrs_idx, "width")
+			img.height = lua_get_size_f32(L, attrs_idx, "height")
+		}
+		return img
+
+	case "popout":
+		pop: types.NodePopout
+		if attrs_idx > 0 {
+			pop.aspect = lua_get_string_field(L, attrs_idx, "aspect")
+			pop.width = lua_get_size_f32(L, attrs_idx, "width")
+			pop.height = lua_get_size_f32(L, attrs_idx, "height")
+			pop.x = lua_get_number_field(L, attrs_idx, "x")
+			pop.y = lua_get_number_field(L, attrs_idx, "y")
+			mode := lua_get_string_field_raw(L, attrs_idx, "mode")
+			switch mode {
+			case "mouse":
+				pop.mode = .MOUSE
+			case "fixed":
+				pop.mode = .FIXED
+			}
+		}
+		return pop
+
+	case "modal":
+		mod: types.NodeModal
+		if attrs_idx > 0 {
+			mod.aspect = lua_get_string_field(L, attrs_idx, "aspect")
+		}
+		return mod
+	}
+
+	return types.NodeStack{}
+}
+
+// ---------------------------------------------------------------------------
+// Lua table → theme
+// ---------------------------------------------------------------------------
+
+lua_to_theme :: proc(L: ^Lua_State, index: i32) -> map[string]types.Theme {
+	theme := make(map[string]types.Theme)
+	abs_idx := index < 0 ? lua_gettop(L) + index + 1 : index
+
+	lua_pushnil(L)
+	for lua_next(L, abs_idx) != 0 {
+		if lua_isstring(L, -2) && lua_istable(L, -1) {
+			key := strings.clone_from_cstring(lua_tostring_raw(L, -2))
+			t: types.Theme
+			props_idx := lua_gettop(L)
+
+			t.bg = lua_get_rgb_field(L, props_idx, "bg")
+			t.color = lua_get_rgb_field(L, props_idx, "color")
+			t.border = lua_get_rgb_field(L, props_idx, "border")
+			t.padding = lua_get_padding_field(L, props_idx, "padding")
+			t.border_width = u8(lua_get_number_field(L, props_idx, "border-width"))
+			t.radius = u8(lua_get_number_field(L, props_idx, "radius"))
+			t.font_size = u8(lua_get_number_field(L, props_idx, "font-size"))
+			t.opacity = lua_get_number_field(L, props_idx, "opacity")
+
+			lua_getfield(L, props_idx, "weight")
+			if lua_isnumber(L, -1) {
+				w := int(lua_tonumber(L, -1))
+				if w == 1 do t.weight = .BOLD
+				else if w == 2 do t.weight = .ITALIC
+			} else if lua_isstring(L, -1) {
+				w := string(lua_tostring_raw(L, -1))
+				if w == "bold" do t.weight = .BOLD
+				else if w == "italic" do t.weight = .ITALIC
+			}
+			lua_pop(L, 1)
+
+			theme[key] = t
+		}
+		lua_pop(L, 1)
+	}
+
+	return theme
+}
+
+lua_get_rgb_field :: proc(L: ^Lua_State, index: i32, field: cstring) -> [3]u8 {
+	lua_getfield(L, index, field)
+	defer lua_pop(L, 1)
+	if !lua_istable(L, -1) do return {}
+	abs := lua_gettop(L)
+	lua_rawgeti(L, abs, 1)
+	r := u8(lua_tonumber(L, -1))
+	lua_pop(L, 1)
+	lua_rawgeti(L, abs, 2)
+	g := u8(lua_tonumber(L, -1))
+	lua_pop(L, 1)
+	lua_rawgeti(L, abs, 3)
+	b := u8(lua_tonumber(L, -1))
+	lua_pop(L, 1)
+	return {r, g, b}
+}
+
+lua_get_padding_field :: proc(L: ^Lua_State, index: i32, field: cstring) -> [4]u8 {
+	lua_getfield(L, index, field)
+	defer lua_pop(L, 1)
+	if !lua_istable(L, -1) do return {}
+	abs := lua_gettop(L)
+	vals: [4]u8
+	for i: i32 = 0; i < 4; i += 1 {
+		lua_rawgeti(L, abs, i + 1)
+		vals[i] = u8(lua_tonumber(L, -1))
+		lua_pop(L, 1)
+	}
+	return vals
+}
+
+// ---------------------------------------------------------------------------
+// Event delivery to Lua
+// ---------------------------------------------------------------------------
+
+deliver_events :: proc(b: ^Bridge, events: []types.InputEvent) {
+	if len(events) == 0 do return
+	L := b.L
+
+	lua_getglobal(L, "redin_events")
+	if lua_isnil(L, -1) {
+		lua_pop(L, 1)
+		return
+	}
+
+	lua_createtable(L, i32(len(events)), 0)
+	for event, i in events {
+		push_input_event_as_lua(L, event)
+		lua_rawseti(L, -2, i32(i + 1))
+	}
+
+	if lua_pcall(L, 1, 0, 0) != 0 {
+		msg := lua_tostring_raw(L, -1)
+		fmt.eprintfln("Event delivery error: %s", msg)
+		lua_pop(L, 1)
+	}
+}
+
+render_tick :: proc(b: ^Bridge) {
+	L := b.L
+	b.frame_changed = false
+
+	lua_getglobal(L, "redin_render_tick")
+	if lua_isnil(L, -1) {
+		lua_pop(L, 1)
+		return
+	}
+
+	if lua_pcall(L, 0, 0, 0) != 0 {
+		msg := lua_tostring_raw(L, -1)
+		fmt.eprintfln("Render tick error: %s", msg)
+		lua_pop(L, 1)
+	}
+}
+
+poll_timers :: proc(b: ^Bridge) {
+	L := b.L
+
+	lua_getglobal(L, "redin_poll_timers")
+	if lua_isnil(L, -1) {
+		lua_pop(L, 1)
+		return
+	}
+
+	t := time.now()
+	ms := f64(time.to_unix_nanoseconds(t)) / 1e6
+	lua_pushnumber(L, ms)
+
+	if lua_pcall(L, 1, 1, 0) != 0 {
+		msg := lua_tostring_raw(L, -1)
+		fmt.eprintfln("Timer poll error: %s", msg)
+		lua_pop(L, 1)
+	} else {
+		lua_pop(L, 1)
+	}
+}
+
+push_input_event_as_lua :: proc(L: ^Lua_State, event: types.InputEvent) {
+	switch e in event {
+	case types.MouseEvent:
+		lua_createtable(L, 3, 0)
+		lua_pushstring(L, "click")
+		lua_rawseti(L, -2, 1)
+		lua_pushnumber(L, f64(e.x))
+		lua_rawseti(L, -2, 2)
+		lua_pushnumber(L, f64(e.y))
+		lua_rawseti(L, -2, 3)
+
+	case types.KeyEvent:
+		lua_createtable(L, 3, 0)
+		lua_pushstring(L, "key")
+		lua_rawseti(L, -2, 1)
+		lua_pushstring(L, key_to_string(e.key))
+		lua_rawseti(L, -2, 2)
+		lua_createtable(L, 0, 4)
+		lua_pushboolean(L, e.mods.shift ? 1 : 0)
+		lua_setfield(L, -2, "shift")
+		lua_pushboolean(L, e.mods.ctrl ? 1 : 0)
+		lua_setfield(L, -2, "ctrl")
+		lua_pushboolean(L, e.mods.alt ? 1 : 0)
+		lua_setfield(L, -2, "alt")
+		lua_pushboolean(L, e.mods.super ? 1 : 0)
+		lua_setfield(L, -2, "super")
+		lua_rawseti(L, -2, 3)
+
+	case types.CharEvent:
+		lua_createtable(L, 2, 0)
+		lua_pushstring(L, "char")
+		lua_rawseti(L, -2, 1)
+		buf, n := utf8.encode_rune(e.char)
+		lua_pushlstring(L, cstring(raw_data(buf[:])), uint(n))
+		lua_rawseti(L, -2, 2)
+
+	case types.ResizeEvent:
+		lua_createtable(L, 3, 0)
+		lua_pushstring(L, "resize")
+		lua_rawseti(L, -2, 1)
+		lua_pushnumber(L, f64(rl.GetScreenWidth()))
+		lua_rawseti(L, -2, 2)
+		lua_pushnumber(L, f64(rl.GetScreenHeight()))
+		lua_rawseti(L, -2, 3)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+register_cfunc :: proc(L: ^Lua_State, name: cstring, f: Lua_CFunction) {
+	lua_pushcfunction(L, f)
+	lua_setfield(L, -2, name)
+}
+
+lua_get_string_field :: proc(L: ^Lua_State, index: i32, field: cstring) -> string {
+	lua_getfield(L, index, field)
+	defer lua_pop(L, 1)
+	if lua_isstring(L, -1) {
+		return strings.clone_from_cstring(lua_tostring_raw(L, -1))
+	}
+	return ""
+}
+
+lua_get_string_field_raw :: proc(L: ^Lua_State, index: i32, field: cstring) -> string {
+	lua_getfield(L, index, field)
+	defer lua_pop(L, 1)
+	if lua_isstring(L, -1) {
+		return string(lua_tostring_raw(L, -1))
+	}
+	return ""
+}
+
+lua_get_size_f32 :: proc(L: ^Lua_State, index: i32, field: cstring) -> union {types.SizeValue, f32} {
+	lua_getfield(L, index, field)
+	defer lua_pop(L, 1)
+	if lua_isstring(L, -1) {
+		s := string(lua_tostring_raw(L, -1))
+		if s == "full" do return types.SizeValue.FULL
+	} else if lua_isnumber(L, -1) {
+		return f32(lua_tonumber(L, -1))
+	}
+	return nil
+}
+
+lua_get_number_field :: proc(L: ^Lua_State, index: i32, field: cstring) -> f32 {
+	lua_getfield(L, index, field)
+	defer lua_pop(L, 1)
+	if lua_isnumber(L, -1) {
+		return f32(lua_tonumber(L, -1))
+	}
+	return 0
+}
+
+key_to_string :: proc(key: rl.KeyboardKey) -> cstring {
+	#partial switch key {
+	case .ENTER:     return "enter"
+	case .ESCAPE:    return "escape"
+	case .BACKSPACE: return "backspace"
+	case .TAB:       return "tab"
+	case .SPACE:     return "space"
+	case .UP:        return "up"
+	case .DOWN:      return "down"
+	case .LEFT:      return "left"
+	case .RIGHT:     return "right"
+	case .DELETE:    return "delete"
+	case .HOME:      return "home"
+	case .END:       return "end"
+	case .PAGE_UP:   return "pageup"
+	case .PAGE_DOWN: return "pagedown"
+	case .INSERT:    return "insert"
+	case .F1:        return "f1"
+	case .F2:        return "f2"
+	case .F3:        return "f3"
+	case .F4:        return "f4"
+	case .F5:        return "f5"
+	case .F6:        return "f6"
+	case .F7:        return "f7"
+	case .F8:        return "f8"
+	case .F9:        return "f9"
+	case .F10:       return "f10"
+	case .F11:       return "f11"
+	case .F12:       return "f12"
+	case .A:         return "a"
+	case .B:         return "b"
+	case .C:         return "c"
+	case .D:         return "d"
+	case .E:         return "e"
+	case .F:         return "f"
+	case .G:         return "g"
+	case .H:         return "h"
+	case .I:         return "i"
+	case .J:         return "j"
+	case .K:         return "k"
+	case .L:         return "l"
+	case .M:         return "m"
+	case .N:         return "n"
+	case .O:         return "o"
+	case .P:         return "p"
+	case .Q:         return "q"
+	case .R:         return "r"
+	case .S:         return "s"
+	case .T:         return "t"
+	case .U:         return "u"
+	case .V:         return "v"
+	case .W:         return "w"
+	case .X:         return "x"
+	case .Y:         return "y"
+	case .Z:         return "z"
+	case .ZERO:      return "0"
+	case .ONE:       return "1"
+	case .TWO:       return "2"
+	case .THREE:     return "3"
+	case .FOUR:      return "4"
+	case .FIVE:      return "5"
+	case .SIX:       return "6"
+	case .SEVEN:     return "7"
+	case .EIGHT:     return "8"
+	case .NINE:      return "9"
+	case:            return "unknown"
+	}
+}
+
+setup_lua_paths :: proc(L: ^Lua_State) {
+	code := `
+		local d = _redin_exe_dir
+		package.path = d .. "/vendor/fennel/?.lua;" .. d .. "/runtime/?.lua;vendor/fennel/?.lua;" .. package.path
+	`
+	luaL_dostring(L, cstring(raw_data(code)))
+}
+
+load_fennel :: proc(L: ^Lua_State) {
+	code := `
+		local d = _redin_exe_dir
+		package.loaded["fennel"] = {}
+		local ok = pcall(dofile, d .. "/vendor/fennel/fennel.lua")
+		if not ok then pcall(dofile, "vendor/fennel/fennel.lua") end
+		package.loaded["fennel"] = nil
+		local fennel = require("fennel")
+		table.insert(package.loaders, fennel.searcher)
+		fennel.path = d .. "/runtime/?.fnl;src/runtime/?.fnl;" .. fennel.path
+	`
+	if luaL_dostring(L, cstring(raw_data(code))) != 0 {
+		msg := lua_tostring_raw(L, -1)
+		fmt.eprintfln("Error loading Fennel: %s", msg)
+		lua_pop(L, 1)
+	}
+}
+
+load_runtime :: proc(L: ^Lua_State) {
+	code := `require("init")`
+	if luaL_dostring(L, cstring(raw_data(code))) != 0 {
+		msg := lua_tostring_raw(L, -1)
+		fmt.eprintfln("Error loading runtime: %s", msg)
+		lua_pop(L, 1)
+	}
+}

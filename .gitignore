@@ -1,0 +1,24 @@
+# Binaries
+redin
+redin-debug
+
+# Test binaries
+test/*/server_test
+test/*/bridge_test
+test/*/leak_test
+
+# Odin build artifacts
+*.o
+*.obj
+*.pdb
+
+# Build output
+build/
+
+# Integration test working directory
+test/integration/testapp/
+
+# clojure-lsp
+.clj-kondo/
+.lsp
+.nrepl-port

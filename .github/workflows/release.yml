@@ -1,0 +1,114 @@
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version tag (e.g. v0.1.0). Leave empty for dev build."
+        required: false
+        default: ""
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Determine version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ -n "$INPUT_VERSION" ]; then
+            echo "tag=$INPUT_VERSION" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=dev-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y luajit libluajit-5.1-dev libssl-dev
+
+      - name: Install Odin
+        uses: laytan/setup-odin@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run tests
+        run: |
+          luajit test/lua/runner.lua test/lua/test_*.fnl
+          odin build src/host -out:build/redin
+
+      - name: Build release binary
+        run: odin build src/host -out:build/redin -o:speed
+
+      - name: AOT compile Fennel runtime
+        run: |
+          mkdir -p dist/runtime
+          for f in src/runtime/*.fnl; do
+            name=$(basename "$f" .fnl)
+            luajit vendor/fennel/fennel.lua --compile "$f" > "dist/runtime/${name}.lua"
+          done
+
+      - name: Package release
+        env:
+          VERSION: ${{ steps.version.outputs.tag }}
+        run: |
+          cp build/redin dist/
+          mkdir -p dist/vendor/fennel
+          cp vendor/fennel/fennel.lua dist/vendor/fennel/
+          mkdir -p dist/mcp
+          cp mcp/redin-mcp.bb dist/mcp/
+          mkdir -p dist/docs/guide dist/docs/reference
+          cp docs/guide/*.md dist/docs/guide/ 2>/dev/null || true
+          cp docs/reference/*.md dist/docs/reference/ 2>/dev/null || true
+          [ -f LICENSE ] && cp LICENSE dist/ || true
+          [ -f README.md ] && cp README.md dist/ || true
+          tar czf "redin-${VERSION}-linux-amd64.tar.gz" -C dist .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: redin-${{ steps.version.outputs.tag }}-linux-amd64
+          path: redin-${{ steps.version.outputs.tag }}-linux-amd64.tar.gz
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: inputs.version != ''
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.version }}
+          name: redin ${{ inputs.version }}
+          draft: false
+          prerelease: ${{ !startsWith(inputs.version, 'v') }}
+          files: artifacts/**/*.tar.gz
+          body: |
+            ## What's included
+            - `redin` binary (Linux x86_64, LuaJIT statically linked)
+            - AOT-compiled Fennel runtime
+            - Fennel compiler (for --dev mode hot reload)
+            - MCP server
+            - Developer documentation
+
+            ## Quick start
+            ```
+            tar xzf redin-<version>-linux-amd64.tar.gz
+            ./redin --dev myapp.fnl
+            ```

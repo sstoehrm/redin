@@ -1,0 +1,1 @@
+- [Fennel idioms for LuaJIT](feedback_fennel_idioms.md) — avoid lua escapes, match keyword, use flag patterns
