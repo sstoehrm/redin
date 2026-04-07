@@ -40,6 +40,43 @@ PUT replaces the entire theme.
 
 ---
 
+## Custom fonts (font-face)
+
+Register custom fonts via a `:font-face` block in the theme. Each font name maps to a table of style variants (regular, bold, italic) pointing to .ttf file paths.
+
+```fennel
+(redin.set_theme
+  {:font-face {:my-font    {:regular "assets/MyFont-Regular.ttf"
+                             :bold    "assets/MyFont-Bold.ttf"}
+               :icon-font  {:regular "assets/Icons.ttf"}}
+   :heading   {:font :my-font :font-size 24 :weight :bold}
+   :body      {:font :sans :font-size 14}
+   :code      {:font :mono :font-size 13}})
+```
+
+`:font-face` is not an aspect -- it's processed separately to load font files before the theme is applied. Font files are loaded via Raylib's `LoadFont`.
+
+### Bundled fonts
+
+Three font families are bundled in the binary and available without `:font-face`:
+
+| Name | Font | Styles |
+|------|------|--------|
+| `sans` | Inter | Regular, Bold |
+| `mono` | Fira Code | Regular, Bold |
+| `serif` | Noto Serif | Regular, Bold |
+
+`sans` is the default -- elements without a `:font` property use it.
+
+### Fallback
+
+If a requested font or style isn't found, the system falls back:
+1. Regular style of the same font
+2. Default font (sans) with the requested style
+3. Default font Regular
+
+---
+
 ## Theme struct
 
 The host-side `Theme` struct (in `src/host/types/theme.odin`) defines the properties available per aspect:
@@ -52,11 +89,12 @@ The host-side `Theme` struct (in `src/host/types/theme.odin`) defines the proper
 | `border` | `[r g b]` 0--255 | Border stroke color |
 | `border_width` | u8 | Border stroke thickness |
 | `radius` | u8 | Corner rounding radius |
-| `weight` | FontWeight enum | `NORMAL`, `BOLD`, `ITALIC` |
-| `font_size` | u8 | Font size in pixels |
+| `weight` | u8 | 0=normal, 1=bold, 2=italic |
+| `font_size` | f16 | Font size in pixels (fractional) |
+| `font` | string | Font name (e.g. "sans", "mono", "serif", or custom) |
 | `opacity` | f32 | Element transparency, 0--1 |
 
-The `FontWeight` enum values are `NORMAL` (default), `BOLD`, and `ITALIC`.
+Weight values: 0 = normal (default), 1 = bold, 2 = italic.
 
 ---
 
@@ -77,7 +115,7 @@ popout       x    .      x      .      x        x       x       .      x       x
 grid         x    .      .      .      x        .       .       x      x       .
 spacer       .    .      .      .      .        .       .       .      .       .
 divider      .    .      .      .      .        .       .       .      x       .
-canvas       .    .      .      .      .        .       .       .      x       .
+canvas       x    .      x      .      x        x       x       .      x       .
 ```
 
 Column key: `x` = consumed, `.` = ignored. `font` covers `font-size`, `weight`, `line-height`, `align`. `border-w` = `border-width`.
@@ -159,7 +197,7 @@ Validation is implemented in `src/runtime/theme.fnl`. Checks include:
 | Check | Rule |
 | ----- | ---- |
 | Color format | `bg`, `color`, `border`, `cursor`, `selection`, `placeholder`, `scrollbar` must be `[r g b]` or `[r g b a]` with channels 0--255 |
-| Enum values | `font` must be `"sans"`, `"mono"`, or `"serif"` |
+| Font type | `font` must be a string |
 | | `weight` must be `"normal"` or `"bold"` |
 | | `align` must be `"left"`, `"center"`, or `"right"` |
 | Opacity range | `opacity` must be a number in `[0, 1]` |

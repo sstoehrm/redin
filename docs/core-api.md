@@ -37,7 +37,7 @@ Functions available under the `redin` global table:
 | `redin.set_theme(theme)`                             | Persist theme to Odin for native aspect resolution |
 | `redin.log(...)`                                     | Print to stdout                                  |
 | `redin.now()`                                        | Current Unix timestamp (float seconds)           |
-| `redin.measure_text(text, font_size)`                | Returns `(width, height)` using renderer fonts   |
+| `redin.measure_text(text, font_size [, font_name])`  | Returns `(width, height)` using named or default font |
 | `redin.http(id, url, method, headers, body, timeout)` | Queue async HTTP request (called by `:http` effect) |
 | `redin.json_encode(value)`                           | Encode Lua value to JSON string                  |
 | `redin.json_decode(string)`                          | Decode JSON string to Lua value                  |
@@ -345,16 +345,16 @@ Returns current Unix timestamp as a float (seconds).
 (local t (redin.now))
 ```
 
-### `redin.measure_text(text, font_size)`
+### `redin.measure_text(text, font_size [, font_name])`
 
-Measures text dimensions using the renderer's default font. Returns width and height.
+Measures text dimensions. Returns width and height. If `font_name` is provided, uses that font; otherwise uses the default sans font.
 
 ```fennel
 (let [(w h) (redin.measure_text "Hello" 14)]
   ...)
 ```
 
-Delegates to Raylib's `MeasureTextEx`. The `font` parameter from the old API is not currently accepted -- the default font is always used.
+Delegates to Raylib's `MeasureTextEx`.
 
 ### `redin.set_theme(theme)`
 
