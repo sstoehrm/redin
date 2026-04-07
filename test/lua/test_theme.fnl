@@ -90,19 +90,6 @@
     (assert (= filtered.radius nil) "text does not consume radius")
     (assert (= filtered.padding nil) "text does not consume padding")))
 
-(fn t.test-props-for-rect []
-  (setup)
-  (let [all-props {:bg [0 0 0] :color [255 255 255] :border [100 100 100]
-                   :padding [8 8] :radius 6 :border-width 1 :opacity 0.8 :shadow [0 2 4 [0 0 0 128]]}
-        filtered (theme.props-for :rect all-props)]
-    (assert filtered.bg "rect consumes bg")
-    (assert filtered.border "rect consumes border")
-    (assert filtered.padding "rect consumes padding")
-    (assert filtered.radius "rect consumes radius")
-    (assert filtered.border-width "rect consumes border-width")
-    (assert filtered.opacity "rect consumes opacity")
-    (assert filtered.shadow "rect consumes shadow")
-    (assert (= filtered.color nil) "rect does not consume color")))
 
 (fn t.test-props-for-input []
   (setup)
@@ -142,10 +129,12 @@
     (assert result.ok "rgba color passes")))
 
 (fn t.test-validate-bad-font []
-  (let [result (theme.validate {:body {:font :comic}})]
-    (assert (not result.ok) "invalid font fails"))
+  (let [result (theme.validate {:body {:font 42}})]
+    (assert (not result.ok) "non-string font fails"))
   (let [result (theme.validate {:body {:font :sans}})]
-    (assert result.ok "valid font passes")))
+    (assert result.ok "valid font passes"))
+  (let [result (theme.validate {:body {:font :my-custom-font}})]
+    (assert result.ok "custom font name passes")))
 
 (fn t.test-validate-bad-weight []
   (let [result (theme.validate {:body {:weight :heavy}})]

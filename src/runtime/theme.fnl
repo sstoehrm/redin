@@ -49,7 +49,6 @@
 
 (local consumption
   {:text    {:color true :font true :font-size true :weight true :line-height true :align true :opacity true}
-   :rect    {:bg true :border true :padding true :radius true :border-width true :opacity true :shadow true}
    :image   {:opacity true}
    :hbox    {:bg true :padding true :gap true :opacity true}
    :vbox    {:bg true :padding true :gap true :opacity true}
@@ -60,7 +59,7 @@
    :grid    {:bg true :padding true :gap true :opacity true}
    :spacer  {}
    :divider {:opacity true}
-   :canvas  {:opacity true}})
+   :canvas  {:bg true :border true :padding true :radius true :border-width true :opacity true}})
 
 (fn M.props-for [tag resolved-props]
   (let [consumed (or (. consumption tag) {})
@@ -73,7 +72,6 @@
 ;; ===== Validation =====
 
 (local color-props {:bg true :color true :border true :cursor true :selection true :placeholder true :scrollbar true})
-(local font-values {:sans true :mono true :serif true})
 (local weight-values {:normal true :bold true})
 (local align-values {:left true :center true :right true})
 (local numeric-props {:font-size true :radius true :border-width true :gap true :line-height true :scrollbar-width true :scrollbar-radius true})
@@ -117,8 +115,8 @@
       (each [prop v (pairs props)]
         (when (. color-props prop) (validate-color v aspect prop errors))
         (when (= prop :font)
-          (when (not (. font-values v))
-            (table.insert errors {:aspect aspect :property prop :message (.. "font must be sans, mono, or serif, got: " (tostring v))})))
+          (when (~= (type v) "string")
+            (table.insert errors {:aspect aspect :property prop :message (.. "font must be a string, got: " (type v))})))
         (when (= prop :weight)
           (when (not (. weight-values v))
             (table.insert errors {:aspect aspect :property prop :message (.. "weight must be normal or bold, got: " (tostring v))})))
