@@ -258,7 +258,12 @@ theme_to_json :: proc(b: ^strings.Builder, t: types.Theme) {
 	if t.font_size > 0 {
 		if !first do json_comma(b)
 		first = false
-		json_key(b, "font-size");json_int(b, i64(t.font_size))
+		json_key(b, "font-size");json_number(b, f64(t.font_size))
+	}
+	if len(t.font) > 0 {
+		if !first do json_comma(b)
+		first = false
+		json_key(b, "font");json_string(b, t.font)
 	}
 	if t.radius > 0 {
 		if !first do json_comma(b)
@@ -281,11 +286,11 @@ theme_to_json :: proc(b: ^strings.Builder, t: types.Theme) {
 		json_int(b, i64(t.padding[3]))
 		json_end_array(b)
 	}
-	if t.weight != .NORMAL {
+	if t.weight != 0 {
 		if !first do json_comma(b)
 		first = false
 		json_key(b, "weight")
-		json_string(b, t.weight == .BOLD ? "bold" : "italic")
+		json_string(b, t.weight == 1 ? "bold" : "italic")
 	}
 	if t.opacity > 0 {
 		if !first do json_comma(b)

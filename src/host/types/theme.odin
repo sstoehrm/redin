@@ -1,11 +1,5 @@
 package types
 
-FontWeight :: enum {
-	NORMAL,
-	BOLD,
-	ITALIC,
-}
-
 Theme :: struct {
 	bg:           [3]u8,
 	color:        [3]u8,
@@ -13,7 +7,8 @@ Theme :: struct {
 	border:       [3]u8,
 	border_width: u8,
 	radius:       u8,
-	weight:       FontWeight,
-	font_size:    u8,
+	weight:       u8,      // 0=normal, 1=bold, 2=italic
+	font_size:    f16,
+	font:         string,
 	opacity:      f32,
 }

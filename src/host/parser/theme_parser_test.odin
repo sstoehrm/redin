@@ -42,7 +42,7 @@ test_parse_theme_font_size :: proc(t: ^testing.T) {
 		delete(theme)
 	}
 	testing.expect(t, ok, "parse should succeed")
-	testing.expect_value(t, theme["heading"].font_size, 24)
+	testing.expect_value(t, theme["heading"].font_size, f16(24))
 }
 
 @(test)
@@ -54,7 +54,7 @@ test_parse_theme_weight_keyword :: proc(t: ^testing.T) {
 		delete(theme)
 	}
 	testing.expect(t, ok, "parse should succeed")
-	testing.expect_value(t, theme["heading"].weight, types.FontWeight.BOLD)
+	testing.expect_value(t, theme["heading"].weight, u8(1))
 }
 
 @(test)
@@ -66,7 +66,7 @@ test_parse_theme_weight_number :: proc(t: ^testing.T) {
 		delete(theme)
 	}
 	testing.expect(t, ok, "parse should succeed")
-	testing.expect_value(t, theme["heading"].weight, types.FontWeight.BOLD)
+	testing.expect_value(t, theme["heading"].weight, u8(1))
 }
 
 @(test)
@@ -110,7 +110,7 @@ test_parse_theme_with_comments :: proc(t: ^testing.T) {
 		delete(theme)
 	}
 	testing.expect(t, ok, "parse should succeed")
-	testing.expect_value(t, theme["body"].font_size, 14)
+	testing.expect_value(t, theme["body"].font_size, f16(14))
 }
 
 @(test)

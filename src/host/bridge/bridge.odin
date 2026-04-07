@@ -564,18 +564,17 @@ lua_to_theme :: proc(L: ^Lua_State, index: i32) -> map[string]types.Theme {
 			t.padding = lua_get_padding_field(L, props_idx, "padding")
 			t.border_width = u8(lua_get_number_field(L, props_idx, "border-width"))
 			t.radius = u8(lua_get_number_field(L, props_idx, "radius"))
-			t.font_size = u8(lua_get_number_field(L, props_idx, "font-size"))
+			t.font_size = f16(lua_get_number_field(L, props_idx, "font-size"))
+			t.font = lua_get_string_field(L, props_idx, "font")
 			t.opacity = lua_get_number_field(L, props_idx, "opacity")
 
 			lua_getfield(L, props_idx, "weight")
 			if lua_isnumber(L, -1) {
-				w := int(lua_tonumber(L, -1))
-				if w == 1 do t.weight = .BOLD
-				else if w == 2 do t.weight = .ITALIC
+				t.weight = u8(lua_tonumber(L, -1))
 			} else if lua_isstring(L, -1) {
 				w := string(lua_tostring_raw(L, -1))
-				if w == "bold" do t.weight = .BOLD
-				else if w == "italic" do t.weight = .ITALIC
+				if w == "bold" do t.weight = 1
+				else if w == "italic" do t.weight = 2
 			}
 			lua_pop(L, 1)
 

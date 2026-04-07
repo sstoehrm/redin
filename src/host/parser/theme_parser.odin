@@ -79,17 +79,22 @@ _parse_theme_props :: proc(p: ^_Parser) -> types.Theme {
 			case "radius":
 				t.radius = u8(_read_number(p))
 			case "font-size":
-				t.font_size = u8(_read_number(p))
+				t.font_size = f16(_read_number(p))
+			case "font":
+				c2 := _peek(p)
+				if c2 == ':' {
+					t.font = strings.clone(_read_keyword(p))
+				} else if c2 == '"' {
+					t.font = strings.clone(_read_string(p))
+				}
 			case "weight":
-				c := _peek(p)
-				if c == ':' {
+				c2 := _peek(p)
+				if c2 == ':' {
 					w := _read_keyword(p)
-					if w == "bold" do t.weight = .BOLD
-					else if w == "italic" do t.weight = .ITALIC
-				} else if c >= '0' && c <= '9' {
-					w := int(_read_number(p))
-					if w == 1 do t.weight = .BOLD
-					else if w == 2 do t.weight = .ITALIC
+					if w == "bold" do t.weight = 1
+					else if w == "italic" do t.weight = 2
+				} else if c2 >= '0' && c2 <= '9' {
+					t.weight = u8(_read_number(p))
 				}
 			case "opacity":
 				t.opacity = _read_number(p)
