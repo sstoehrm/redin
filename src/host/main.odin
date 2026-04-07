@@ -1,6 +1,7 @@
 package host
 
 import "bridge"
+import "canvas"
 import "core:fmt"
 import "core:mem"
 import "core:os"
@@ -49,6 +50,7 @@ main :: proc() {
 	b: bridge.Bridge
 	bridge.init(&b, dev_mode)
 	defer bridge.destroy(&b)
+	defer canvas.destroy()
 
 	bridge.load_app(&b, app_file)
 
@@ -82,6 +84,7 @@ main :: proc() {
 		rl.ClearBackground({255, 255, 255, 255})
 
 		render_tree(b.theme, b.nodes[:], b.children_list[:])
+		canvas.end_frame()
 
 		rl.EndDrawing()
 	}
