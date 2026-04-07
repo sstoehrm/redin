@@ -72,7 +72,7 @@ process :: proc(provider_name: string, rect: rl.Rectangle) {
 // Called once after the render pass. Suspends any Running provider
 // that was not visited this frame, then resets all visited flags.
 end_frame :: proc() {
-	for name, &entry in entries {
+	for _, &entry in entries {
 		if entry.lifecycle == .Running && !entry.visited {
 			if entry.provider.suspend != nil {
 				entry.provider.suspend()
@@ -85,7 +85,7 @@ end_frame :: proc() {
 
 // Called on shutdown. Stops all providers and clears the registry.
 destroy :: proc() {
-	for name, &entry in entries {
+	for _, &entry in entries {
 		if entry.provider.stop != nil {
 			entry.provider.stop()
 		}
