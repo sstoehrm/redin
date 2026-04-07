@@ -7,6 +7,7 @@ import "core:strings"
 import "core:time"
 import "core:unicode/utf8"
 import "base:runtime"
+import "../font"
 import "../types"
 import rl "vendor:raylib"
 
@@ -147,9 +148,14 @@ redin_now :: proc "c" (L: ^Lua_State) -> i32 {
 redin_measure_text :: proc "c" (L: ^Lua_State) -> i32 {
 	context = runtime.default_context()
 	text := lua_tostring_raw(L, 1)
-	font_size := i32(lua_tonumber(L, 2))
-	font := rl.GetFontDefault()
-	size := rl.MeasureTextEx(font, text, f32(font_size), max(f32(font_size) / 10, 1))
+	font_size := f32(lua_tonumber(L, 2))
+	font_name := "sans"
+	if lua_isstring(L, 3) {
+		font_name = string(lua_tostring_raw(L, 3))
+	}
+	f := font.get(font_name, .Regular)
+	spacing := max(font_size / 10, 1)
+	size := rl.MeasureTextEx(f, text, font_size, spacing)
 	lua_pushnumber(L, f64(size.x))
 	lua_pushnumber(L, f64(size.y))
 	return 2
@@ -177,6 +183,13 @@ redin_set_theme :: proc "c" (L: ^Lua_State) -> i32 {
 	context = runtime.default_context()
 	if g_bridge == nil do return 0
 	if lua_istable(L, 1) {
+		// Load font-face declarations before processing theme
+		lua_getfield(L, 1, "font-face")
+		if lua_istable(L, -1) {
+			load_font_faces(L, lua_gettop(L))
+		}
+		lua_pop(L, 1)
+
 		// Clear old theme
 		for k in g_bridge.theme {
 			delete(k)
@@ -543,6 +556,38 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 	return types.NodeStack{}
 }
 
+load_font_faces :: proc(L: ^Lua_State, index: i32) {
+	lua_pushnil(L)
+	for lua_next(L, index) != 0 {
+		if lua_isstring(L, -2) && lua_istable(L, -1) {
+			font_name := string(lua_tostring_raw(L, -2))
+			variants_idx := lua_gettop(L)
+
+			style_keys := [?]struct{key: cstring, style: font.Font_Style}{
+				{"regular", .Regular},
+				{"bold", .Bold},
+				{"italic", .Italic},
+			}
+
+			for sk in style_keys {
+				lua_getfield(L, variants_idx, sk.key)
+				if lua_isstring(L, -1) {
+					path := string(lua_tostring_raw(L, -1))
+					cpath := strings.clone_to_cstring(path, context.temp_allocator)
+					loaded := rl.LoadFont(cpath)
+					if loaded.texture.id > 0 {
+						font.register(strings.clone(font_name), sk.style, loaded)
+					} else {
+						fmt.eprintfln("Failed to load font: %s", path)
+					}
+				}
+				lua_pop(L, 1)
+			}
+		}
+		lua_pop(L, 1)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Lua table → theme
 // ---------------------------------------------------------------------------
@@ -555,6 +600,11 @@ lua_to_theme :: proc(L: ^Lua_State, index: i32) -> map[string]types.Theme {
 	for lua_next(L, abs_idx) != 0 {
 		if lua_isstring(L, -2) && lua_istable(L, -1) {
 			key := strings.clone_from_cstring(lua_tostring_raw(L, -2))
+			if key == "font-face" {
+				delete(key)
+				lua_pop(L, 1)
+				continue
+			}
 			t: types.Theme
 			props_idx := lua_gettop(L)
 
