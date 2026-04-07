@@ -5,6 +5,7 @@ import "canvas"
 import "core:fmt"
 import "core:mem"
 import "core:os"
+import "font"
 import "input"
 import "types"
 import rl "vendor:raylib"
@@ -46,6 +47,9 @@ main :: proc() {
 	rl.InitWindow(1280, 800, "redin")
 	defer rl.CloseWindow()
 	rl.SetTargetFPS(60)
+
+	font.init()
+	defer font.destroy()
 
 	b: bridge.Bridge
 	bridge.init(&b, dev_mode)

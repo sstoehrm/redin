@@ -2,6 +2,7 @@ package host
 
 import "core:strings"
 import "canvas"
+import "font"
 import "input"
 import "types"
 import rl "vendor:raylib"
@@ -258,10 +259,10 @@ node_preferred_height :: proc(
 		if h > 0 do return h
 		if len(n.aspect) > 0 {
 			if t, ok := theme[n.aspect]; ok && t.font_size > 0 {
-				return f32(t.font_size) + 6
+				return f32(t.font_size) + 4
 			}
 		}
-		return 24
+		return 22
 	case types.NodeImage:
 		return size_f32(n.height)
 	case types.NodeVbox:
@@ -298,7 +299,7 @@ draw_input :: proc(
 	border_color := rl.DARKGRAY
 	bg_color := rl.Color{0, 0, 0, 0}
 	text_color := rl.WHITE
-	font_size: i32 = 14
+	font_size: f32 = 14
 	padding_l: f32 = 4
 	border_width: f32 = 1
 
@@ -307,7 +308,7 @@ draw_input :: proc(
 			if t.border != {} do border_color = rl.Color{t.border[0], t.border[1], t.border[2], 255}
 			if t.bg != {} do bg_color = rl.Color{t.bg[0], t.bg[1], t.bg[2], 255}
 			if t.color != {} do text_color = rl.Color{t.color[0], t.color[1], t.color[2], 255}
-			if t.font_size > 0 do font_size = i32(t.font_size)
+			if t.font_size > 0 do font_size = f32(t.font_size)
 			if t.border_width > 0 do border_width = f32(t.border_width)
 			if t.padding[3] > 0 do padding_l = f32(t.padding[3])
 		}
@@ -326,10 +327,10 @@ draw_input :: proc(
 		blink := int(rl.GetTime() * 2) % 2 == 0
 		if blink {
 			cursor_x := rect.x + padding_l
-			cursor_y := rect.y + (rect.height - f32(font_size)) / 2
+			cursor_y := rect.y + (rect.height - font_size) / 2
 			rl.DrawLineEx(
 				rl.Vector2{cursor_x, cursor_y},
-				rl.Vector2{cursor_x, cursor_y + f32(font_size)},
+				rl.Vector2{cursor_x, cursor_y + font_size},
 				1.5,
 				text_color,
 			)
@@ -341,12 +342,18 @@ draw_button :: proc(rect: rl.Rectangle, n: types.NodeButton, theme: map[string]t
 	bg_color := rl.LIGHTGRAY
 	text_color := rl.BLACK
 	radius: f32 = 0
+	font_size: f32 = 18
+	font_name := "sans"
+	font_weight: u8 = 0
 
 	if len(n.aspect) > 0 {
 		if t, ok := theme[n.aspect]; ok {
 			if t.bg != {} do bg_color = rl.Color{t.bg[0], t.bg[1], t.bg[2], 255}
 			if t.color != {} do text_color = rl.Color{t.color[0], t.color[1], t.color[2], 255}
 			if t.radius > 0 do radius = f32(t.radius)
+			if t.font_size > 0 do font_size = f32(t.font_size)
+			if len(t.font) > 0 do font_name = t.font
+			font_weight = t.weight
 		}
 	}
 
@@ -358,28 +365,35 @@ draw_button :: proc(rect: rl.Rectangle, n: types.NodeButton, theme: map[string]t
 	}
 
 	if len(n.label) > 0 {
-		font_size: i32 = 18
+		f := font.get(font_name, font.style_from_weight(font.Font_Weight(font_weight)))
+		spacing := font_size / 10
 		text := strings.clone_to_cstring(n.label, context.temp_allocator)
-		tw := rl.MeasureText(text, font_size)
-		tx := i32(rect.x) + (i32(rect.width) - tw) / 2
-		ty := i32(rect.y) + (i32(rect.height) - font_size) / 2
-		rl.DrawText(text, tx, ty, font_size, text_color)
+		size := rl.MeasureTextEx(f, text, font_size, spacing)
+		tx := rect.x + (rect.width - size.x) / 2
+		ty := rect.y + (rect.height - size.y) / 2
+		rl.DrawTextEx(f, text, {tx, ty}, font_size, spacing, text_color)
 	}
 }
 
 draw_text :: proc(rect: rl.Rectangle, n: types.NodeText, theme: map[string]types.Theme) {
 	if len(n.content) == 0 do return
 
-	font_size: i32 = 18
+	font_size: f32 = 18
 	text_color := rl.BLACK
+	font_name := "sans"
+	font_weight: u8 = 0
 
 	if len(n.aspect) > 0 {
 		if t, ok := theme[n.aspect]; ok {
-			if t.font_size > 0 do font_size = i32(t.font_size)
+			if t.font_size > 0 do font_size = f32(t.font_size)
 			if t.color != {} do text_color = rl.Color{t.color[0], t.color[1], t.color[2], 255}
+			if len(t.font) > 0 do font_name = t.font
+			font_weight = t.weight
 		}
 	}
 
+	f := font.get(font_name, font.style_from_weight(font.Font_Weight(font_weight)))
+	spacing := font_size / 10
 	text := strings.clone_to_cstring(n.content, context.temp_allocator)
-	rl.DrawText(text, i32(rect.x), i32(rect.y) + 2, font_size, text_color)
+	rl.DrawTextEx(f, text, {rect.x, rect.y + 2}, font_size, spacing, text_color)
 }
