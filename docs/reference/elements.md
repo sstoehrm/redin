@@ -179,8 +179,6 @@ An independent render region managed by a registered canvas provider. The provid
 
 The element's `width` and `height` define the render texture size. See the [canvas provider docs](canvas.md) for registration and lifecycle details.
 
-> **Status:** The canvas type exists in the host but rendering is placeholder only.
-
 ```fennel
 [:canvas {:provider :line-chart :width 400 :height 200}]
 ```

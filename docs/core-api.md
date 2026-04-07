@@ -260,7 +260,7 @@ popout       x    .      x      .      x        x       x       .      x       x
 grid         x    .      .      .      x        .       .       x      x       .
 spacer       .    .      .      .      .        .       .       .      .       .
 divider      .    .      .      .      .        .       .       .      x       .
-canvas       .    .      .      .      .        .       .       .      x       .
+canvas       x    .      x      .      x        x       x       .      x       .
 ```
 
 Properties not consumed by an element are ignored silently.
@@ -397,38 +397,26 @@ Decodes a JSON string to a Lua value. Raises an error on invalid JSON.
 
 ## Canvas providers
 
-A canvas element delegates rendering to a registered **provider**. The canvas infrastructure is parsed and laid out by the host, but full provider lifecycle callbacks are not yet wired up.
+A canvas element delegates rendering to a registered Odin-side **provider**. Providers draw directly using Raylib during their `update` callback.
 
 ### Usage
 
 ```fennel
-[:canvas {:provider :line-chart :width 400 :height 200}]
+[:canvas {:provider :line-chart :aspect :chart-chrome :width 400 :height 200}]
 ```
 
-The host recognizes the `canvas` tag and reserves a rect at the specified size. The provider name is stored but provider registration and lifecycle callbacks (`start`/`update`/`halt`/`stop`) are not yet implemented.
+The host draws aspect chrome (bg, border, radius), computes the inner rect (inset by padding), and calls the provider's `update(inner_rect)` every frame. Providers use Raylib directly for all drawing -- 2D, 3D, scissor mode, cameras, shaders.
 
-### Planned lifecycle
+### Lifecycle
 
-| Callback | When                                             | Purpose                              |
-| -------- | ------------------------------------------------ | ------------------------------------ |
-| `start`  | Canvas appears in the frame tree                 | Initialize state, allocate resources |
-| `update` | Each frame the canvas is visible                 | Pull events, emit draw commands      |
-| `halt`   | Canvas becomes hidden                            | Pause, stop consuming cycles         |
-| `stop`   | Canvas removed from the frame tree               | Cleanup, free resources              |
+| Callback | Signature | When |
+| -------- | --------- | ---- |
+| `start` | `proc(rect: rl.Rectangle)` | Canvas appears in the frame tree |
+| `update` | `proc(rect: rl.Rectangle)` | Each frame the canvas is visible |
+| `suspend` | `proc()` | Canvas leaves the frame tree (may return) |
+| `stop` | `proc()` | Provider unregistered (final cleanup) |
 
-### Planned draw context (`ctx`)
-
-| Field / Function  | Purpose                                                             |
-| ----------------- | ------------------------------------------------------------------- |
-| `ctx.state`       | Provider-local state table. Persists across updates.                |
-| `ctx.width`       | Current allocated width (px)                                        |
-| `ctx.height`      | Current allocated height (px)                                       |
-| `ctx.poll-events` | Returns list of pending input events since last update              |
-| `ctx.clear`       | `(ctx.clear [r g b])`                                               |
-| `ctx.line`        | `(ctx.line x1 y1 x2 y2 [r g b])`                                   |
-| `ctx.rect`        | `(ctx.rect x y w h [r g b])`                                        |
-| `ctx.circle`      | `(ctx.circle cx cy radius [r g b])`                                  |
-| `ctx.text`        | `(ctx.text str x y font-size [r g b])`                               |
+Providers register in Odin via `canvas.register(name, provider)`. See the [canvas provider reference](../reference/canvas.md) for full details and examples.
 
 ---
 
