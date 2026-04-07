@@ -1,6 +1,7 @@
 package host
 
 import "core:strings"
+import "canvas"
 import "input"
 import "types"
 import rl "vendor:raylib"
@@ -48,8 +49,45 @@ render_node :: proc(
 	case types.NodeHbox:
 		draw_box(idx, rect, n.aspect, n.layoutX, false, nodes, children_list, theme)
 	case types.NodeCanvas:
-		rl.DrawRectangleLinesEx(rect, 1, rl.LIGHTGRAY)
-		rl.DrawText("canvas", i32(rect.x) + 4, i32(rect.y) + 4, 16, rl.GRAY)
+		// Draw aspect chrome (bg, border, radius, padding)
+		content_rect := rect
+		if len(n.aspect) > 0 {
+			if t, ok := theme[n.aspect]; ok {
+				if t.bg != {} {
+					bg := rl.Color{t.bg[0], t.bg[1], t.bg[2], 255}
+					if t.radius > 0 {
+						roundness := f32(t.radius) / min(rect.width, rect.height) * 2
+						rl.DrawRectangleRounded(rect, roundness, 6, bg)
+					} else {
+						rl.DrawRectangleRec(rect, bg)
+					}
+				}
+				if t.border != {} && t.border_width > 0 {
+					border := rl.Color{t.border[0], t.border[1], t.border[2], 255}
+					if t.radius > 0 {
+						roundness := f32(t.radius) / min(rect.width, rect.height) * 2
+						rl.DrawRectangleRoundedLinesEx(rect, roundness, 6, f32(t.border_width), border)
+					} else {
+						rl.DrawRectangleLinesEx(rect, f32(t.border_width), border)
+					}
+				}
+				if t.padding != {} {
+					content_rect = rl.Rectangle {
+						rect.x + f32(t.padding[3]),
+						rect.y + f32(t.padding[0]),
+						rect.width - f32(t.padding[1]) - f32(t.padding[3]),
+						rect.height - f32(t.padding[0]) - f32(t.padding[2]),
+					}
+				}
+			}
+		}
+		// Dispatch to canvas provider or draw placeholder
+		if len(n.provider) > 0 {
+			canvas.process(n.provider, content_rect)
+		} else {
+			rl.DrawRectangleLinesEx(content_rect, 1, rl.LIGHTGRAY)
+			rl.DrawText("canvas", i32(content_rect.x) + 4, i32(content_rect.y) + 4, 16, rl.GRAY)
+		}
 	case types.NodeInput:
 		draw_input(idx, rect, n, theme)
 	case types.NodeButton:
@@ -197,7 +235,9 @@ node_preferred_width :: proc(idx: int, nodes: []types.Node) -> f32 {
 		return size_f32(n.width)
 	case types.NodePopout:
 		return size_f32(n.width)
-	case types.NodeStack, types.NodeCanvas, types.NodeModal:
+	case types.NodeCanvas:
+		return size_f16(n.width)
+	case types.NodeStack, types.NodeModal:
 		return 0
 	}
 	return 0
@@ -230,7 +270,9 @@ node_preferred_height :: proc(
 		return size_f32(n.height)
 	case types.NodePopout:
 		return size_f32(n.height)
-	case types.NodeStack, types.NodeCanvas, types.NodeModal:
+	case types.NodeCanvas:
+		return size_f16(n.height)
+	case types.NodeStack, types.NodeModal:
 		return 0
 	}
 	return 0
