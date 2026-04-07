@@ -67,7 +67,6 @@ Properties not consumed by an element are ignored silently. The consumption matr
 ```
             bg  color  border  font  padding  radius  border-w  gap  opacity  shadow
 text         .    x      .      x      .        .       .       .      x       .
-rect         x    .      x      .      x        x       x       .      x       x
 image        .    .      .      .      .        .       .       .      x       .
 hbox         x    .      .      .      x        .       .       x      x       .
 vbox         x    .      .      .      x        .       .       x      x       .

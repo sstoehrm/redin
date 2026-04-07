@@ -12,7 +12,7 @@ A translation guide for developers who know re-frame. The programming model is t
 | `reg-sub` | `reg-sub` | Same pattern |
 | `@(subscribe [:key])` | `(subscribe :sub/key)` | Direct call, no deref |
 | `dispatch` | `dispatch` | Same |
-| Hiccup `[:div {:class "x"} ...]` | Frame `[:rect {:aspect :x} ...]` | No CSS -- use aspects |
+| Hiccup `[:div {:class "x"} ...]` | Frame `[:vbox {:aspect :x} ...]` | No CSS -- use aspects |
 | Reagent components | Fennel functions | No reactivity in components |
 | Interceptors | Effects | Handlers return fx maps |
 | `reg-fx` | `reg-fx` | Same |

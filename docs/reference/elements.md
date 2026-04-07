@@ -16,7 +16,6 @@ Reference for all element tags in redin frames.
 | `image` | Implemented |
 | `popout` | Implemented |
 | `modal` | Implemented |
-| `rect` | Not yet implemented |
 | `scroll` | Not yet implemented |
 | `grid` | Not yet implemented |
 | `spacer` | Not yet implemented |
@@ -335,27 +334,6 @@ Visual properties come from `aspect`.
         [:button {:click :event/new-file :aspect :button} "New File"]
         [:button {:click :event/open-file :aspect :button} "Open..."]
         [:button {:click :event/quit :aspect :button} "Quit"]]])]
-```
-
----
-
-### `rect` (not yet implemented)
-
-A decorated box. Use it to apply a background, border, radius, or padding to a region via an aspect. Uses stack layout -- all children overlap.
-
-**Required attrs:** none
-
-**Optional attrs:**
-
-| Attribute | Type | Default | Notes |
-| --------- | ---- | ------- | ----- |
-| `padding` | px or `[v h]` or `[t r b l]` | from aspect | Inner padding. |
-
-```fennel
-[:rect {:aspect :surface}
-  [:vbox {:gap 8}
-    [:text {:aspect :heading} "Title"]
-    [:text {:aspect :body} "Body text"]]]
 ```
 
 ---

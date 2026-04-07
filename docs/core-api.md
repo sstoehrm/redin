@@ -128,7 +128,6 @@ The flattening is a single pass when the frame enters the pipeline. No fragment 
 | `vbox`   | Vertical flow. Children top to bottom.                    | implemented | --             |
 | `modal`  | Full-screen overlay. Blocks interaction behind it.        | implemented | --             |
 | `popout` | Anchored popup, escapes parent clipping.                  | implemented | --             |
-| `rect`   | Decorated container.                                      | planned     | --             |
 | `scroll` | Scrollable viewport. Exactly 1 child.                     | planned     | --             |
 | `grid`   | 2D grid layout.                                           | planned     | `cols`         |
 
@@ -258,7 +257,6 @@ input        x    x      x      x      x        x       x       .      x       .
 button       x    x      .      .      .        x       .       .      .       .
 modal        x    .      .      .      .        .       .       .      x       .
 popout       x    .      x      .      x        x       x       .      x       x
-rect         x    .      x      .      x        x       x       .      x       x
 grid         x    .      .      .      x        .       .       x      x       .
 spacer       .    .      .      .      .        .       .       .      .       .
 divider      .    .      .      .      .        .       .       .      x       .
