@@ -58,6 +58,9 @@ main :: proc() {
 
 	bridge.load_app(&b, app_file)
 
+	input.state_init()
+	defer input.state_destroy()
+
 	listeners: [dynamic]types.Listener
 	defer delete(listeners)
 
@@ -83,6 +86,31 @@ main :: proc() {
 
 		applied_events := input.apply_listeners(listeners, input_events, node_rects[:])
 		defer delete(applied_events)
+
+		// Handle focus changes for input state
+		for ae in applied_events {
+			switch a in ae {
+			case types.ApplyFocus:
+				if a.idx < len(b.nodes) {
+					if n, ok := b.nodes[a.idx].(types.NodeInput); ok {
+						input.focus_enter(n.value)
+					} else {
+						input.focus_leave()
+					}
+				}
+			case types.ApplyActive:
+			}
+		}
+		// If focus was cleared (click outside), leave input state
+		if input.state.active && input.focused_idx < 0 {
+			input.focus_leave()
+		}
+
+		dispatch_events := input.process_user_events(
+			user_events[:], input_events[:], b.nodes[:], node_rects[:],
+		)
+		defer delete(dispatch_events)
+		bridge.deliver_dispatch_events(&b, dispatch_events[:])
 
 		rl.BeginDrawing()
 		rl.ClearBackground({255, 255, 255, 255})
