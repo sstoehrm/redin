@@ -38,9 +38,21 @@ odin build src/host -out:build/redin
 # Fennel runtime tests (95 tests)
 luajit test/lua/runner.lua test/lua/test_*.fnl
 
+# UI integration tests (requires running dev server)
+./build/redin --dev test/ui/<app>.fnl &
+bb test/ui/run.bb test/ui/test_<name>.bb
+
 # Build check
 odin build src/host -out:build/redin
 ```
+
+### UI test convention
+
+When touching a component, write a UI test if one doesn't exist yet, or add to the existing test file. Each component gets:
+- `test/ui/<component>_app.fnl` -- minimal app exercising just that component
+- `test/ui/test_<component>.bb` -- Babashka tests using the `redin-test` framework
+
+Existing UI tests: `test_smoke` (basic dispatch/state), `test_input` (input change/key/submit).
 
 ## Architecture
 

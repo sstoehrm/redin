@@ -10,6 +10,9 @@
 
 (dataflow.init {:counter 0 :message "hello"})
 
+;; Expose state to dev server (GET /state endpoint)
+(global redin_get_state (. dataflow :_get-raw-db))
+
 (reg-handler :event/inc
   (fn [db event]
     (update db :counter #(+ $1 1))))

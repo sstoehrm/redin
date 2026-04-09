@@ -86,9 +86,10 @@
 ;; ---------------------------------------------------------------------------
 
 (defn get-frame
-  "Fetch the last pushed frame via GET /frames."
+  "Fetch the last pushed frame tree via GET /frames."
   []
-  (get-json "/frames"))
+  (let [resp (get-json "/frames")]
+    (if (map? resp) (:frame resp) resp)))
 
 (defn get-state
   "Fetch app state. Optional path for nested access."

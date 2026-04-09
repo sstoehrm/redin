@@ -7,7 +7,6 @@ import "core:os"
 import "core:strings"
 import "core:sync"
 import "core:thread"
-import http "../../../lib/odin-http"
 import "../types"
 import rl "vendor:raylib"
 
@@ -21,7 +20,7 @@ Pending_Request :: struct {
 }
 
 Response_Channel :: struct {
-	status:       http.Status,
+	status:       int,
 	content_type: string,
 	body:         string,
 	binary:       []u8,
@@ -36,7 +35,7 @@ Sync_Queue :: struct {
 
 Dev_Server :: struct {
 	bridge:             ^Bridge,
-	server:             http.Server,
+	tcp_sock:           net.TCP_Socket,
 	server_thread:      ^thread.Thread,
 	incoming:           Sync_Queue,
 	event_queue:        [dynamic]types.InputEvent,
@@ -68,6 +67,18 @@ devserver_init :: proc(ds: ^Dev_Server, b: ^Bridge) {
 	ds.bridge = b
 	ds.running = true
 	queue.init(&ds.incoming.q)
+
+	endpoint := net.Endpoint{
+		address = net.IP4_Loopback,
+		port    = 8800,
+	}
+	sock, sock_err := net.listen_tcp(endpoint)
+	if sock_err != nil {
+		fmt.eprintfln("Dev server listen error: %v", sock_err)
+		ds.running = false
+		return
+	}
+	ds.tcp_sock = sock
 	ds.server_thread = thread.create_and_start_with_poly_data(ds, server_thread_proc, context)
 	fmt.println("Dev server listening on http://localhost:8800")
 }
@@ -75,11 +86,15 @@ devserver_init :: proc(ds: ^Dev_Server, b: ^Bridge) {
 devserver_destroy :: proc(ds: ^Dev_Server) {
 	if ds.running {
 		ds.running = false
-		http.server_shutdown(&ds.server)
+		// Connect to unblock the accept call
+		if unblock, err := net.dial_tcp(net.Endpoint{address = net.IP4_Loopback, port = 8800}); err == nil {
+			net.close(unblock)
+		}
 		if ds.server_thread != nil {
 			thread.join(ds.server_thread)
 			thread.destroy(ds.server_thread)
 		}
+		net.close(ds.tcp_sock)
 	}
 	queue.destroy(&ds.incoming.q)
 	delete(ds.event_queue)
@@ -92,129 +107,188 @@ devserver_drain_events :: proc(ds: ^Dev_Server, events: ^[dynamic]types.InputEve
 	clear(&ds.event_queue)
 }
 
-// --- Server thread ---
+// --- Simple blocking HTTP server thread ---
 
 server_thread_proc :: proc(ds: ^Dev_Server) {
-	h := http.Handler{
-		user_data = ds,
-		handle = server_request_handler,
-	}
-	endpoint := net.Endpoint{
-		address = net.IP4_Loopback,
-		port = 8800,
-	}
-	opts := http.Default_Server_Opts
-	opts.thread_count = 1
-	err := http.listen_and_serve(&ds.server, h, endpoint, opts)
-	if err != nil {
-		fmt.eprintfln("Dev server error: %v", err)
-		ds.running = false
-	}
-}
+	buf: [8192]u8
 
-// --- odin-http handler ---
-
-server_request_handler :: proc(h: ^http.Handler, req: ^http.Request, res: ^http.Response) {
-	ds := (^Dev_Server)(h.user_data)
-
-	// Loopback check
-	switch a in req.client.address {
-	case net.IP4_Address:
-		if a != net.IP4_Loopback {
-			res.status = .Forbidden
-			http.body_set(res, "Forbidden")
-			http.respond(res)
-			return
+	for ds.running {
+		client, _, accept_err := net.accept_tcp(ds.tcp_sock)
+		if accept_err != nil || !ds.running {
+			break
 		}
-	case net.IP6_Address:
-		if a != net.IP6_Loopback {
-			res.status = .Forbidden
-			http.body_set(res, "Forbidden")
-			http.respond(res)
-			return
+
+		// Read full request into buffer
+		total := 0
+		for {
+			n, recv_err := net.recv_tcp(client, buf[total:])
+			if recv_err != nil || n <= 0 {
+				break
+			}
+			total += n
+			// Check for end of headers (double CRLF)
+			if total >= 4 {
+				req_str := string(buf[:total])
+				if header_end := strings.index(req_str, "\r\n\r\n"); header_end >= 0 {
+					// Check Content-Length for body
+					cl := find_content_length(req_str[:header_end])
+					body_start := header_end + 4
+					if cl > 0 {
+						needed := body_start + cl
+						for total < needed && total < len(buf) {
+							n2, err2 := net.recv_tcp(client, buf[total:])
+							if err2 != nil || n2 <= 0 do break
+							total += n2
+						}
+					}
+					break
+				}
+			}
+			if total >= len(buf) do break
+		}
+
+		if total == 0 {
+			net.close(client)
+			continue
+		}
+
+		req_str := string(buf[:total])
+
+		// Parse request line
+		rline_end := strings.index(req_str, "\r\n")
+		if rline_end < 0 {
+			net.close(client)
+			continue
+		}
+		rline := req_str[:rline_end]
+
+		// Split request line manually (avoid allocator)
+		method, path: string
+		{
+			sp1 := strings.index_byte(rline, ' ')
+			if sp1 < 0 {
+				net.close(client)
+				continue
+			}
+			method = rline[:sp1]
+			rest := rline[sp1 + 1:]
+			sp2 := strings.index_byte(rest, ' ')
+			path = rest[:sp2] if sp2 >= 0 else rest
+		}
+
+		// Extract body (after double CRLF)
+		body := ""
+		if header_end := strings.index(req_str, "\r\n\r\n"); header_end >= 0 {
+			body_start := header_end + 4
+			if body_start < total {
+				body = req_str[body_start:]
+			}
+		}
+
+		// Handle OPTIONS directly
+		if method == "OPTIONS" {
+			options_resp := "HTTP/1.1 204 No Content\r\n" + CORS_HEADERS + "\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+			net.send_tcp(client, transmute([]u8)options_resp)
+			net.close(client)
+			continue
+		}
+
+		// Dispatch to main thread
+		channel: Response_Channel
+		pending := new(Pending_Request)
+		pending.method = method
+		pending.path = path
+		pending.body = body
+		pending.response = &channel
+
+		sync_queue_push(&ds.incoming, pending)
+		sync.sema_wait(&channel.done)
+
+		// Build and send HTTP response
+		status_line := status_text(channel.status)
+		ct := channel.content_type if len(channel.content_type) > 0 else "application/json"
+		resp_body := channel.body if len(channel.body) > 0 else ""
+		body_len := len(channel.binary) if len(channel.binary) > 0 else len(resp_body)
+
+		// Send header line by line (no allocator needed)
+		send_str(client, "HTTP/1.1 ")
+		send_str(client, status_line)
+		send_str(client, "\r\n")
+		send_str(client, CORS_HEADERS)
+		send_str(client, "\r\nContent-Type: ")
+		send_str(client, ct)
+		send_str(client, "\r\nContent-Length: ")
+		{
+			int_buf: [20]u8
+			send_str(client, int_to_str(int_buf[:], body_len))
+		}
+		send_str(client, "\r\nConnection: close\r\n\r\n")
+
+		if len(channel.binary) > 0 {
+			net.send_tcp(client, channel.binary)
+		} else {
+			send_str(client, resp_body)
+		}
+
+		net.close(client)
+		sync.sema_post(&channel.ack)
+		free(pending)
+	}
+}
+
+send_str :: proc(sock: net.TCP_Socket, s: string) {
+	if len(s) > 0 {
+		net.send_tcp(sock, transmute([]u8)s)
+	}
+}
+
+int_to_str :: proc(buf: []u8, val: int) -> string {
+	if val == 0 {
+		buf[0] = '0'
+		return string(buf[:1])
+	}
+	i := len(buf)
+	v := val
+	for v > 0 {
+		i -= 1
+		buf[i] = u8(v % 10) + '0'
+		v /= 10
+	}
+	return string(buf[i:])
+}
+
+CORS_HEADERS :: "Access-Control-Allow-Origin: http://localhost:8800\r\nAccess-Control-Allow-Methods: GET, POST, PUT, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type"
+
+find_content_length :: proc(headers: string) -> int {
+	lower := strings.to_lower(headers, context.temp_allocator)
+	idx := strings.index(lower, "content-length:")
+	if idx < 0 do return 0
+	rest := strings.trim_left_space(headers[idx + len("content-length:"):])
+	end := strings.index_any(rest, "\r\n")
+	if end < 0 do end = len(rest)
+	val := strings.trim_space(rest[:end])
+	n := 0
+	for c in val {
+		if c >= '0' && c <= '9' {
+			n = n * 10 + int(c - '0')
+		} else {
+			break
 		}
 	}
-
-	rline, rline_ok := req.line.(http.Requestline)
-	if !rline_ok {
-		res.status = .Bad_Request
-		http.body_set(res, "Bad request")
-		http.respond(res)
-		return
-	}
-
-	if rline.method == .Options {
-		res.status = .No_Content
-		set_cors_headers(res)
-		http.headers_set(&res.headers, "access-control-max-age", "86400")
-		http.respond(res)
-		return
-	}
-
-	ctx := new(Body_Handler_Context)
-	ctx.ds = ds
-	ctx.path = strings.clone(req.url.path)
-	ctx.method = rline.method
-	ctx.res = res
-	http.body(req, -1, ctx, body_handler_callback)
+	return n
 }
 
-Body_Handler_Context :: struct {
-	ds:     ^Dev_Server,
-	path:   string,
-	method: http.Method,
-	res:    ^http.Response,
-}
-
-body_handler_callback :: proc(user_data: rawptr, body_str: http.Body, err: http.Body_Error) {
-	ctx := (^Body_Handler_Context)(user_data)
-	defer {
-		delete(ctx.path)
-		free(ctx)
+status_text :: proc(code: int) -> string {
+	switch code {
+	case 200: return "200 OK"
+	case 204: return "204 No Content"
+	case 400: return "400 Bad Request"
+	case 403: return "403 Forbidden"
+	case 404: return "404 Not Found"
+	case 405: return "405 Method Not Allowed"
+	case 500: return "500 Internal Server Error"
+	case:     return "200 OK"
 	}
-
-	if err != nil {
-		ctx.res.status = .Bad_Request
-		http.body_set(ctx.res, "Bad request body")
-		set_cors_headers(ctx.res)
-		http.respond(ctx.res)
-		return
-	}
-
-	dispatch_to_main(ctx.ds, http.method_string(ctx.method), ctx.path, string(body_str), ctx.res)
-}
-
-dispatch_to_main :: proc(ds: ^Dev_Server, method: string, path: string, body: string, res: ^http.Response) {
-	channel: Response_Channel
-	pending := new(Pending_Request)
-	pending.method = method
-	pending.path = path
-	pending.body = body
-	pending.response = &channel
-
-	sync_queue_push(&ds.incoming, pending)
-	sync.sema_wait(&channel.done)
-
-	res.status = channel.status
-	set_cors_headers(res)
-	if len(channel.content_type) > 0 {
-		http.headers_set_content_type(&res.headers, channel.content_type)
-	}
-	if len(channel.binary) > 0 {
-		http.body_set(res, channel.binary)
-	} else if len(channel.body) > 0 {
-		http.body_set(res, channel.body)
-	}
-	http.respond(res)
-
-	sync.sema_post(&channel.ack)
-	free(pending)
-}
-
-set_cors_headers :: proc(res: ^http.Response) {
-	http.headers_set(&res.headers, "access-control-allow-origin", "http://localhost:8800")
-	http.headers_set(&res.headers, "access-control-allow-methods", "GET, POST, PUT, OPTIONS")
-	http.headers_set(&res.headers, "access-control-allow-headers", "Content-Type")
 }
 
 // --- Main loop processing ---
@@ -244,7 +318,7 @@ process_request :: proc(ds: ^Dev_Server, req: ^Pending_Request) {
 		} else if req.path == "/screenshot" {
 			handle_screenshot(ch)
 		} else {
-			respond_text(ch, .Not_Found, "Not found")
+			respond_text(ch, 404, "Not found")
 		}
 	case "POST":
 		if req.path == "/events" {
@@ -255,23 +329,23 @@ process_request :: proc(ds: ^Dev_Server, req: ^Pending_Request) {
 			ds.shutdown_requested = true
 			respond_json_ok(ch)
 		} else {
-			respond_text(ch, .Not_Found, "Not found")
+			respond_text(ch, 404, "Not found")
 		}
 	case "PUT":
 		if req.path == "/aspects" {
 			handle_put_aspects(ds, ch, req.body)
 		} else {
-			respond_text(ch, .Not_Found, "Not found")
+			respond_text(ch, 404, "Not found")
 		}
 	case:
-		respond_text(ch, .Method_Not_Allowed, "Method not allowed")
+		respond_text(ch, 405, "Method not allowed")
 	}
 }
 
 // --- Response helpers ---
 
 respond_json :: proc(ch: ^Response_Channel, body: string) {
-	ch.status = .OK
+	ch.status = 200
 	ch.content_type = "application/json"
 	ch.body = body
 	sync.sema_post(&ch.done)
@@ -279,14 +353,14 @@ respond_json :: proc(ch: ^Response_Channel, body: string) {
 }
 
 respond_json_ok :: proc(ch: ^Response_Channel) {
-	ch.status = .OK
+	ch.status = 200
 	ch.content_type = "application/json"
 	ch.body = `{"ok":true}`
 	sync.sema_post(&ch.done)
 	sync.sema_wait(&ch.ack)
 }
 
-respond_json_error :: proc(ch: ^Response_Channel, status: http.Status, msg: string) {
+respond_json_error :: proc(ch: ^Response_Channel, status: int, msg: string) {
 	ch.status = status
 	ch.content_type = "application/json"
 	ch.body = msg
@@ -294,7 +368,7 @@ respond_json_error :: proc(ch: ^Response_Channel, status: http.Status, msg: stri
 	sync.sema_wait(&ch.ack)
 }
 
-respond_text :: proc(ch: ^Response_Channel, status: http.Status, body: string) {
+respond_text :: proc(ch: ^Response_Channel, status: int, body: string) {
 	ch.status = status
 	ch.content_type = "text/plain"
 	ch.body = body
@@ -303,7 +377,7 @@ respond_text :: proc(ch: ^Response_Channel, status: http.Status, body: string) {
 }
 
 respond_binary :: proc(ch: ^Response_Channel, content_type: string, data: []u8) {
-	ch.status = .OK
+	ch.status = 200
 	ch.content_type = content_type
 	ch.binary = data
 	sync.sema_post(&ch.done)
@@ -311,7 +385,6 @@ respond_binary :: proc(ch: ^Response_Channel, content_type: string, data: []u8) 
 }
 
 // --- GET handlers ---
-// (same Lua logic as before, writing to Response_Channel instead of socket)
 
 handle_get_frames :: proc(ds: ^Dev_Server, ch: ^Response_Channel) {
 	L := ds.bridge.L
@@ -319,14 +392,14 @@ handle_get_frames :: proc(ds: ^Dev_Server, ch: ^Response_Channel) {
 	lua_pushstring(L, "view")
 	if lua_pcall(L, 1, 1, 0) != 0 {
 		lua_pop(L, 1)
-		respond_json_error(ch, .Internal_Server_Error, `{"error":"lua error"}`)
+		respond_json_error(ch, 500, `{"error":"lua error"}`)
 		return
 	}
 	lua_getfield(L, -1, "get-last-push")
 	lua_remove(L, -2)
 	if lua_pcall(L, 0, 1, 0) != 0 {
 		lua_pop(L, 1)
-		respond_json_error(ch, .Internal_Server_Error, `{"error":"lua error"}`)
+		respond_json_error(ch, 500, `{"error":"lua error"}`)
 		return
 	}
 	b := strings.builder_make()
@@ -348,7 +421,7 @@ handle_get_state :: proc(ds: ^Dev_Server, ch: ^Response_Channel) {
 			respond_json(ch, strings.to_string(b))
 		} else {
 			lua_pop(L, 1)
-			respond_json_error(ch, .Internal_Server_Error, `{"error":"lua error"}`)
+			respond_json_error(ch, 500, `{"error":"lua error"}`)
 		}
 	} else {
 		lua_pop(L, 1)
@@ -366,7 +439,7 @@ handle_get_state_path :: proc(ds: ^Dev_Server, ch: ^Response_Channel, dot_path: 
 	}
 	if lua_pcall(L, 0, 1, 0) != 0 {
 		lua_pop(L, 1)
-		respond_json_error(ch, .Internal_Server_Error, `{"error":"lua error"}`)
+		respond_json_error(ch, 500, `{"error":"lua error"}`)
 		return
 	}
 	segments := strings.split(dot_path, ".")
@@ -490,13 +563,13 @@ handle_post_events :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string)
 	lua_getglobal(L, "redin_events")
 	if lua_isnil(L, -1) {
 		lua_pop(L, 1)
-		respond_json_error(ch, .Internal_Server_Error, `{"error":"no event handler"}`)
+		respond_json_error(ch, 500, `{"error":"no event handler"}`)
 		return
 	}
 	pos := 0
 	if !json_decode_value(L, body, &pos) {
 		lua_pop(L, 1)
-		respond_json_error(ch, .Bad_Request, `{"error":"invalid JSON"}`)
+		respond_json_error(ch, 400, `{"error":"invalid JSON"}`)
 		return
 	}
 	lua_createtable(L, 1, 0)
@@ -559,7 +632,7 @@ handle_screenshot :: proc(ch: ^Response_Channel) {
 	rl.ExportImage(image, tmp_path)
 	data, read_err := os.read_entire_file_from_path("/tmp/redin_screenshot.png", context.allocator)
 	if read_err != nil {
-		respond_text(ch, .Internal_Server_Error, "Failed to capture screenshot")
+		respond_text(ch, 500, "Failed to capture screenshot")
 		return
 	}
 	defer delete(data)

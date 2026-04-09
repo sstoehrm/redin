@@ -102,12 +102,16 @@ clear_frame :: proc(b: ^Bridge) {
 		delete(p.value)
 	}
 	delete(b.paths)
+	b.paths = {}
 	delete(b.nodes)
+	b.nodes = {}
 	delete(b.parent_indices)
+	b.parent_indices = {}
 	for &c in b.children_list {
 		delete(c.value)
 	}
 	delete(b.children_list)
+	b.children_list = {}
 }
 
 // ---------------------------------------------------------------------------
