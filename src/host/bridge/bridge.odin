@@ -696,6 +696,87 @@ deliver_events :: proc(b: ^Bridge, events: []types.InputEvent) {
 	}
 }
 
+// Deliver input dispatch events to Fennel.
+// Each event is wrapped as [:dispatch [:event-name {context}]].
+deliver_dispatch_events :: proc(b: ^Bridge, events: []types.Dispatch_Event) {
+	if len(events) == 0 do return
+	L := b.L
+
+	for event in events {
+		lua_getglobal(L, "redin_events")
+		if lua_isnil(L, -1) {
+			lua_pop(L, 1)
+			return
+		}
+
+		// Build events table with 1 entry
+		lua_createtable(L, 1, 0)
+
+		switch e in event {
+		case types.Change_Event:
+			// [:dispatch [:event-name {:value "text"}]]
+			lua_createtable(L, 2, 0)
+			lua_pushstring(L, "dispatch")
+			lua_rawseti(L, -2, 1)
+
+			// Inner event: [:event-name {:value "text"}]
+			lua_createtable(L, 2, 0)
+			ev_name := strings.clone_to_cstring(e.event_name, context.temp_allocator)
+			lua_pushstring(L, ev_name)
+			lua_rawseti(L, -2, 1)
+
+			// Context table: {:value "text"}
+			lua_createtable(L, 0, 1)
+			val := strings.clone_to_cstring(e.value, context.temp_allocator)
+			lua_pushstring(L, val)
+			lua_setfield(L, -2, "value")
+			lua_rawseti(L, -2, 2)
+
+			lua_rawseti(L, -2, 2) // set dispatch wrapper as event[2]
+			lua_rawseti(L, -2, 1) // set as events[1]
+
+		case types.Key_Event_Dispatch:
+			// [:dispatch [:event-name {:key "enter" :mods {:shift false ...}}]]
+			lua_createtable(L, 2, 0)
+			lua_pushstring(L, "dispatch")
+			lua_rawseti(L, -2, 1)
+
+			// Inner event
+			lua_createtable(L, 2, 0)
+			ev_name := strings.clone_to_cstring(e.event_name, context.temp_allocator)
+			lua_pushstring(L, ev_name)
+			lua_rawseti(L, -2, 1)
+
+			// Context table: {:key "enter" :mods {...}}
+			lua_createtable(L, 0, 2)
+			key_name := strings.clone_to_cstring(e.key, context.temp_allocator)
+			lua_pushstring(L, key_name)
+			lua_setfield(L, -2, "key")
+
+			// Mods subtable
+			lua_createtable(L, 0, 4)
+			lua_pushboolean(L, e.mods.shift ? 1 : 0)
+			lua_setfield(L, -2, "shift")
+			lua_pushboolean(L, e.mods.ctrl ? 1 : 0)
+			lua_setfield(L, -2, "ctrl")
+			lua_pushboolean(L, e.mods.alt ? 1 : 0)
+			lua_setfield(L, -2, "alt")
+			lua_pushboolean(L, e.mods.super ? 1 : 0)
+			lua_setfield(L, -2, "super")
+			lua_setfield(L, -2, "mods")
+
+			lua_rawseti(L, -2, 2) // set dispatch wrapper as event[2]
+			lua_rawseti(L, -2, 1) // set as events[1]
+		}
+
+		if lua_pcall(L, 1, 0, 0) != 0 {
+			msg := lua_tostring_raw(L, -1)
+			fmt.eprintfln("Dispatch event delivery error: %s", msg)
+			lua_pop(L, 1)
+		}
+	}
+}
+
 render_tick :: proc(b: ^Bridge) {
 	L := b.L
 	b.frame_changed = false
