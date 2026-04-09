@@ -32,3 +32,19 @@ InputEvent :: union {
 	MouseEvent,
 	ResizeEvent,
 }
+
+Change_Event :: struct {
+	event_name: string,
+	value:      string,
+}
+
+Key_Event_Dispatch :: struct {
+	event_name: string,
+	key:        string,
+	mods:       KeyMods,
+}
+
+Dispatch_Event :: union {
+	Change_Event,
+	Key_Event_Dispatch,
+}

@@ -484,6 +484,8 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 			inp.key = lua_get_string_field(L, attrs_idx, "key")
 			inp.width = lua_get_size_f32(L, attrs_idx, "width")
 			inp.height = lua_get_size_f32(L, attrs_idx, "height")
+			inp.value = lua_get_string_field(L, attrs_idx, "value")
+			inp.placeholder = lua_get_string_field(L, attrs_idx, "placeholder")
 		}
 		return inp
 

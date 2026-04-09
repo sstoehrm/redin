@@ -72,17 +72,19 @@ NodeHbox :: struct {
 }
 
 NodeInput :: struct {
-	change: string,
-	key:    string,
-	aspect: string,
-	width:  union {
+	change:      string,
+	key:         string,
+	aspect:      string,
+	width:       union {
 		SizeValue,
 		f32,
 	},
-	height: union {
+	height:      union {
 		SizeValue,
 		f32,
 	},
+	value:       string,
+	placeholder: string,
 }
 
 NodeButton :: struct {
