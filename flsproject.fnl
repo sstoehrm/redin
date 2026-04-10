@@ -1,0 +1,2 @@
+{:lua-version "lua5.1"
+ :extra-globals "get get-in assoc assoc-in update update-in dissoc dissoc-in reg-handler reg-sub subscribe dispatch reg-fx main_view redin_get_state"}
