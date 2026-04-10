@@ -90,6 +90,20 @@ poll :: proc() -> [dynamic]types.InputEvent {
 		key = rl.GetKeyPressed()
 	}
 
+	// Repeat events for held editing keys (backspace, delete, arrows, etc.)
+	repeat_keys := [?]rl.KeyboardKey{
+		.BACKSPACE, .DELETE, .LEFT, .RIGHT, .UP, .DOWN, .HOME, .END,
+		.PAGE_UP, .PAGE_DOWN, .TAB, .ENTER,
+	}
+	for rk in repeat_keys {
+		if rl.IsKeyPressedRepeat(rk) {
+			append(
+				&events,
+				types.InputEvent(types.KeyEvent{x = mouse.x, y = mouse.y, key = rk, mods = mods}),
+			)
+		}
+	}
+
 	ch := rl.GetCharPressed()
 	for ch != 0 {
 		append(
