@@ -1,11 +1,15 @@
 package host
 
-import "core:strings"
 import "canvas"
+import "core:math"
+import "core:strings"
 import "font"
 import "input"
 import "types"
 import rl "vendor:raylib"
+
+// Snap to pixel grid for crisp text rendering
+px :: proc(v: f32) -> f32 { return math.round(v) }
 
 // Layout rects populated during render, indexed by node idx.
 // Used by input handling for hit testing in the next frame.
@@ -67,7 +71,13 @@ render_node :: proc(
 					border := rl.Color{t.border[0], t.border[1], t.border[2], 255}
 					if t.radius > 0 {
 						roundness := f32(t.radius) / min(rect.width, rect.height) * 2
-						rl.DrawRectangleRoundedLinesEx(rect, roundness, 6, f32(t.border_width), border)
+						rl.DrawRectangleRoundedLinesEx(
+							rect,
+							roundness,
+							6,
+							f32(t.border_width),
+							border,
+						)
 					} else {
 						rl.DrawRectangleLinesEx(rect, f32(t.border_width), border)
 					}
@@ -160,7 +170,8 @@ draw_box :: proc(
 	fill_count: int = 0
 	for i in 0 ..< int(ch.length) {
 		child_idx := int(ch.value[i])
-		s := vertical ? node_preferred_height(child_idx, nodes, theme) : node_preferred_width(child_idx, nodes)
+		s :=
+			vertical ? node_preferred_height(child_idx, nodes, theme) : node_preferred_width(child_idx, nodes)
 		if s > 0 {
 			fixed_total += s
 		} else {
@@ -209,13 +220,19 @@ draw_box :: proc(
 }
 
 // Helper: extract f32 from union{SizeValue, f32}
-size_f32 :: proc(size: union {types.SizeValue, f32}) -> f32 {
+size_f32 :: proc(size: union {
+		types.SizeValue,
+		f32,
+	}) -> f32 {
 	if v, ok := size.(f32); ok do return v
 	return 0
 }
 
 // Helper: extract f32 from union{SizeValue, f16}
-size_f16 :: proc(size: union {types.SizeValue, f16}) -> f32 {
+size_f16 :: proc(size: union {
+		types.SizeValue,
+		f16,
+	}) -> f32 {
 	if v, ok := size.(f16); ok do return f32(v)
 	return 0
 }
@@ -339,7 +356,7 @@ draw_input :: proc(
 	content_h := rect.height
 
 	f := font.get(font_name, font.style_from_weight(font.Font_Weight(font_weight)))
-	spacing := font_size / 10
+	spacing: f32 = 0
 
 	// Determine what text to display
 	display_text: string
@@ -370,12 +387,7 @@ draw_input :: proc(
 		hi_text := strings.clone_to_cstring(string(input.state.text[:hi]), context.temp_allocator)
 		lo_x := rl.MeasureTextEx(f, lo_text, font_size, spacing).x
 		hi_x := rl.MeasureTextEx(f, hi_text, font_size, spacing).x
-		sel_rect := rl.Rectangle{
-			content_x + lo_x - scroll_offset,
-			text_y,
-			hi_x - lo_x,
-			font_size,
-		}
+		sel_rect := rl.Rectangle{content_x + lo_x - scroll_offset, text_y, hi_x - lo_x, font_size}
 		rl.DrawRectangleRec(sel_rect, selection_color)
 	}
 
@@ -383,12 +395,15 @@ draw_input :: proc(
 	if len(display_text) > 0 {
 		cstr := strings.clone_to_cstring(display_text, context.temp_allocator)
 		color := show_placeholder ? placeholder_color : text_color
-		rl.DrawTextEx(f, cstr, {content_x - scroll_offset, text_y}, font_size, spacing, color)
+		rl.DrawTextEx(f, cstr, {px(content_x - scroll_offset), px(text_y)}, font_size, spacing, color)
 	}
 
 	// Draw cursor with bottom-to-top wipe animation
 	if is_focused && input.state.active {
-		cursor_text := strings.clone_to_cstring(string(input.state.text[:input.state.cursor]), context.temp_allocator)
+		cursor_text := strings.clone_to_cstring(
+			string(input.state.text[:input.state.cursor]),
+			context.temp_allocator,
+		)
 		cursor_x_offset := rl.MeasureTextEx(f, cursor_text, font_size, spacing).x
 		cursor_x := content_x + cursor_x_offset - scroll_offset
 
@@ -403,13 +418,13 @@ draw_input :: proc(
 		}
 
 		// Bottom-to-top wipe animation
-		cycle := f32(rl.GetTime()) * 2.0   // 2Hz cycle
-		phase := cycle - f32(i32(cycle))    // 0..1 sawtooth
+		cycle := f32(rl.GetTime()) * 0.4 // 1Hz cycle
+		phase := cycle - f32(i32(cycle)) // 0..1 sawtooth
 		wave: f32
 		if phase < 0.5 {
-			wave = phase * 2        // 0->1 (fade in)
+			wave = phase * 2 // 0->1 (fade in)
 		} else {
-			wave = (1 - phase) * 2  // 1->0 (fade out)
+			wave = (1 - phase) * 2 // 1->0 (fade out)
 		}
 
 		CURSOR_SLICES :: 8
@@ -460,11 +475,11 @@ draw_button :: proc(rect: rl.Rectangle, n: types.NodeButton, theme: map[string]t
 
 	if len(n.label) > 0 {
 		f := font.get(font_name, font.style_from_weight(font.Font_Weight(font_weight)))
-		spacing := font_size / 10
+		spacing: f32 = 0
 		text := strings.clone_to_cstring(n.label, context.temp_allocator)
 		size := rl.MeasureTextEx(f, text, font_size, spacing)
-		tx := rect.x + (rect.width - size.x) / 2
-		ty := rect.y + (rect.height - size.y) / 2
+		tx := px(rect.x + (rect.width - size.x) / 2)
+		ty := px(rect.y + (rect.height - size.y) / 2)
 		rl.DrawTextEx(f, text, {tx, ty}, font_size, spacing, text_color)
 	}
 }
@@ -487,7 +502,7 @@ draw_text :: proc(rect: rl.Rectangle, n: types.NodeText, theme: map[string]types
 	}
 
 	f := font.get(font_name, font.style_from_weight(font.Font_Weight(font_weight)))
-	spacing := font_size / 10
+	spacing: f32 = 0
 	text := strings.clone_to_cstring(n.content, context.temp_allocator)
-	rl.DrawTextEx(f, text, {rect.x, rect.y + 2}, font_size, spacing, text_color)
+	rl.DrawTextEx(f, text, {px(rect.x), px(rect.y + 2)}, font_size, spacing, text_color)
 }
