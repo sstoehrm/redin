@@ -484,8 +484,8 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 		inp: types.NodeInput
 		if attrs_idx > 0 {
 			inp.aspect = lua_get_string_field(L, attrs_idx, "aspect")
-			inp.change = lua_get_string_field(L, attrs_idx, "change")
-			inp.key = lua_get_string_field(L, attrs_idx, "key")
+			inp.change = lua_get_event_name(L, attrs_idx, "change")
+			inp.key = lua_get_event_name(L, attrs_idx, "key")
 			inp.width = lua_get_size_f32(L, attrs_idx, "width")
 			inp.height = lua_get_size_f32(L, attrs_idx, "height")
 			inp.value = lua_get_string_field(L, attrs_idx, "value")
@@ -497,7 +497,7 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 		btn: types.NodeButton
 		if attrs_idx > 0 {
 			btn.aspect = lua_get_string_field(L, attrs_idx, "aspect")
-			btn.click = lua_get_string_field(L, attrs_idx, "click")
+			btn.click = lua_get_event_name(L, attrs_idx, "click")
 			btn.width = lua_get_size_f32(L, attrs_idx, "width")
 			btn.height = lua_get_size_f32(L, attrs_idx, "height")
 		}
@@ -881,6 +881,24 @@ lua_get_string_field :: proc(L: ^Lua_State, index: i32, field: cstring) -> strin
 	defer lua_pop(L, 1)
 	if lua_isstring(L, -1) {
 		return strings.clone_from_cstring(lua_tostring_raw(L, -1))
+	}
+	return ""
+}
+
+// Read an event vector field: [:event-name] -> "event-name"
+// Falls back to plain string if the field is a string.
+lua_get_event_name :: proc(L: ^Lua_State, index: i32, field: cstring) -> string {
+	lua_getfield(L, index, field)
+	defer lua_pop(L, 1)
+	if lua_isstring(L, -1) {
+		return strings.clone_from_cstring(lua_tostring_raw(L, -1))
+	}
+	if lua_istable(L, -1) {
+		lua_rawgeti(L, -1, 1)
+		defer lua_pop(L, 1)
+		if lua_isstring(L, -1) {
+			return strings.clone_from_cstring(lua_tostring_raw(L, -1))
+		}
 	}
 	return ""
 }
