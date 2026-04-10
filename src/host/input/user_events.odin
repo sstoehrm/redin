@@ -82,6 +82,7 @@ get_user_events :: proc(
 				}
 			}
 
+		case types.ScrollEvent:
 		case types.ResizeEvent:
 		}
 	}

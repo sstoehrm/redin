@@ -498,6 +498,7 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 		if attrs_idx > 0 {
 			btn.aspect = lua_get_string_field(L, attrs_idx, "aspect")
 			btn.click = lua_get_event_name(L, attrs_idx, "click")
+			btn.click_ctx = lua_get_event_ctx(L, attrs_idx, "click")
 			btn.width = lua_get_size_f32(L, attrs_idx, "width")
 			btn.height = lua_get_size_f32(L, attrs_idx, "height")
 		}
@@ -688,9 +689,16 @@ deliver_events :: proc(b: ^Bridge, events: []types.InputEvent) {
 	}
 
 	lua_createtable(L, i32(len(events)), 0)
-	for event, i in events {
+	lua_idx: i32 = 0
+	for event in events {
+		if _, is_scroll := event.(types.ScrollEvent); is_scroll do continue
 		push_input_event_as_lua(L, event)
-		lua_rawseti(L, -2, i32(i + 1))
+		lua_idx += 1
+		lua_rawseti(L, -2, lua_idx)
+	}
+	if lua_idx == 0 {
+		lua_pop(L, 2) // pop empty table and redin_events
+		return
 	}
 
 	if lua_pcall(L, 1, 0, 0) != 0 {
@@ -735,6 +743,28 @@ deliver_dispatch_events :: proc(b: ^Bridge, events: []types.Dispatch_Event) {
 			lua_pushstring(L, val)
 			lua_setfield(L, -2, "value")
 			lua_rawseti(L, -2, 2)
+
+			lua_rawseti(L, -2, 2) // set dispatch wrapper as event[2]
+			lua_rawseti(L, -2, 1) // set as events[1]
+
+		case types.Click_Event:
+			// [:dispatch [:event-name context?]]
+			lua_createtable(L, 2, 0)
+			lua_pushstring(L, "dispatch")
+			lua_rawseti(L, -2, 1)
+
+			// Inner event: [:event-name] or [:event-name context]
+			inner_len: i32 = 1
+			if e.context_ref != 0 do inner_len = 2
+			lua_createtable(L, inner_len, 0)
+			ev_name := strings.clone_to_cstring(e.event_name, context.temp_allocator)
+			lua_pushstring(L, ev_name)
+			lua_rawseti(L, -2, 1)
+
+			if e.context_ref != 0 {
+				lua_rawgeti(L, LUA_REGISTRYINDEX, e.context_ref)
+				lua_rawseti(L, -2, 2)
+			}
 
 			lua_rawseti(L, -2, 2) // set dispatch wrapper as event[2]
 			lua_rawseti(L, -2, 1) // set as events[1]
@@ -856,6 +886,8 @@ push_input_event_as_lua :: proc(L: ^Lua_State, event: types.InputEvent) {
 		lua_pushlstring(L, cstring(raw_data(buf[:])), uint(n))
 		lua_rawseti(L, -2, 2)
 
+	case types.ScrollEvent:
+		// handled by render scroll state
 	case types.ResizeEvent:
 		lua_createtable(L, 3, 0)
 		lua_pushstring(L, "resize")
@@ -901,6 +933,21 @@ lua_get_event_name :: proc(L: ^Lua_State, index: i32, field: cstring) -> string 
 		}
 	}
 	return ""
+}
+
+// Read element 2 of an event vector field and store as a Lua registry ref.
+// Returns 0 if there is no context.
+lua_get_event_ctx :: proc(L: ^Lua_State, index: i32, field: cstring) -> i32 {
+	lua_getfield(L, index, field)
+	defer lua_pop(L, 1)
+	if lua_istable(L, -1) {
+		lua_rawgeti(L, -1, 2)
+		if !lua_isnil(L, -1) {
+			return luaL_ref(L, LUA_REGISTRYINDEX) // pops value, returns ref
+		}
+		lua_pop(L, 1)
+	}
+	return 0
 }
 
 lua_get_string_field_raw :: proc(L: ^Lua_State, index: i32, field: cstring) -> string {

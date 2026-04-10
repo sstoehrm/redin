@@ -125,6 +125,11 @@ poll :: proc() -> [dynamic]types.InputEvent {
 		}
 	}
 
+	wheel := rl.GetMouseWheelMove()
+	if wheel != 0 {
+		append(&events, types.InputEvent(types.ScrollEvent{x = mouse.x, y = mouse.y, delta = wheel}))
+	}
+
 	if rl.IsWindowResized() {
 		append(&events, types.InputEvent(types.ResizeEvent{}))
 	}
@@ -141,6 +146,18 @@ process_user_events :: proc(
 	node_rects: []rl.Rectangle,
 ) -> [dynamic]types.Dispatch_Event {
 	dispatch: [dynamic]types.Dispatch_Event
+
+	// Handle click events for buttons (independent of focus state)
+	for ue in user_events {
+		if ue.event != .CLICK do continue
+		if ue.node_idx < 0 || ue.node_idx >= len(nodes) do continue
+		if btn, ok := nodes[ue.node_idx].(types.NodeButton); ok && len(btn.click) > 0 {
+			append(&dispatch, types.Dispatch_Event(types.Click_Event{
+				event_name  = btn.click,
+				context_ref = btn.click_ctx,
+			}))
+		}
+	}
 
 	if !state.active || focused_idx < 0 || focused_idx >= len(nodes) {
 		return dispatch
@@ -236,6 +253,7 @@ process_user_events :: proc(
 				}
 			}
 
+		case types.ScrollEvent:
 		case types.ResizeEvent:
 		}
 	}

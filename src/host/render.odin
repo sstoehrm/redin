@@ -15,6 +15,50 @@ px :: proc(v: f32) -> f32 { return math.round(v) }
 // Used by input handling for hit testing in the next frame.
 node_rects: [dynamic]rl.Rectangle
 
+// Per-node scroll offsets for overflow containers.
+scroll_offsets: map[int]f32
+
+SCROLL_SPEED :: 30.0 // pixels per wheel tick
+
+apply_scroll_events :: proc(events: []types.InputEvent, nodes: []types.Node) {
+	for event in events {
+		if se, ok := event.(types.ScrollEvent); ok {
+			pt := rl.Vector2{se.x, se.y}
+			// Find the deepest scrollable node under the mouse
+			best_idx := -1
+			best_area: f32 = max(f32)
+			for idx in 0 ..< len(nodes) {
+				overflow := ""
+				switch n in nodes[idx] {
+				case types.NodeVbox:
+					overflow = n.overflow
+				case types.NodeHbox:
+					overflow = n.overflow
+				case types.NodeStack, types.NodeCanvas, types.NodeInput,
+					types.NodeButton, types.NodeText, types.NodeImage,
+					types.NodePopout, types.NodeModal:
+				}
+				if overflow != "scroll-y" do continue
+				if idx >= len(node_rects) do continue
+				r := node_rects[idx]
+				if rl.CheckCollisionPointRec(pt, r) {
+					area := r.width * r.height
+					if area < best_area {
+						best_area = area
+						best_idx = idx
+					}
+				}
+			}
+			if best_idx >= 0 {
+				offset := scroll_offsets[best_idx] if best_idx in scroll_offsets else 0
+				offset -= se.delta * SCROLL_SPEED
+				if offset < 0 do offset = 0
+				scroll_offsets[best_idx] = offset
+			}
+		}
+	}
+}
+
 render_tree :: proc(
 	theme: map[string]types.Theme,
 	nodes: []types.Node,
@@ -50,9 +94,9 @@ render_node :: proc(
 	case types.NodeStack:
 		render_children_stack(idx, rect, nodes, children_list, theme)
 	case types.NodeVbox:
-		draw_box(idx, rect, n.aspect, n.layoutX, true, nodes, children_list, theme)
+		draw_box(idx, rect, n.aspect, n.layoutX, true, n.overflow, nodes, children_list, theme)
 	case types.NodeHbox:
-		draw_box(idx, rect, n.aspect, n.layoutX, false, nodes, children_list, theme)
+		draw_box(idx, rect, n.aspect, n.layoutX, false, n.overflow, nodes, children_list, theme)
 	case types.NodeCanvas:
 		// Draw aspect chrome (bg, border, radius, padding)
 		content_rect := rect
@@ -139,6 +183,7 @@ draw_box :: proc(
 	aspect: string,
 	layoutX: types.LayoutX,
 	vertical: bool,
+	overflow: string,
 	nodes: []types.Node,
 	children_list: []types.Children,
 	theme: map[string]types.Theme,
@@ -165,6 +210,8 @@ draw_box :: proc(
 	ch := children_list[idx]
 	if ch.length == 0 do return
 
+	scrollable := overflow == "scroll-y" && vertical
+
 	// First pass: sum fixed sizes, count fill nodes
 	fixed_total: f32 = 0
 	fill_count: int = 0
@@ -181,14 +228,36 @@ draw_box :: proc(
 
 	available := vertical ? content_rect.height : content_rect.width
 	fill_size: f32 = 0
-	if fill_count > 0 {
+
+	if scrollable {
+		// In scroll mode, give fill nodes a zero size (content determines layout)
+		fill_size = 0
+	} else if fill_count > 0 {
 		remaining := available - fixed_total
 		if remaining > 0 do fill_size = remaining / f32(fill_count)
 	}
 
+	// Scroll offset
+	scroll_off: f32 = 0
+	if scrollable {
+		scroll_off = scroll_offsets[idx] if idx in scroll_offsets else 0
+		// Clamp scroll to content bounds
+		total_content := fixed_total
+		max_scroll := total_content - content_rect.height
+		if max_scroll < 0 do max_scroll = 0
+		if scroll_off > max_scroll do scroll_off = max_scroll
+		if scroll_off < 0 do scroll_off = 0
+		scroll_offsets[idx] = scroll_off
+
+		rl.BeginScissorMode(
+			i32(content_rect.x), i32(content_rect.y),
+			i32(content_rect.width), i32(content_rect.height),
+		)
+	}
+
 	// Second pass: layout and render
 	center := layoutX == .CENTER
-	pos := vertical ? content_rect.y : content_rect.x
+	pos := (vertical ? content_rect.y : content_rect.x) - scroll_off
 
 	for i in 0 ..< int(ch.length) {
 		child_idx := int(ch.value[i])
@@ -216,6 +285,27 @@ draw_box :: proc(
 		}
 
 		render_node(child_idx, child_rect, nodes, children_list, theme)
+	}
+
+	if scrollable {
+		rl.EndScissorMode()
+
+		// Draw scroll bar if content overflows
+		total_content := fixed_total
+		if total_content > content_rect.height {
+			bar_w: f32 = 4
+			bar_x := content_rect.x + content_rect.width - bar_w
+			visible_ratio := content_rect.height / total_content
+			bar_h := max(content_rect.height * visible_ratio, 20)
+			max_scroll := total_content - content_rect.height
+			scroll_ratio := scroll_off / max_scroll if max_scroll > 0 else 0
+			bar_y := content_rect.y + scroll_ratio * (content_rect.height - bar_h)
+			rl.DrawRectangleRounded(
+				{bar_x, bar_y, bar_w, bar_h},
+				1, 4,
+				rl.Color{200, 200, 200, 120},
+			)
+		}
 	}
 }
 

@@ -9,7 +9,7 @@ fira_code_bold     := #load("FiraCode-Bold.ttf")
 noto_serif_regular := #load("NotoSerif-Regular.ttf")
 noto_serif_bold    := #load("NotoSerif-Bold.ttf")
 
-DEFAULT_FONT_SIZE :: 96
+DEFAULT_FONT_SIZE :: 64
 
 load_embedded :: proc() {
 	load_font :: proc(name: string, style: Font_Style, data: []u8) {

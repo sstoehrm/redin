@@ -88,17 +88,18 @@ NodeInput :: struct {
 }
 
 NodeButton :: struct {
-	click:  string,
-	width:  union {
+	click:     string,
+	click_ctx: i32, // Lua registry ref for click context (0 = none)
+	width:     union {
 		SizeValue,
 		f32,
 	},
-	height: union {
+	height:    union {
 		SizeValue,
 		f32,
 	},
-	label:  string,
-	aspect: string,
+	label:     string,
+	aspect:    string,
 }
 
 NodeText :: struct {

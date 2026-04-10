@@ -26,10 +26,16 @@ MouseEvent :: struct {
 
 ResizeEvent :: struct {}
 
+ScrollEvent :: struct {
+	x, y:  f32, // mouse position
+	delta: f32, // wheel delta (positive = up)
+}
+
 InputEvent :: union {
 	KeyEvent,
 	CharEvent,
 	MouseEvent,
+	ScrollEvent,
 	ResizeEvent,
 }
 
@@ -44,7 +50,13 @@ Key_Event_Dispatch :: struct {
 	mods:       KeyMods,
 }
 
+Click_Event :: struct {
+	event_name: string,
+	context_ref: i32, // Lua registry ref for click context (0 = none)
+}
+
 Dispatch_Event :: union {
 	Change_Event,
 	Key_Event_Dispatch,
+	Click_Event,
 }

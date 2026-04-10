@@ -112,6 +112,8 @@ main :: proc() {
 		defer delete(dispatch_events)
 		bridge.deliver_dispatch_events(&b, dispatch_events[:])
 
+		apply_scroll_events(input_events[:], b.nodes[:])
+
 		rl.BeginDrawing()
 		rl.ClearBackground({255, 255, 255, 255})
 

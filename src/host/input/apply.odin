@@ -43,7 +43,7 @@ apply_listeners :: proc(
 				focused_idx = -1
 			}
 
-		case types.KeyEvent, types.CharEvent, types.ResizeEvent:
+		case types.KeyEvent, types.CharEvent, types.ScrollEvent, types.ResizeEvent:
 		}
 	}
 
