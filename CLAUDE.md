@@ -83,6 +83,24 @@ src/runtime/        Fennel runtime (loaded by bridge at startup)
   theme.fnl         Theme storage, resolution, validation
 ```
 
+## Dev server HTTP API
+
+Available when running with `--dev` on `http://localhost:8800`. Used by UI tests and for interactive debugging.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/frames` | Last pushed frame (view tree as JSON) |
+| `GET` | `/state` | Full app state |
+| `GET` | `/state/<dot.path>` | Nested state lookup (e.g. `/state/form.name`) |
+| `GET` | `/aspects` | Current theme map |
+| `GET` | `/screenshot` | PNG screenshot of the window |
+| `POST` | `/events` | Dispatch an event (JSON body: `[:event-name, payload]`) |
+| `POST` | `/click` | Inject a mouse click (JSON body: `{"x":N,"y":N}`) |
+| `POST` | `/shutdown` | Request graceful shutdown |
+| `PUT` | `/aspects` | Replace the theme map (JSON body) |
+
+Example: `curl http://localhost:8800/state/counter`
+
 ## Key conventions
 
 - Node types: `NodeStack`, `NodeCanvas`, `NodeVbox`, `NodeHbox`, `NodeInput`, `NodeButton`, `NodeText`, `NodeImage`, `NodePopout`, `NodeModal`
