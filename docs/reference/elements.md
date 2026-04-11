@@ -16,10 +16,6 @@ Reference for all element tags in redin frames.
 | `image` | Implemented |
 | `popout` | Implemented |
 | `modal` | Implemented |
-| `scroll` | Not yet implemented |
-| `grid` | Not yet implemented |
-| `spacer` | Not yet implemented |
-| `divider` | Not yet implemented |
 
 ---
 
@@ -185,38 +181,6 @@ The element's `width` and `height` define the render texture size. See the [canv
 
 ---
 
-### `spacer` (not yet implemented)
-
-Flexible empty space. Expands along the parent's main axis, pushing siblings apart.
-
-**Required attrs:** none
-**Optional attrs:** none beyond the common set.
-
-```fennel
-[:hbox {:gap 8}
-  [:text {:aspect :label} "File"]
-  [:spacer {}]
-  [:text {:aspect :muted} "Saved"]]
-```
-
----
-
-### `divider` (not yet implemented)
-
-A visual separator line. Automatically orients based on the parent container direction.
-
-**Required attrs:** none
-**Optional attrs:** none beyond the common set.
-
-```fennel
-[:vbox {:gap 4}
-  [:text {:aspect :label} "Section A"]
-  [:divider {:aspect :divider}]
-  [:text {:aspect :label} "Section B"]]
-```
-
----
-
 ## Container elements
 
 Container elements hold child frames. Children are passed as positional arguments after the attrs table.
@@ -228,13 +192,32 @@ Container elements hold child frames. Children are passed as positional argument
 All children receive the full available space and overlap. Use for layering (e.g., a canvas background behind content).
 
 **Required attrs:** none
-**Optional attrs:** none beyond the common set.
+
+**Optional attrs:**
+
+| Attribute | Type | Default | Notes |
+| --------- | ---- | ------- | ----- |
+| `viewport` | `[[x y w h] ...]` | -- | Array of rects, one per child. Positions children absolutely relative to the window. |
+
+Each viewport value can be:
+- **px number** -- fixed pixels (e.g. `42`, `250`)
+- **`:full`** -- full window dimension
+- **Fraction keyword** -- `:M_N` resolves to `M/N` of the window dimension (e.g. `:1_2` = 50%, `:3_4` = 75%)
+
+When `viewport` is set, the entry count must exactly match the child count. The viewport rect overrides any `width`/`height` on the child.
 
 ```fennel
+;; Basic stack (no viewport) -- children overlap at full size
 [:stack {}
   [:canvas {:provider :dot-grid :width "full" :height "full"}]
   [:vbox {:gap 16}
     [:text {:aspect :heading} "App title"]]]
+
+;; Viewport stack -- absolute positioning
+[:stack {:viewport [[0 0 :full :full]
+                    [:1_2 :1_2 :1_4 42]]}
+  [:vbox {:aspect :surface} ...]
+  [:hbox {:aspect :body} ...]]
 ```
 
 ---
@@ -336,53 +319,6 @@ Visual properties come from `aspect`.
 
 ---
 
-### `scroll` (not yet implemented)
-
-A scrollable viewport. Clips its child and reveals it via scroll position.
-
-**Constraint: exactly 1 child.**
-
-**Required attrs:** none
-
-**Optional attrs:**
-
-| Attribute | Type | Default | Notes |
-| --------- | ---- | ------- | ----- |
-| `direction` | `"vertical"` \| `"horizontal"` \| `"both"` | `"vertical"` | Scrollable axes. |
-| `offset` | `[x y]` | `[0 0]` | Current scroll position in pixels. |
-
-```fennel
-[:scroll {:direction "vertical" :height 300}
-  [:vbox {:gap 8}
-    (icollect [_ item (ipairs items)]
-      [:text {:aspect :body} item.label])]]
-```
-
----
-
-### `grid` (not yet implemented)
-
-A two-dimensional grid layout. Children fill cells left-to-right, wrapping to the next row.
-
-**Required attrs:** `cols`
-
-**Optional attrs:**
-
-| Attribute | Type | Default | Notes |
-| --------- | ---- | ------- | ----- |
-| `cols` | number | -- | Number of columns. **Required.** |
-| `gap` | px number | `0` | Uniform gap between cells. |
-| `row-gap` | px number | value of `gap` | Row spacing override. |
-| `col-gap` | px number | value of `gap` | Column spacing override. |
-
-```fennel
-[:grid {:cols 3 :gap 16}
-  (icollect [_ item (ipairs items)]
-    [:text {:aspect :body} item.name])]
-```
-
----
-
 ## Validation rules
 
 The frame validator checks the following. Invalid frames are rejected before reaching layout.
@@ -390,8 +326,7 @@ The frame validator checks the following. Invalid frames are rejected before rea
 | Rule | Detail |
 | ---- | ------ |
 | **Known tag** | The tag must be one of the registered element names. |
-| **Required attributes present** | `image` needs `src`; `canvas` needs `provider`; `input` needs `value`; `button` needs `click`; `grid` needs `cols`. |
+| **Required attributes present** | `image` needs `src`; `canvas` needs `provider`; `input` needs `value`; `button` needs `click`. |
 | **No visual properties** | `bg`, `color`, `border`, `font-size`, `weight`, `radius`, `border-width`, `opacity` are rejected on any element. |
-| **Leaf nodes have no children** | `text`, `image`, `input`, `button`, `spacer`, `divider`, `canvas` must not have child frames. |
-| **`scroll` has exactly 1 child** | Zero children or more than one child is an error. |
+| **Leaf nodes have no children** | `text`, `image`, `input`, `button`, `canvas` must not have child frames. |
 | **`modal` and `popout` not at root** | Both must be nested inside a container element. |

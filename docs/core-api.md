@@ -116,8 +116,6 @@ The flattening is a single pass when the frame enters the pipeline. No fragment 
 | `input`   | Editable text field.                                   | implemented   | --             |
 | `button`  | Clickable button. Last positional arg is the label.    | implemented   | --             |
 | `canvas`  | Independent render region. Runs a registered provider. | implemented   | `provider`     |
-| `spacer`  | Flexible empty space. Pushes siblings apart.           | planned       | --             |
-| `divider` | Visual separator. Auto-orients per parent direction.   | planned       | --             |
 
 **Container nodes** (have children):
 
@@ -128,8 +126,6 @@ The flattening is a single pass when the frame enters the pipeline. No fragment 
 | `vbox`   | Vertical flow. Children top to bottom.                    | implemented | --             |
 | `modal`  | Full-screen overlay. Blocks interaction behind it.        | implemented | --             |
 | `popout` | Anchored popup, escapes parent clipping.                  | implemented | --             |
-| `scroll` | Scrollable viewport. Exactly 1 child.                     | planned     | --             |
-| `grid`   | 2D grid layout.                                           | planned     | `cols`         |
 
 ### Attributes
 
@@ -147,6 +143,7 @@ The flattening is a single pass when the frame enters the pipeline. No fragment 
 | Attribute  | Type     | Applies to | Notes |
 | ---------- | -------- | ---------- | ----- |
 | `overflow` | string   | vbox, hbox | Overflow behavior (e.g. `"scroll-y"`) |
+| `viewport` | `[[x y w h] ...]` | stack | Absolute window-relative rects, one per child. Values: px, `"full"`, or `"M_N"` fraction. |
 
 **Element-specific:**
 
@@ -240,7 +237,6 @@ The theme is a global flat map: `keyword -> property-table`. Elements reference 
 |            | `gap`                                                                | px number                        |
 | Display    | `opacity`                                                            | 0--1                             |
 |            | `shadow`                                                             | `[x y blur [r g b a]]`           |
-| Scroll     | `scrollbar-width` `scrollbar-radius`                                 | px number                        |
 
 **Host-side representation:** On the Odin side, theme entries are stored as `Theme` structs with fields for `bg`, `color`, `border`, `padding`, `border_width`, `radius`, `weight`, `font_size`, and `opacity`. Not all Fennel-side properties are consumed by the Odin renderer yet.
 
@@ -252,14 +248,10 @@ text         .    x      .      x      .        .       .       .      x       .
 image        .    .      .      .      .        .       .       .      x       .
 hbox         x    .      .      .      x        .       .       x      x       .
 vbox         x    .      .      .      x        .       .       x      x       .
-scroll       x    .      .      .      x        .       .       .      x       .
 input        x    x      x      x      x        x       x       .      x       .
 button       x    x      .      .      .        x       .       .      .       .
 modal        x    .      .      .      .        .       .       .      x       .
 popout       x    .      x      .      x        x       x       .      x       x
-grid         x    .      .      .      x        .       .       x      x       .
-spacer       .    .      .      .      .        .       .       .      .       .
-divider      .    .      .      .      .        .       .       .      x       .
 canvas       x    .      x      .      x        x       x       .      x       .
 ```
 
@@ -310,7 +302,7 @@ Aspects should be named by role, not appearance:
 - **Typography:** `heading` `subheading` `body` `caption` `label` `mono` `display`
 - **Interactive:** `button` `button-secondary` `button-ghost` `input`
 - **Status:** `danger` `warning` `success` `info` `muted`
-- **Structure:** `divider` `overlay` `scrollbar`
+- **Structure:** `overlay` `scrollbar`
 
 ### Validation
 
