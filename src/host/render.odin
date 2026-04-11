@@ -495,6 +495,7 @@ draw_input :: proc(
 	font_size: f32 = 14
 	padding_l: f32 = 4
 	padding_r: f32 = 4
+	padding_t: f32 = 4
 	border_width: f32 = 1
 	font_name := "sans"
 	font_weight: u8 = 0
@@ -508,6 +509,7 @@ draw_input :: proc(
 			if t.border_width > 0 do border_width = f32(t.border_width)
 			if t.padding[3] > 0 do padding_l = f32(t.padding[3])
 			if t.padding[1] > 0 do padding_r = f32(t.padding[1])
+			if t.padding[0] > 0 do padding_t = f32(t.padding[0])
 			if len(t.font) > 0 do font_name = t.font
 			font_weight = t.weight
 		}
@@ -525,14 +527,15 @@ draw_input :: proc(
 
 	// Content area
 	content_x := rect.x + padding_l
-	content_y := rect.y
+	content_y := rect.y + padding_t
 	content_w := rect.width - padding_l - padding_r
-	content_h := rect.height
+	content_h := rect.height - padding_t * 2
 
 	f := font.get(font_name, font.style_from_weight(font.Font_Weight(font_weight)))
 	spacing: f32 = 0
+	lh := text_pkg.line_height(font_size)
 
-	// Determine what text to display
+	// Determine text to display
 	display_text: string
 	show_placeholder := false
 	if is_focused && input.state.active {
@@ -544,76 +547,93 @@ draw_input :: proc(
 		show_placeholder = true
 	}
 
-	// Scissor clip to content area
-	rl.BeginScissorMode(i32(content_x), i32(content_y), i32(content_w), i32(content_h))
+	// Compute lines with word-wrap
+	lines := text_pkg.compute_lines(display_text, f, font_size, spacing, content_w)
+	defer delete(lines)
 
-	scroll_offset: f32 = 0
+	// Vertical scroll management — keep cursor visible
+	scroll_y: f32 = 0
 	if is_focused && input.state.active {
-		scroll_offset = input.state.scroll_offset_x
+		scroll_y = input.state.scroll_offset_y
+		cursor_line, _ := text_pkg.cursor_to_line(lines[:], input.state.cursor)
+		cursor_y_top := f32(cursor_line) * lh
+		cursor_y_bot := cursor_y_top + lh
+
+		if cursor_y_top < scroll_y {
+			scroll_y = cursor_y_top
+		} else if cursor_y_bot > scroll_y + content_h {
+			scroll_y = cursor_y_bot - content_h
+		}
+		if scroll_y < 0 do scroll_y = 0
+		input.state.scroll_offset_y = scroll_y
 	}
 
-	text_y := content_y + (content_h - font_size) / 2
+	// Scissor clip to content area
+	rl.BeginScissorMode(i32(content_x), i32(content_y), i32(content_w), i32(content_h))
 
 	// Draw selection highlight (behind text)
 	if is_focused && input.state.active && input.has_selection() {
 		lo, hi := input.selection_range()
-		lo_text := strings.clone_to_cstring(string(input.state.text[:lo]), context.temp_allocator)
-		hi_text := strings.clone_to_cstring(string(input.state.text[:hi]), context.temp_allocator)
-		lo_x := rl.MeasureTextEx(f, lo_text, font_size, spacing).x
-		hi_x := rl.MeasureTextEx(f, hi_text, font_size, spacing).x
-		sel_rect := rl.Rectangle{content_x + lo_x - scroll_offset, text_y, hi_x - lo_x, font_size}
-		rl.DrawRectangleRec(sel_rect, selection_color)
-	}
+		for line, i in lines {
+			ly := content_y + f32(i) * lh - scroll_y
+			if ly + lh < content_y || ly > content_y + content_h do continue
 
-	// Draw text
-	if len(display_text) > 0 {
-		cstr := strings.clone_to_cstring(display_text, context.temp_allocator)
-		color := show_placeholder ? placeholder_color : text_color
-		rl.DrawTextEx(f, cstr, {px(content_x - scroll_offset), px(text_y)}, font_size, spacing, color)
-	}
+			sel_start := max(lo, line.start)
+			sel_end := min(hi, line.end)
+			if sel_start >= sel_end do continue
 
-	// Draw cursor with bottom-to-top wipe animation
-	if is_focused && input.state.active {
-		cursor_text := strings.clone_to_cstring(
-			string(input.state.text[:input.state.cursor]),
-			context.temp_allocator,
-		)
-		cursor_x_offset := rl.MeasureTextEx(f, cursor_text, font_size, spacing).x
-		cursor_x := content_x + cursor_x_offset - scroll_offset
-
-		// Update scroll offset to keep cursor visible
-		if cursor_x < content_x {
-			input.state.scroll_offset_x -= (content_x - cursor_x) + 10
-			if input.state.scroll_offset_x < 0 do input.state.scroll_offset_x = 0
-			cursor_x = content_x + cursor_x_offset - input.state.scroll_offset_x
-		} else if cursor_x > content_x + content_w - 2 {
-			input.state.scroll_offset_x += (cursor_x - (content_x + content_w - 2)) + 10
-			cursor_x = content_x + cursor_x_offset - input.state.scroll_offset_x
+			x0 := text_pkg.measure_range(display_text, line.start, sel_start, f, font_size, spacing)
+			x1 := text_pkg.measure_range(display_text, line.start, sel_end, f, font_size, spacing)
+			sel_rect := rl.Rectangle{content_x + x0, ly, x1 - x0, lh}
+			rl.DrawRectangleRec(sel_rect, selection_color)
 		}
+	}
 
-		// Bottom-to-top wipe animation
-		cycle := f32(rl.GetTime()) * 0.4 // 1Hz cycle
-		phase := cycle - f32(i32(cycle)) // 0..1 sawtooth
+	// Draw text lines
+	color := show_placeholder ? placeholder_color : text_color
+	for line, i in lines {
+		ly := content_y + f32(i) * lh - scroll_y
+		if ly + lh < content_y do continue
+		if ly > content_y + content_h do break
+
+		if line.start < line.end {
+			cstr := strings.clone_to_cstring(display_text[line.start:line.end], context.temp_allocator)
+			rl.DrawTextEx(f, cstr, {px(content_x), px(ly)}, font_size, spacing, color)
+		}
+	}
+
+	// Draw cursor with wipe animation
+	if is_focused && input.state.active {
+		cursor_line, _ := text_pkg.cursor_to_line(lines[:], input.state.cursor)
+		cur_line := lines[cursor_line]
+		cursor_x_offset := text_pkg.measure_range(
+			display_text, cur_line.start, input.state.cursor, f, font_size, spacing,
+		)
+		cursor_x := content_x + cursor_x_offset
+		cursor_y := content_y + f32(cursor_line) * lh - scroll_y
+
+		cycle := f32(rl.GetTime()) * 0.4
+		phase := cycle - f32(i32(cycle))
 		wave: f32
 		if phase < 0.5 {
-			wave = phase * 2 // 0->1 (fade in)
+			wave = phase * 2
 		} else {
-			wave = (1 - phase) * 2 // 1->0 (fade out)
+			wave = (1 - phase) * 2
 		}
 
 		CURSOR_SLICES :: 8
-		slice_h := font_size / f32(CURSOR_SLICES)
-		for i in 0 ..< i32(CURSOR_SLICES) {
-			norm := 1.0 - (f32(i) + 0.5) / f32(CURSOR_SLICES)
+		slice_h := lh / f32(CURSOR_SLICES)
+		for s in 0 ..< i32(CURSOR_SLICES) {
+			norm := 1.0 - (f32(s) + 0.5) / f32(CURSOR_SLICES)
 			alpha_norm := clamp(wave * 2.0 - norm, 0, 1)
 			alpha := u8(alpha_norm * f32(text_color.a))
-			slice_y := text_y + f32(i) * slice_h
-			color := rl.Color{text_color.r, text_color.g, text_color.b, alpha}
+			slice_y := cursor_y + f32(s) * slice_h
+			c := rl.Color{text_color.r, text_color.g, text_color.b, alpha}
 			rl.DrawLineEx(
 				rl.Vector2{cursor_x, slice_y},
 				rl.Vector2{cursor_x, slice_y + slice_h},
 				1.5,
-				color,
+				c,
 			)
 		}
 	}
