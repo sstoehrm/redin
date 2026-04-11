@@ -23,10 +23,21 @@ ChangeListener :: struct {
 	node_idx: int,
 }
 
+DragListener :: struct {
+	node_idx: int,
+}
+
+DropListener :: struct {
+	node_idx: int,
+	group:    string,
+}
+
 Listener :: union {
 	HoverListener,
 	FocusListener,
 	ClickListener,
 	KeyListener,
 	ChangeListener,
+	DragListener,
+	DropListener,
 }

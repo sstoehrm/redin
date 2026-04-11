@@ -52,7 +52,8 @@ get_user_events :: proc(
 							types.UserEvent{event = .FOCUS, node_idx = l.node_idx},
 						)
 					}
-				case types.HoverListener, types.KeyListener, types.ChangeListener:
+				case types.HoverListener, types.KeyListener, types.ChangeListener,
+				     types.DragListener, types.DropListener:
 				}
 			}
 

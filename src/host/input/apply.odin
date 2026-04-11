@@ -35,7 +35,8 @@ apply_listeners :: proc(
 					   rl.CheckCollisionPointRec(mouse, node_rects[l.node_idx]) {
 						append(&applied, types.ApplyEvents(types.ApplyActive{idx = l.node_idx}))
 					}
-				case types.HoverListener, types.KeyListener, types.ChangeListener:
+				case types.HoverListener, types.KeyListener, types.ChangeListener,
+				     types.DragListener, types.DropListener:
 				}
 			}
 

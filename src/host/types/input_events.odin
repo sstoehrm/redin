@@ -55,8 +55,21 @@ Click_Event :: struct {
 	context_ref: i32, // Lua registry ref for click context (0 = none)
 }
 
+Drag_Event :: struct {
+	event_name:  string,
+	context_ref: i32, // Lua registry ref for drag payload
+}
+
+Drop_Event :: struct {
+	event_name: string,
+	from_ref:   i32, // Lua registry ref for drag source payload
+	to_ref:     i32, // Lua registry ref for drop target payload
+}
+
 Dispatch_Event :: union {
 	Change_Event,
 	Key_Event_Dispatch,
 	Click_Event,
+	Drag_Event,
+	Drop_Event,
 }
