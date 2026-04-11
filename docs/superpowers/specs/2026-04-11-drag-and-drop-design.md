@@ -199,6 +199,40 @@ if input.drag_over_idx == idx {
 | `src/host/render.odin` | Apply `#drag-start` and `#drag` theme variants |
 | `src/host/main.odin` | Wire drag state updates into the main loop |
 | `src/runtime/theme.fnl` | No changes needed (variant resolution already handles arbitrary `#suffix` keys) |
+| `src/host/bridge/devserver.odin` | Add `POST /drag` endpoint for UI testing |
+| `test/ui/drag_app.fnl` | New: minimal drag-and-drop test app |
+| `test/ui/test_drag.bb` | New: drag-and-drop UI tests |
+
+## UI test
+
+Following existing convention (`test/ui/<component>_app.fnl` + `test/ui/test_<component>.bb`):
+
+### Dev server: `POST /drag` endpoint
+
+Simulates a full drag-and-drop gesture by injecting input events. JSON body:
+
+```json
+{"from": {"x": N, "y": N}, "to": {"x": N, "y": N}}
+```
+
+Injects a MouseEvent sequence: mouse-down at `from`, mouse-move beyond threshold, mouse-up at `to`. This reuses the existing `event_queue` mechanism from `POST /click`.
+
+### Test app: `test/ui/drag_app.fnl`
+
+Minimal app with a list of items that have `:draggable` and `:dropable` attrs. Handlers:
+- `:event/drag` — stores the drag payload in state (for verifying drag-start fired)
+- `:event/drop` — reorders items using `from`/`to` payloads
+- `:event/reset` — resets state
+
+State shape: `{:items [{:text "A"} {:text "B"} {:text "C"}] :last-drag nil :last-drop nil}`
+
+### Test file: `test/ui/test_drag.bb`
+
+Tests:
+- **Frame structure**: draggable/dropable attrs present on list items
+- **Drop reorders state**: dispatch `[:event/drop {:from 1 :to 3}]` via `POST /events`, verify items reordered in state
+- **Drag event fires**: dispatch `[:event/drag {:value 2}]`, verify `last-drag` updated
+- **Integration via POST /drag**: use the new endpoint to simulate a full drag gesture between two item positions, verify state reflects the reorder
 
 ## Not in scope
 
