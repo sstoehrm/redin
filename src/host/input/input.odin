@@ -35,8 +35,20 @@ extract_listeners :: proc(
 			aspect = n.aspect
 		case types.NodeVbox:
 			aspect = n.aspect
+			if len(n.draggable_group) > 0 {
+				append(&listeners, types.Listener(types.DragListener{node_idx = idx}))
+			}
+			if len(n.dropable_group) > 0 {
+				append(&listeners, types.Listener(types.DropListener{node_idx = idx, group = n.dropable_group}))
+			}
 		case types.NodeHbox:
 			aspect = n.aspect
+			if len(n.draggable_group) > 0 {
+				append(&listeners, types.Listener(types.DragListener{node_idx = idx}))
+			}
+			if len(n.dropable_group) > 0 {
+				append(&listeners, types.Listener(types.DropListener{node_idx = idx, group = n.dropable_group}))
+			}
 		case types.NodeText:
 			aspect = n.aspect
 		case types.NodeImage:
