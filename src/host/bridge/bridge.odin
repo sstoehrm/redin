@@ -399,7 +399,39 @@ lua_flatten_node :: proc(L: ^Lua_State, index: i32, cur: ^[dynamic]u8, b: ^Bridg
 lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: string) -> types.Node {
 	switch tag {
 	case "stack":
-		return types.NodeStack{}
+		s: types.NodeStack
+		if attrs_idx > 0 {
+			lua_getfield(L, attrs_idx, "viewport")
+			defer lua_pop(L, 1)
+			if lua_istable(L, -1) {
+				vp_idx := lua_gettop(L)
+				count := int(lua_objlen(L, vp_idx))
+				if count > int(types.MAX_VIEWPORT_RECTS) do count = int(types.MAX_VIEWPORT_RECTS)
+				s.viewport_count = u8(count)
+				for i in 0 ..< count {
+					lua_rawgeti(L, vp_idx, i32(i + 1))
+					if lua_istable(L, -1) {
+						rect_idx := lua_gettop(L)
+						for j in 0 ..< 4 {
+							lua_rawgeti(L, rect_idx, i32(j + 1))
+							if lua_isnumber(L, -1) {
+								s.viewport[i][j] = f32(lua_tonumber(L, -1))
+							} else if lua_isstring(L, -1) {
+								str := string(lua_tostring_raw(L, -1))
+								if str == "full" {
+									s.viewport[i][j] = types.SizeValue.FULL
+								} else {
+									s.viewport[i][j] = parse_fraction(str)
+								}
+							}
+							lua_pop(L, 1)
+						}
+					}
+					lua_pop(L, 1)
+				}
+			}
+		}
+		return s
 
 	case "canvas":
 		c: types.NodeCanvas
@@ -897,6 +929,33 @@ push_input_event_as_lua :: proc(L: ^Lua_State, event: types.InputEvent) {
 		lua_pushnumber(L, f64(rl.GetScreenHeight()))
 		lua_rawseti(L, -2, 3)
 	}
+}
+
+// Parse a fraction string like "1_2" -> Fraction{1, 2}, "3_4" -> Fraction{3, 4}.
+// Returns Fraction{0, 0} on parse failure.
+parse_fraction :: proc(s: string) -> types.ViewportValue {
+	for i in 0 ..< len(s) {
+		if s[i] == '_' && i > 0 && i < len(s) - 1 {
+			num: u8 = 0
+			den: u8 = 0
+			num_ok := true
+			den_ok := true
+			for j in 0 ..< i {
+				d := s[j]
+				if d < '0' || d > '9' { num_ok = false; break }
+				num = num * 10 + (d - '0')
+			}
+			for j in i + 1 ..< len(s) {
+				d := s[j]
+				if d < '0' || d > '9' { den_ok = false; break }
+				den = den * 10 + (d - '0')
+			}
+			if num_ok && den_ok && den > 0 {
+				return types.Fraction{num, den}
+			}
+		}
+	}
+	return types.Fraction{0, 0}
 }
 
 // ---------------------------------------------------------------------------
