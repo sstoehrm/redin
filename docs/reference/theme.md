@@ -108,13 +108,9 @@ text         .    x      .      x      .        .       .       .      x       .
 image        .    .      .      .      .        .       .       .      x       .
 hbox         x    .      .      .      x        .       .       x      x       .
 vbox         x    .      .      .      x        .       .       x      x       .
-scroll       x    .      .      .      x        .       .       .      x       .
 input        x    x      x      x      x        x       x       .      x       .
 modal        x    .      .      .      .        .       .       .      x       .
 popout       x    .      x      .      x        x       x       .      x       x
-grid         x    .      .      .      x        .       .       x      x       .
-spacer       .    .      .      .      .        .       .       .      .       .
-divider      .    .      .      .      .        .       .       .      x       .
 canvas       x    .      x      .      x        x       x       .      x       .
 ```
 
@@ -146,10 +142,12 @@ State variants use `#` notation. The renderer resolves variants by appending `#s
 
 | State    | Suffix       | Trigger             |
 | -------- | ------------ | ------------------- |
-| hover    | `#hover`     | Cursor over element |
-| focus    | `#focus`     | Keyboard focus      |
-| active   | `#active`    | Mouse button down   |
-| disabled | `#disabled`  | Disabled element    |
+| hover      | `#hover`      | Cursor over element                    |
+| focus      | `#focus`      | Keyboard focus                         |
+| active     | `#active`     | Mouse button down                      |
+| disabled   | `#disabled`   | Disabled element                       |
+| drag-start | `#drag-start` | Node is being dragged                  |
+| drag       | `#drag`       | Compatible drag hovers over drop target |
 
 ```fennel
 {:button        {:bg [76 86 106] :color [236 239 244]}
@@ -180,7 +178,7 @@ Aspects should be named by role, not by appearance.
 | Typography  | `heading` `subheading` `body` `caption` `label` `mono` |
 | Interactive | `button` `input` |
 | Status      | `danger` `warning` `success` `info` `muted` |
-| Structure   | `divider` `overlay` |
+| Structure   | `overlay` |
 
 ---
 
