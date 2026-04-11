@@ -545,7 +545,7 @@ draw_input :: proc(
 
 	scroll_offset: f32 = 0
 	if is_focused && input.state.active {
-		scroll_offset = input.state.scroll_offset
+		scroll_offset = input.state.scroll_offset_x
 	}
 
 	text_y := content_y + (content_h - font_size) / 2
@@ -579,12 +579,12 @@ draw_input :: proc(
 
 		// Update scroll offset to keep cursor visible
 		if cursor_x < content_x {
-			input.state.scroll_offset -= (content_x - cursor_x) + 10
-			if input.state.scroll_offset < 0 do input.state.scroll_offset = 0
-			cursor_x = content_x + cursor_x_offset - input.state.scroll_offset
+			input.state.scroll_offset_x -= (content_x - cursor_x) + 10
+			if input.state.scroll_offset_x < 0 do input.state.scroll_offset_x = 0
+			cursor_x = content_x + cursor_x_offset - input.state.scroll_offset_x
 		} else if cursor_x > content_x + content_w - 2 {
-			input.state.scroll_offset += (cursor_x - (content_x + content_w - 2)) + 10
-			cursor_x = content_x + cursor_x_offset - input.state.scroll_offset
+			input.state.scroll_offset_x += (cursor_x - (content_x + content_w - 2)) + 10
+			cursor_x = content_x + cursor_x_offset - input.state.scroll_offset_x
 		}
 
 		// Bottom-to-top wipe animation

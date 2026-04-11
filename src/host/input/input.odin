@@ -256,7 +256,7 @@ process_user_events :: proc(
 				pt := rl.Vector2{e.x, e.y}
 				if rl.CheckCollisionPointRec(pt, rect) {
 					padding_l: f32 = 4
-					click_x := e.x - rect.x - padding_l + state.scroll_offset
+					click_x := e.x - rect.x - padding_l + state.scroll_offset_x
 					font_size: f32 = 14
 					f := rl.GetFontDefault()
 					spacing := font_size / 10

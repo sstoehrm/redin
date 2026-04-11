@@ -5,7 +5,8 @@ Input_State :: struct {
 	cursor:          int,    // byte offset
 	selection_start: int,    // byte offset, -1 = no selection
 	selection_end:   int,    // byte offset, -1 = no selection
-	scroll_offset:   f32,
+	scroll_offset_x: f32,
+	scroll_offset_y: f32,
 	last_dispatched: string,
 	active:          bool,
 }
@@ -31,7 +32,8 @@ focus_enter :: proc(value: string) {
 	state.cursor = len(state.text)
 	state.selection_start = -1
 	state.selection_end = -1
-	state.scroll_offset = 0
+	state.scroll_offset_x = 0
+	state.scroll_offset_y = 0
 	state.active = true
 	if len(state.last_dispatched) > 0 {
 		delete(state.last_dispatched)
