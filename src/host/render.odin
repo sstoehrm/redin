@@ -1,6 +1,7 @@
 package host
 
 import "canvas"
+import "core:fmt"
 import "core:math"
 import "core:strings"
 import "font"
@@ -10,6 +11,20 @@ import rl "vendor:raylib"
 
 // Snap to pixel grid for crisp text rendering
 px :: proc(v: f32) -> f32 { return math.round(v) }
+
+// Resolve a single ViewportValue to pixels given a window dimension.
+resolve_vp :: proc(v: types.ViewportValue, window_dim: f32) -> f32 {
+	switch val in v {
+	case f32:
+		return val
+	case types.SizeValue:
+		return window_dim
+	case types.Fraction:
+		if val.den == 0 do return 0
+		return (f32(val.num) / f32(val.den)) * window_dim
+	}
+	return 0
+}
 
 // Layout rects populated during render, indexed by node idx.
 // Used by input handling for hit testing in the next frame.
@@ -92,7 +107,11 @@ render_node :: proc(
 
 	switch n in nodes[idx] {
 	case types.NodeStack:
-		render_children_stack(idx, rect, nodes, children_list, theme)
+		if n.viewport_count > 0 {
+			render_children_viewport(idx, n, nodes, children_list, theme)
+		} else {
+			render_children_stack(idx, rect, nodes, children_list, theme)
+		}
 	case types.NodeVbox:
 		draw_box(idx, rect, n.aspect, n.layoutX, true, n.overflow, nodes, children_list, theme)
 	case types.NodeHbox:
@@ -173,6 +192,36 @@ render_children_stack :: proc(
 	for i in 0 ..< int(ch.length) {
 		child_idx := int(ch.value[i])
 		render_node(child_idx, rect, nodes, children_list, theme)
+	}
+}
+
+// stack with viewport: each child gets an absolute window-relative rect
+render_children_viewport :: proc(
+	idx: int,
+	stack: types.NodeStack,
+	nodes: []types.Node,
+	children_list: []types.Children,
+	theme: map[string]types.Theme,
+) {
+	ch := children_list[idx]
+	if int(ch.length) != int(stack.viewport_count) {
+		fmt.eprintfln("viewport: entry count %d != child count %d, skipping stack", stack.viewport_count, ch.length)
+		return
+	}
+
+	win_w := f32(rl.GetScreenWidth())
+	win_h := f32(rl.GetScreenHeight())
+
+	for i in 0 ..< int(ch.length) {
+		vr := stack.viewport[i]
+		child_rect := rl.Rectangle {
+			resolve_vp(vr[0], win_w),
+			resolve_vp(vr[1], win_h),
+			resolve_vp(vr[2], win_w),
+			resolve_vp(vr[3], win_h),
+		}
+		child_idx := int(ch.value[i])
+		render_node(child_idx, child_rect, nodes, children_list, theme)
 	}
 }
 
