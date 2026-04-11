@@ -725,7 +725,9 @@ draw_text :: proc(idx: int, rect: rl.Rectangle, n: types.NodeText, theme: map[st
 		scroll_x = scroll_offsets_x[idx] if idx in scroll_offsets_x else 0
 	}
 
-	if scrollable_y || scrollable_x {
+	// Clip when content may overflow the rect
+	needs_clip := scrollable_y || scrollable_x || (len(lines) > 1 && f32(len(lines)) * lh > rect.height)
+	if needs_clip {
 		rl.BeginScissorMode(i32(rect.x), i32(rect.y), i32(rect.width), i32(rect.height))
 	}
 
@@ -740,7 +742,7 @@ draw_text :: proc(idx: int, rect: rl.Rectangle, n: types.NodeText, theme: map[st
 		}
 	}
 
-	if scrollable_y || scrollable_x {
+	if needs_clip {
 		rl.EndScissorMode()
 	}
 }
