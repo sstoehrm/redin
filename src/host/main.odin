@@ -106,6 +106,13 @@ main :: proc() {
 			input.focus_leave()
 		}
 
+		// Process drag state machine
+		drag_events := input.process_drag(
+			input_events[:], listeners[:], b.nodes[:], node_rects[:],
+		)
+		defer delete(drag_events)
+		bridge.deliver_dispatch_events(&b, drag_events[:])
+
 		dispatch_events := input.process_user_events(
 			user_events[:], input_events[:], b.nodes[:], node_rects[:],
 		)

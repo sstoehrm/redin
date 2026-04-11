@@ -32,6 +32,7 @@ get_user_events :: proc(
 		switch e in event {
 		case types.MouseEvent:
 			if e.button != .LEFT do continue
+			if is_dragging() do continue
 			pt := rl.Vector2{e.x, e.y}
 
 			for listener in listeners {
