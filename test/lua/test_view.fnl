@@ -17,8 +17,7 @@
   (set _G.main_view
     (fn []
       (set called true)
-      {:frame [:vbox {} [:text {} "hello"]]
-       :bind {}}))
+      [:vbox {} [:text {} "hello"]]))
   (view.render-tick)
   (assert called "main_view was called"))
 
@@ -27,13 +26,11 @@
   (dataflow.init {:counter 0})
   (set _G.main_view
     (fn []
-      {:frame [:vbox {} [:text {} "hello"]]
-       :bind {}}))
+      [:vbox {} [:text {} "hello"]]))
   (view.render-tick)
   (let [state (view.get-last-push)]
     (assert state "push captured")
-    (assert (= (. state.frame 1) :vbox) "frame tag correct")
-    (assert state.bind "bindings captured")))
+    (assert (= (. state 1) :vbox) "frame tag correct")))
 
 (fn t.test-render-tick-skips-when-no-changes []
   (setup)
@@ -42,8 +39,7 @@
   (set _G.main_view
     (fn []
       (set call-count (+ call-count 1))
-      {:frame [:vbox {} [:text {} "hello"]]
-       :bind {}}))
+      [:vbox {} [:text {} "hello"]]))
   (view.render-tick)
   (assert (= call-count 1) "first tick renders")
   (view.render-tick)
@@ -59,8 +55,7 @@
   (set _G.main_view
     (fn []
       (set call-count (+ call-count 1))
-      {:frame [:vbox {} [:text {} (tostring (dataflow.subscribe :sub/counter))]]
-       :bind {}}))
+      [:vbox {} [:text {} (tostring (dataflow.subscribe :sub/counter))]]))
   (dataflow.reg-sub :sub/counter
     (fn [db] (dataflow.get db :counter)))
   (view.render-tick)
@@ -74,11 +69,10 @@
   (dataflow.init {})
   (set _G.main_view
     (fn []
-      {:frame [:vbox {} [[:text {} "a"] [:text {} "b"]]]
-       :bind {}}))
+      [:vbox {} [[:text {} "a"] [:text {} "b"]]]))
   (view.render-tick)
   (let [state (view.get-last-push)]
-    (assert (= (length state.frame) 4) "nested list flattened")))
+    (assert (= (length state) 4) "nested list flattened")))
 
 (fn t.test-render-tick-without-main-view []
   (setup)

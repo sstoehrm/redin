@@ -18,8 +18,8 @@
       (when view-fn
         (let [result (view-fn)]
           (when result
-            (let [flattened (frame.flatten result.frame)]
-              (set last-push {:frame flattened :bind result.bind})
+            (let [flattened (frame.flatten result)]
+              (set last-push flattened)
               (let [redin-tbl (rawget _G :redin)]
                 (when (and redin-tbl (rawget redin-tbl :push))
                   ((rawget redin-tbl :push) flattened))))))))

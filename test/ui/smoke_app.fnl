@@ -35,11 +35,10 @@
   (fn []
     (let [count (subscribe :sub/counter)
           msg (subscribe :sub/message)]
-      {:frame
-       [:vbox {}
-        [:text {:id :counter :aspect :heading} (tostring count)]
-        [:text {:id :message :aspect :body} msg]
-        [:button {:id :inc-btn :aspect :button
-                  :click [:event/inc]}
-                 "+1"]]
-       :bind {}})))
+      [:vbox {}
+       [:text {:id :counter :aspect :heading} (tostring count)]
+       [:text {:id :message :aspect :body} msg]
+       [:button {:id :inc-btn :aspect :button
+                 :click [:event/inc]}
+                "+1"]])))
+

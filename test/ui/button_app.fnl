@@ -36,20 +36,18 @@
   (fn []
     (let [count (subscribe :sub/counter)
           action (subscribe :sub/last-action)]
-      {:frame
-       [:vbox {}
-        [:text {:id :counter :aspect :body} (tostring count)]
-        [:text {:id :last-action :aspect :body} action]
-        [:button {:id :inc-btn :aspect :button
-                  :click [:event/inc]
-                  :width 100 :height 36}
-                 "+1"]
-        [:button {:id :dec-btn :aspect :button
-                  :click [:event/dec]
-                  :width 100 :height 36}
-                 "-1"]
-        [:button {:id :reset-btn :aspect :button
-                  :click [:event/reset]
-                  :width 100 :height 36}
-                 "Reset"]]
-       :bind {}})))
+      [:vbox {}
+       [:text {:id :counter :aspect :body} (tostring count)]
+       [:text {:id :last-action :aspect :body} action]
+       [:button {:id :inc-btn :aspect :button
+                 :click [:event/inc]
+                 :width 100 :height 36}
+                "+1"]
+       [:button {:id :dec-btn :aspect :button
+                 :click [:event/dec]
+                 :width 100 :height 36}
+                "-1"]
+       [:button {:id :reset-btn :aspect :button
+                 :click [:event/reset]
+                 :width 100 :height 36}
+                "Reset"]])))

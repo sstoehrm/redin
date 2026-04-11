@@ -59,17 +59,15 @@
           items (subscribe :submitted)
           count (subscribe :submitted-count)
           last-key (subscribe :last-key)]
-      {:frame
-       [:vbox {}
-        [:text {:id :title :aspect :heading} "Input Test"]
-        [:input {:id :test-input :aspect :input :width 250 :height 42
-                 :value input-val
-                 :placeholder "Type here..."
-                 :change [:event/input-change] :key [:event/input-key]}]
-        [:text {:id :current-value :aspect :body} (.. "value:" input-val)]
-        [:text {:id :submitted-count :aspect :body} (.. "count:" (tostring count))]
-        [:text {:id :last-key :aspect :body} (.. "key:" (or last-key ""))]
-        [:vbox {:id :submitted-list}
-         (icollect [i item (ipairs (or items []))]
-           [:text {:id (.. :item- (tostring i)) :aspect :body} item])]]
-       :bind {}})))
+      [:vbox {}
+       [:text {:id :title :aspect :heading} "Input Test"]
+       [:input {:id :test-input :aspect :input :width 250 :height 42
+                :value input-val
+                :placeholder "Type here..."
+                :change [:event/input-change] :key [:event/input-key]}]
+       [:text {:id :current-value :aspect :body} (.. "value:" input-val)]
+       [:text {:id :submitted-count :aspect :body} (.. "count:" (tostring count))]
+       [:text {:id :last-key :aspect :body} (.. "key:" (or last-key ""))]
+       [:vbox {:id :submitted-list}
+        (icollect [i item (ipairs (or items []))]
+          [:text {:id (.. :item- (tostring i)) :aspect :body} item])]])))

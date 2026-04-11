@@ -242,16 +242,14 @@ Subscriptions are not recomputed during flush. They recompute lazily on the next
 
 ### Views
 
-A view function returns `{:frame [...] :bind {}}`. It reads subscriptions and builds the frame tree from current state. The `:bind` table is currently unused (reserved for future use) but the API expects it.
+A view function returns a hiccup frame tree. It reads subscriptions and builds the tree from current state.
 
 ```fennel
 (fn main-view []
   (let [count (subscribe :sub/counter)]
-    {:frame
-     [:vbox {:aspect :surface}
-       [:text {:aspect :heading} (tostring count)]
-       [:button {:aspect :button :click [:event/increment]} "+1"]]
-     :bind {}}))
+    [:vbox {:aspect :surface}
+      [:text {:aspect :heading} (tostring count)]
+      [:button {:aspect :button :click [:event/increment]} "+1"]]))
 
 (global main_view main-view)
 ```
@@ -264,7 +262,7 @@ Each frame, the host calls `redin_render_tick`. The view runner:
 
 1. Checks if there are pending changes (or if this is the first render).
 2. Calls `dataflow.flush` to invalidate affected subscriptions.
-3. Calls `_G.main_view()` to get `{:frame ... :bind ...}`.
+3. Calls `_G.main_view()` to get the frame tree.
 4. Flattens the frame tree (splicing nested lists into the parent).
 5. Pushes the flattened frame to the host via `redin.push`.
 

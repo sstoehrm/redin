@@ -25,15 +25,13 @@
 (global main_view
   (fn []
     (let [count (subscribe :sub/counter)]
-      {:frame
-       [:stack {:viewport [[0 0 :full :full]
-                           [:1_2 0 :1_2 42]]}
-        [:vbox {:id :bg-layer :aspect :surface}
-         [:text {:id :title :aspect :body} "Background"]]
-        [:hbox {:id :overlay}
-         [:text {:id :counter :aspect :body} (tostring count)]
-         [:button {:id :inc-btn :aspect :button
-                   :click [:event/inc]
-                   :width 80 :height 36}
-                  "+1"]]]
-       :bind {}})))
+      [:stack {:viewport [[0 0 :full :full]
+                          [:1_2 0 :1_2 42]]}
+       [:vbox {:id :bg-layer :aspect :surface}
+        [:text {:id :title :aspect :body} "Background"]]
+       [:hbox {:id :overlay}
+        [:text {:id :counter :aspect :body} (tostring count)]
+        [:button {:id :inc-btn :aspect :button
+                  :click [:event/inc]
+                  :width 80 :height 36}
+                 "+1"]]])))
