@@ -36,10 +36,10 @@
           static (subscribe :static-text)
           newline (subscribe :newline-text)]
       [:vbox {:aspect :surface}
-       [:text {:id :wrap-text :aspect :body :width 200} static]
-       [:text {:id :newline-text :aspect :body :width 200} newline]
+       [:text {:id :wrap-text :aspect :body :width 200 :height 80} static]
+       [:text {:id :newline-text :aspect :body :width 200 :height 60} newline]
        [:text {:id :scroll-text :aspect :body :width 200 :height 40 :overflow :scroll-y} static]
        [:input {:id :test-input :aspect :input :width 250 :height 80
                 :value input-val
                 :change [:event/input-change]}]
-       [:text {:id :current-value :aspect :body} (.. "value:" input-val)]])))
+       [:text {:id :current-value :aspect :body :height 60} (.. "value:" input-val)]])))
