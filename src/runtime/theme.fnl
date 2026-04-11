@@ -52,13 +52,9 @@
    :image   {:opacity true}
    :hbox    {:bg true :padding true :gap true :opacity true}
    :vbox    {:bg true :padding true :gap true :opacity true}
-   :scroll  {:bg true :padding true :opacity true}
    :input   {:bg true :color true :border true :font true :font-size true :weight true :line-height true :align true :padding true :radius true :border-width true :opacity true}
    :modal   {:bg true :opacity true}
    :popout  {:bg true :border true :padding true :radius true :border-width true :opacity true :shadow true}
-   :grid    {:bg true :padding true :gap true :opacity true}
-   :spacer  {}
-   :divider {:opacity true}
    :canvas  {:bg true :border true :padding true :radius true :border-width true :opacity true}})
 
 (fn M.props-for [tag resolved-props]
