@@ -839,14 +839,58 @@ deliver_dispatch_events :: proc(b: ^Bridge, events: []types.Dispatch_Event) {
 			lua_rawseti(L, -2, 1) // set as events[1]
 
 		case types.Drag_Event:
-			// TODO: implement drag event delivery
-			lua_pop(L, 2) // pop events table and redin_events
-			continue
+			// [:dispatch [:event-name {:value payload}]]
+			lua_createtable(L, 2, 0)
+			lua_pushstring(L, "dispatch")
+			lua_rawseti(L, -2, 1)
+
+			lua_createtable(L, 2, 0)
+			ev_name := strings.clone_to_cstring(e.event_name, context.temp_allocator)
+			lua_pushstring(L, ev_name)
+			lua_rawseti(L, -2, 1)
+
+			// Context: {:value payload}
+			lua_createtable(L, 0, 1)
+			if e.context_ref != 0 {
+				lua_rawgeti(L, LUA_REGISTRYINDEX, e.context_ref)
+			} else {
+				lua_pushnil(L)
+			}
+			lua_setfield(L, -2, "value")
+			lua_rawseti(L, -2, 2)
+
+			lua_rawseti(L, -2, 2)
+			lua_rawseti(L, -2, 1)
 
 		case types.Drop_Event:
-			// TODO: implement drop event delivery
-			lua_pop(L, 2) // pop events table and redin_events
-			continue
+			// [:dispatch [:event-name {:from source-payload :to target-payload}]]
+			lua_createtable(L, 2, 0)
+			lua_pushstring(L, "dispatch")
+			lua_rawseti(L, -2, 1)
+
+			lua_createtable(L, 2, 0)
+			ev_name := strings.clone_to_cstring(e.event_name, context.temp_allocator)
+			lua_pushstring(L, ev_name)
+			lua_rawseti(L, -2, 1)
+
+			// Context: {:from source :to target}
+			lua_createtable(L, 0, 2)
+			if e.from_ref != 0 {
+				lua_rawgeti(L, LUA_REGISTRYINDEX, e.from_ref)
+			} else {
+				lua_pushnil(L)
+			}
+			lua_setfield(L, -2, "from")
+			if e.to_ref != 0 {
+				lua_rawgeti(L, LUA_REGISTRYINDEX, e.to_ref)
+			} else {
+				lua_pushnil(L)
+			}
+			lua_setfield(L, -2, "to")
+			lua_rawseti(L, -2, 2)
+
+			lua_rawseti(L, -2, 2)
+			lua_rawseti(L, -2, 1)
 		}
 
 		if lua_pcall(L, 1, 0, 0) != 0 {
