@@ -240,18 +240,49 @@ draw_box :: proc(
 	content_rect := rect
 
 	if len(aspect) > 0 {
+		bg_color: rl.Color
+		has_bg := false
+		pad: [4]u8
+
 		if t, ok := theme[aspect]; ok {
 			if t.bg != {} {
-				bg := rl.Color{t.bg[0], t.bg[1], t.bg[2], 255}
-				rl.DrawRectangleRec(rect, bg)
+				bg_color = rl.Color{t.bg[0], t.bg[1], t.bg[2], 255}
+				has_bg = true
 			}
-			if t.padding != {} {
-				content_rect = rl.Rectangle {
-					rect.x + f32(t.padding[3]),
-					rect.y + f32(t.padding[0]),
-					rect.width - f32(t.padding[1]) - f32(t.padding[3]),
-					rect.height - f32(t.padding[0]) - f32(t.padding[2]),
+			pad = t.padding
+		}
+
+		// Apply drag theme variants (override base)
+		if input.dragging_idx == idx {
+			drag_start_key := strings.concatenate({aspect, "#drag-start"}, context.temp_allocator)
+			if dt, ok := theme[drag_start_key]; ok {
+				if dt.bg != {} {
+					bg_color = rl.Color{dt.bg[0], dt.bg[1], dt.bg[2], 255}
+					has_bg = true
 				}
+				if dt.padding != {} do pad = dt.padding
+			}
+		}
+		if input.drag_over_idx == idx {
+			drag_key := strings.concatenate({aspect, "#drag"}, context.temp_allocator)
+			if dt, ok := theme[drag_key]; ok {
+				if dt.bg != {} {
+					bg_color = rl.Color{dt.bg[0], dt.bg[1], dt.bg[2], 255}
+					has_bg = true
+				}
+				if dt.padding != {} do pad = dt.padding
+			}
+		}
+
+		if has_bg {
+			rl.DrawRectangleRec(rect, bg_color)
+		}
+		if pad != {} {
+			content_rect = rl.Rectangle {
+				rect.x + f32(pad[3]),
+				rect.y + f32(pad[0]),
+				rect.width - f32(pad[1]) - f32(pad[3]),
+				rect.height - f32(pad[0]) - f32(pad[2]),
 			}
 		}
 	}
