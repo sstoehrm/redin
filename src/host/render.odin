@@ -107,7 +107,7 @@ render_node :: proc(
 
 	switch n in nodes[idx] {
 	case types.NodeStack:
-		if n.viewport_count > 0 {
+		if len(n.viewport) > 0 {
 			render_children_viewport(idx, n, nodes, children_list, theme)
 		} else {
 			render_children_stack(idx, rect, nodes, children_list, theme)
@@ -204,8 +204,8 @@ render_children_viewport :: proc(
 	theme: map[string]types.Theme,
 ) {
 	ch := children_list[idx]
-	if int(ch.length) != int(stack.viewport_count) {
-		fmt.eprintfln("viewport: entry count %d != child count %d, skipping stack", stack.viewport_count, ch.length)
+	if int(ch.length) != len(stack.viewport) {
+		fmt.eprintfln("viewport: entry count %d != child count %d, skipping stack", len(stack.viewport), ch.length)
 		return
 	}
 
@@ -215,10 +215,10 @@ render_children_viewport :: proc(
 	for i in 0 ..< int(ch.length) {
 		vr := stack.viewport[i]
 		child_rect := rl.Rectangle {
-			resolve_vp(vr[0], win_w),
-			resolve_vp(vr[1], win_h),
-			resolve_vp(vr[2], win_w),
-			resolve_vp(vr[3], win_h),
+			px(resolve_vp(vr[0], win_w)),
+			px(resolve_vp(vr[1], win_h)),
+			px(resolve_vp(vr[2], win_w)),
+			px(resolve_vp(vr[3], win_h)),
 		}
 		child_idx := int(ch.value[i])
 		render_node(child_idx, child_rect, nodes, children_list, theme)
