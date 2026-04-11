@@ -16,6 +16,21 @@ SizeValue :: enum {
 	FULL,
 }
 
+Fraction :: struct {
+	num: u8,
+	den: u8,
+}
+
+ViewportValue :: union {
+	f32,
+	SizeValue,
+	Fraction,
+}
+
+ViewportRect :: [4]ViewportValue
+
+MAX_VIEWPORT_RECTS :: 16
+
 Path :: struct {
 	value:  []u8,
 	length: u8,
@@ -26,7 +41,10 @@ Children :: struct {
 	length: i32,
 }
 
-NodeStack :: struct {}
+NodeStack :: struct {
+	viewport:       [MAX_VIEWPORT_RECTS]ViewportRect,
+	viewport_count: u8,
+}
 
 NodeCanvas :: struct {
 	provider: string,
