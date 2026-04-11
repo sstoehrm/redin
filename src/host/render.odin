@@ -6,6 +6,7 @@ import "core:math"
 import "core:strings"
 import "font"
 import "input"
+import text_pkg "text"
 import "types"
 import rl "vendor:raylib"
 
@@ -32,6 +33,7 @@ node_rects: [dynamic]rl.Rectangle
 
 // Per-node scroll offsets for overflow containers.
 scroll_offsets: map[int]f32
+scroll_offsets_x: map[int]f32
 
 SCROLL_SPEED :: 30.0 // pixels per wheel tick
 
@@ -49,8 +51,10 @@ apply_scroll_events :: proc(events: []types.InputEvent, nodes: []types.Node) {
 					overflow = n.overflow
 				case types.NodeHbox:
 					overflow = n.overflow
+				case types.NodeText:
+					overflow = n.overflow
 				case types.NodeStack, types.NodeCanvas, types.NodeInput,
-					types.NodeButton, types.NodeText, types.NodeImage,
+					types.NodeButton, types.NodeImage,
 					types.NodePopout, types.NodeModal:
 				}
 				if overflow != "scroll-y" do continue
@@ -167,7 +171,7 @@ render_node :: proc(
 	case types.NodeButton:
 		draw_button(rect, n, theme)
 	case types.NodeText:
-		draw_text(rect, n, theme)
+		draw_text(idx, rect, n, theme)
 	case types.NodeImage:
 		draw_themed_rect(rect, n.aspect, theme)
 		rl.DrawRectangleLinesEx(rect, 1, rl.GRAY)
@@ -654,7 +658,7 @@ draw_button :: proc(rect: rl.Rectangle, n: types.NodeButton, theme: map[string]t
 	}
 }
 
-draw_text :: proc(rect: rl.Rectangle, n: types.NodeText, theme: map[string]types.Theme) {
+draw_text :: proc(idx: int, rect: rl.Rectangle, n: types.NodeText, theme: map[string]types.Theme) {
 	if len(n.content) == 0 do return
 
 	font_size: f32 = 18
@@ -673,6 +677,50 @@ draw_text :: proc(rect: rl.Rectangle, n: types.NodeText, theme: map[string]types
 
 	f := font.get(font_name, font.style_from_weight(font.Font_Weight(font_weight)))
 	spacing: f32 = 0
-	text := strings.clone_to_cstring(n.content, context.temp_allocator)
-	rl.DrawTextEx(f, text, {px(rect.x), px(rect.y + 2)}, font_size, spacing, text_color)
+	lh := text_pkg.line_height(font_size)
+
+	// Compute lines: wrap if not scroll-x
+	max_width: f32 = 0
+	if n.overflow != "scroll-x" {
+		max_width = rect.width
+	}
+	lines := text_pkg.compute_lines(n.content, f, font_size, spacing, max_width)
+	defer delete(lines)
+
+	scrollable_y := n.overflow == "scroll-y"
+	scrollable_x := n.overflow == "scroll-x"
+
+	scroll_y: f32 = 0
+	scroll_x: f32 = 0
+	if scrollable_y {
+		scroll_y = scroll_offsets[idx] if idx in scroll_offsets else 0
+		total_h := f32(len(lines)) * lh
+		max_scroll := total_h - rect.height
+		if max_scroll < 0 do max_scroll = 0
+		if scroll_y > max_scroll do scroll_y = max_scroll
+		if scroll_y < 0 do scroll_y = 0
+		scroll_offsets[idx] = scroll_y
+	}
+	if scrollable_x {
+		scroll_x = scroll_offsets_x[idx] if idx in scroll_offsets_x else 0
+	}
+
+	if scrollable_y || scrollable_x {
+		rl.BeginScissorMode(i32(rect.x), i32(rect.y), i32(rect.width), i32(rect.height))
+	}
+
+	for line, i in lines {
+		ly := rect.y + f32(i) * lh - scroll_y
+		if ly + lh < rect.y do continue
+		if ly > rect.y + rect.height do break
+
+		if line.start < line.end {
+			cstr := strings.clone_to_cstring(n.content[line.start:line.end], context.temp_allocator)
+			rl.DrawTextEx(f, cstr, {px(rect.x - scroll_x), px(ly)}, font_size, spacing, text_color)
+		}
+	}
+
+	if scrollable_y || scrollable_x {
+		rl.EndScissorMode()
+	}
 }
