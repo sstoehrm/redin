@@ -526,6 +526,7 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 			inp.height = lua_get_size_f32(L, attrs_idx, "height")
 			inp.value = lua_get_string_field(L, attrs_idx, "value")
 			inp.placeholder = lua_get_string_field(L, attrs_idx, "placeholder")
+			inp.overflow = lua_get_string_field(L, attrs_idx, "overflow")
 		}
 		return inp
 
@@ -557,6 +558,7 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 			case "right":
 				t.layoutX = .RIGHT
 			}
+			t.overflow = lua_get_string_field(L, attrs_idx, "overflow")
 		}
 		if len(text_content) > 0 do t.content = text_content
 		return t

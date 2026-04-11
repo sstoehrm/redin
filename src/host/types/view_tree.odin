@@ -112,6 +112,7 @@ NodeInput :: struct {
 	},
 	value:       string,
 	placeholder: string,
+	overflow:    string,
 }
 
 NodeButton :: struct {
@@ -130,18 +131,19 @@ NodeButton :: struct {
 }
 
 NodeText :: struct {
-	layoutX: LayoutX,
-	layoutY: LayoutY,
-	content: string,
-	aspect:  string,
-	width:   union {
+	layoutX:  LayoutX,
+	layoutY:  LayoutY,
+	content:  string,
+	aspect:   string,
+	width:    union {
 		SizeValue,
 		f32,
 	},
-	height:  union {
+	height:   union {
 		SizeValue,
 		f32,
 	},
+	overflow: string,
 }
 
 PopoutMode :: enum {
