@@ -489,6 +489,8 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 			case "right":
 				v.layoutX = .RIGHT
 			}
+			v.draggable_group, v.draggable_event, v.draggable_ctx = lua_get_drag_drop(L, attrs_idx, "draggable")
+			v.dropable_group, v.dropable_event, v.dropable_ctx = lua_get_drag_drop(L, attrs_idx, "dropable")
 		}
 		return v
 
@@ -509,6 +511,8 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 			case "right":
 				h.layoutX = .RIGHT
 			}
+			h.draggable_group, h.draggable_event, h.draggable_ctx = lua_get_drag_drop(L, attrs_idx, "draggable")
+			h.dropable_group, h.dropable_event, h.dropable_ctx = lua_get_drag_drop(L, attrs_idx, "dropable")
 		}
 		return h
 
@@ -1049,6 +1053,39 @@ lua_get_number_field :: proc(L: ^Lua_State, index: i32, field: cstring) -> f32 {
 		return f32(lua_tonumber(L, -1))
 	}
 	return 0
+}
+
+// Read a drag/drop 3-element vector field: [:group :event payload]
+// Returns group, event as strings, and payload as a Lua registry ref.
+lua_get_drag_drop :: proc(L: ^Lua_State, index: i32, field: cstring) -> (group: string, event: string, ctx: i32) {
+	lua_getfield(L, index, field)
+	defer lua_pop(L, 1)
+	if !lua_istable(L, -1) do return "", "", 0
+	tbl := lua_gettop(L)
+
+	// [1] = group keyword
+	lua_rawgeti(L, tbl, 1)
+	if lua_isstring(L, -1) {
+		group = strings.clone_from_cstring(lua_tostring_raw(L, -1))
+	}
+	lua_pop(L, 1)
+
+	// [2] = event keyword
+	lua_rawgeti(L, tbl, 2)
+	if lua_isstring(L, -1) {
+		event = strings.clone_from_cstring(lua_tostring_raw(L, -1))
+	}
+	lua_pop(L, 1)
+
+	// [3] = payload (any Lua value, stored as registry ref)
+	lua_rawgeti(L, tbl, 3)
+	if !lua_isnil(L, -1) {
+		ctx = luaL_ref(L, LUA_REGISTRYINDEX) // pops value
+	} else {
+		lua_pop(L, 1)
+	}
+
+	return
 }
 
 key_to_string :: proc(key: rl.KeyboardKey) -> cstring {
