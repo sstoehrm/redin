@@ -114,7 +114,7 @@ main :: proc() {
 		bridge.deliver_dispatch_events(&b, drag_events[:])
 
 		dispatch_events := input.process_user_events(
-			user_events[:], input_events[:], b.nodes[:], node_rects[:],
+			user_events[:], input_events[:], b.nodes[:], node_rects[:], b.theme,
 		)
 		defer delete(dispatch_events)
 		bridge.deliver_dispatch_events(&b, dispatch_events[:])

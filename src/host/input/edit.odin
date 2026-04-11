@@ -3,6 +3,7 @@ package input
 import "core:strings"
 import "core:unicode/utf8"
 import rl "vendor:raylib"
+import text_pkg "../text"
 
 // --- UTF-8 cursor helpers ---
 
@@ -267,6 +268,90 @@ click_to_cursor :: proc(text: []u8, click_x: f32, font_obj: rl.Font, font_size: 
 		cstr := strings.clone_to_cstring(string(text[:pos]), context.temp_allocator)
 		measured := rl.MeasureTextEx(font_obj, cstr, font_size, spacing)
 		dist := abs(click_x - measured.x)
+		if dist < best_dist {
+			best_dist = dist
+			best_pos = pos
+		}
+	}
+	return best_pos
+}
+
+// --- Line-aware movement (requires layout lines) ---
+
+// Move cursor up one visual line, preserving X position.
+move_up :: proc(lines: []text_pkg.Text_Line, text_str: string, font_obj: rl.Font, font_size: f32, sp: f32, shift: bool) {
+	old_cursor := state.cursor
+	line_idx, _ := text_pkg.cursor_to_line(lines, state.cursor)
+	if line_idx <= 0 {
+		state.cursor = 0
+	} else {
+		cur_line := lines[line_idx]
+		x := text_pkg.measure_range(text_str, cur_line.start, state.cursor, font_obj, font_size, sp)
+		prev_line := lines[line_idx - 1]
+		state.cursor = x_to_cursor_in_line(text_str, prev_line, x, font_obj, font_size, sp)
+	}
+	if shift {
+		start_or_extend_selection(old_cursor, state.cursor)
+	} else {
+		clear_selection()
+	}
+}
+
+// Move cursor down one visual line, preserving X position.
+move_down :: proc(lines: []text_pkg.Text_Line, text_str: string, font_obj: rl.Font, font_size: f32, sp: f32, shift: bool) {
+	old_cursor := state.cursor
+	line_idx, _ := text_pkg.cursor_to_line(lines, state.cursor)
+	if line_idx >= len(lines) - 1 {
+		state.cursor = len(state.text)
+	} else {
+		cur_line := lines[line_idx]
+		x := text_pkg.measure_range(text_str, cur_line.start, state.cursor, font_obj, font_size, sp)
+		next_line := lines[line_idx + 1]
+		state.cursor = x_to_cursor_in_line(text_str, next_line, x, font_obj, font_size, sp)
+	}
+	if shift {
+		start_or_extend_selection(old_cursor, state.cursor)
+	} else {
+		clear_selection()
+	}
+}
+
+// Move cursor to start of current visual line.
+move_home_line :: proc(lines: []text_pkg.Text_Line, shift: bool) {
+	old_cursor := state.cursor
+	line_idx, _ := text_pkg.cursor_to_line(lines, state.cursor)
+	state.cursor = lines[line_idx].start
+	if shift {
+		start_or_extend_selection(old_cursor, state.cursor)
+	} else {
+		clear_selection()
+	}
+}
+
+// Move cursor to end of current visual line.
+move_end_line :: proc(lines: []text_pkg.Text_Line, shift: bool) {
+	old_cursor := state.cursor
+	line_idx, _ := text_pkg.cursor_to_line(lines, state.cursor)
+	state.cursor = lines[line_idx].end
+	if shift {
+		start_or_extend_selection(old_cursor, state.cursor)
+	} else {
+		clear_selection()
+	}
+}
+
+// Find byte offset in a line closest to a given X pixel position.
+x_to_cursor_in_line :: proc(text_str: string, line: text_pkg.Text_Line, target_x: f32, font_obj: rl.Font, font_size: f32, sp: f32) -> int {
+	if line.start >= line.end do return line.start
+	best_pos := line.start
+	best_dist := abs(target_x)
+
+	pos := line.start
+	for pos < line.end {
+		_, size := utf8.decode_rune(transmute([]u8)text_str[pos:])
+		pos += size
+		w := text_pkg.measure_range(text_str, line.start, pos, font_obj, font_size, sp)
+		dist := abs(target_x - w)
 		if dist < best_dist {
 			best_dist = dist
 			best_pos = pos

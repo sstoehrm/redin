@@ -2,6 +2,8 @@ package input
 
 import "core:strings"
 import "../types"
+import text_pkg "../text"
+import font "../font"
 import rl "vendor:raylib"
 
 // Currently focused node index, -1 means none.
@@ -156,6 +158,7 @@ process_user_events :: proc(
 	input_events: []types.InputEvent,
 	nodes: []types.Node,
 	node_rects: []rl.Rectangle,
+	theme: map[string]types.Theme,
 ) -> [dynamic]types.Dispatch_Event {
 	dispatch: [dynamic]types.Dispatch_Event
 
@@ -181,6 +184,31 @@ process_user_events :: proc(
 	// Controlled sync
 	controlled_sync(n.value)
 
+	// Compute text layout for multiline navigation
+	inp_font_name := "sans"
+	inp_font_size: f32 = 14
+	inp_font_weight: u8 = 0
+	inp_padding_l: f32 = 4
+	inp_padding_r: f32 = 4
+	if len(n.aspect) > 0 {
+		if t, ok := theme[n.aspect]; ok {
+			if t.font_size > 0 do inp_font_size = f32(t.font_size)
+			if len(t.font) > 0 do inp_font_name = t.font
+			inp_font_weight = t.weight
+			if t.padding[3] > 0 do inp_padding_l = f32(t.padding[3])
+			if t.padding[1] > 0 do inp_padding_r = f32(t.padding[1])
+		}
+	}
+	inp_font := font.get(inp_font_name, font.style_from_weight(font.Font_Weight(inp_font_weight)))
+	inp_spacing: f32 = 0
+	inp_content_w: f32 = 0
+	if focused_idx >= 0 && focused_idx < len(node_rects) {
+		inp_content_w = node_rects[focused_idx].width - inp_padding_l - inp_padding_r
+	}
+	text_str := get_text()
+	layout_lines := text_pkg.compute_lines(text_str, inp_font, inp_font_size, inp_spacing, inp_content_w)
+	defer delete(layout_lines)
+
 	text_changed := false
 
 	for event in input_events {
@@ -202,6 +230,9 @@ process_user_events :: proc(
 
 			// Process editing keys
 			#partial switch e.key {
+			case .ENTER:
+				insert_char('\n')
+				text_changed = true
 			case .BACKSPACE:
 				if e.mods.ctrl {
 					delete_back_word()
@@ -228,10 +259,35 @@ process_user_events :: proc(
 				} else {
 					move_right(e.mods.shift)
 				}
+			case .UP:
+				// Recompute layout since text_str may have changed
+				text_str = get_text()
+				delete(layout_lines)
+				layout_lines = text_pkg.compute_lines(text_str, inp_font, inp_font_size, inp_spacing, inp_content_w)
+				move_up(layout_lines[:], text_str, inp_font, inp_font_size, inp_spacing, e.mods.shift)
+			case .DOWN:
+				text_str = get_text()
+				delete(layout_lines)
+				layout_lines = text_pkg.compute_lines(text_str, inp_font, inp_font_size, inp_spacing, inp_content_w)
+				move_down(layout_lines[:], text_str, inp_font, inp_font_size, inp_spacing, e.mods.shift)
 			case .HOME:
-				move_home(e.mods.shift)
+				if e.mods.ctrl {
+					move_home(e.mods.shift)
+				} else {
+					text_str = get_text()
+					delete(layout_lines)
+					layout_lines = text_pkg.compute_lines(text_str, inp_font, inp_font_size, inp_spacing, inp_content_w)
+					move_home_line(layout_lines[:], e.mods.shift)
+				}
 			case .END:
-				move_end(e.mods.shift)
+				if e.mods.ctrl {
+					move_end(e.mods.shift)
+				} else {
+					text_str = get_text()
+					delete(layout_lines)
+					layout_lines = text_pkg.compute_lines(text_str, inp_font, inp_font_size, inp_spacing, inp_content_w)
+					move_end_line(layout_lines[:], e.mods.shift)
+				}
 			case .A:
 				if e.mods.ctrl do select_all()
 			case .C:
@@ -250,17 +306,22 @@ process_user_events :: proc(
 			}
 
 		case types.MouseEvent:
-			// Click-to-position cursor within focused input
 			if focused_idx >= 0 && focused_idx < len(node_rects) {
 				rect := node_rects[focused_idx]
 				pt := rl.Vector2{e.x, e.y}
 				if rl.CheckCollisionPointRec(pt, rect) {
-					padding_l: f32 = 4
-					click_x := e.x - rect.x - padding_l + state.scroll_offset_x
-					font_size: f32 = 14
-					f := rl.GetFontDefault()
-					spacing := font_size / 10
-					state.cursor = click_to_cursor(state.text[:], click_x, f, font_size, spacing)
+					click_x := e.x - rect.x - inp_padding_l
+					click_y := e.y - rect.y
+					lh := text_pkg.line_height(inp_font_size)
+					text_str = get_text()
+					delete(layout_lines)
+					layout_lines = text_pkg.compute_lines(text_str, inp_font, inp_font_size, inp_spacing, inp_content_w)
+					state.cursor = text_pkg.point_to_cursor(
+						layout_lines[:], text_str,
+						click_x, click_y,
+						inp_font, inp_font_size, inp_spacing, lh,
+						state.scroll_offset_x, state.scroll_offset_y,
+					)
 					clear_selection()
 				}
 			}
