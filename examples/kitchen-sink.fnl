@@ -137,8 +137,8 @@
                    {:layout :center
                     :aspect :row
                     :height 42
-                    :draggable [:row :drag i]
-                    :dropable [:row :drop i]}
+                    :draggable [:row :event/drag i]
+                    :dropable [:row :event/drop i]}
                    [:text {:aspect :body} item.text]
                    [:button
                     {:width 250 :aspect :button :click [:test/remove i]}
