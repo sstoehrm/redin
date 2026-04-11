@@ -179,8 +179,13 @@ render_node :: proc(
 	case types.NodePopout:
 		render_children_stack(idx, rect, nodes, children_list, theme)
 	case types.NodeModal:
-		draw_themed_rect(rect, n.aspect, theme)
-		render_children_stack(idx, rect, nodes, children_list, theme)
+		// Modal always covers the full screen, regardless of parent layout
+		screen := rl.Rectangle{0, 0, f32(rl.GetScreenWidth()), f32(rl.GetScreenHeight())}
+		if idx < len(node_rects) {
+			node_rects[idx] = screen
+		}
+		draw_themed_rect(screen, n.aspect, theme)
+		render_children_stack(idx, screen, nodes, children_list, theme)
 	}
 }
 
