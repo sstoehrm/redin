@@ -25,8 +25,8 @@
 (global main_view
   (fn []
     (let [count (subscribe :sub/counter)]
-      [:stack {:viewport [[0 0 :full :full]
-                          [:1_2 0 :1_2 42]]}
+      [:stack {:viewport [[:top_left 0 0 :full :full]
+                          [:top_left :1_2 0 :1_2 42]]}
        [:vbox {:id :bg-layer :aspect :surface}
         [:text {:id :title :aspect :body} "Background"]]
        [:hbox {:id :overlay}

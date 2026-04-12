@@ -223,12 +223,33 @@ render_children_viewport :: proc(
 
 	for i in 0 ..< int(ch.length) {
 		vr := stack.viewport[i]
-		child_rect := rl.Rectangle {
-			px(resolve_vp(vr[0], win_w)),
-			px(resolve_vp(vr[1], win_h)),
-			px(resolve_vp(vr[2], win_w)),
-			px(resolve_vp(vr[3], win_h)),
+		w := px(resolve_vp(vr.w, win_w))
+		h := px(resolve_vp(vr.h, win_h))
+		offset_x := px(resolve_vp(vr.x, win_w))
+		offset_y := px(resolve_vp(vr.y, win_h))
+
+		x: f32
+		y: f32
+
+		#partial switch vr.anchor {
+		case .TOP_LEFT, .CENTER_LEFT, .BOTTOM_LEFT:
+			x = offset_x
+		case .TOP_CENTER, .CENTER, .BOTTOM_CENTER:
+			x = win_w / 2 - w / 2 + offset_x
+		case .TOP_RIGHT, .CENTER_RIGHT, .BOTTOM_RIGHT:
+			x = win_w - w + offset_x
 		}
+
+		#partial switch vr.anchor {
+		case .TOP_LEFT, .TOP_CENTER, .TOP_RIGHT:
+			y = offset_y
+		case .CENTER_LEFT, .CENTER, .CENTER_RIGHT:
+			y = win_h / 2 - h / 2 + offset_y
+		case .BOTTOM_LEFT, .BOTTOM_CENTER, .BOTTOM_RIGHT:
+			y = win_h - h + offset_y
+		}
+
+		child_rect := rl.Rectangle{px(x), px(y), w, h}
 		child_idx := int(ch.value[i])
 		render_node(child_idx, child_rect, nodes, children_list, theme)
 	}
@@ -255,7 +276,11 @@ draw_box :: proc(
 
 		if t, ok := theme[aspect]; ok {
 			if t.bg != {} {
-				bg_color = rl.Color{t.bg[0], t.bg[1], t.bg[2], 255}
+				alpha := u8(255)
+				if t.opacity > 0 && t.opacity < 1 {
+					alpha = u8(t.opacity * 255)
+				}
+				bg_color = rl.Color{t.bg[0], t.bg[1], t.bg[2], alpha}
 				has_bg = true
 			}
 			pad = t.padding

@@ -763,16 +763,24 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 					lua_rawgeti(L, vp_idx, i32(i + 1))
 					if lua_istable(L, -1) {
 						rect_idx := lua_gettop(L)
+						// Element 1: anchor keyword
+						lua_rawgeti(L, rect_idx, 1)
+						if lua_isstring(L, -1) {
+							rects[i].anchor = parse_anchor(string(lua_tostring_raw(L, -1)))
+						}
+						lua_pop(L, 1)
+						// Elements 2-5: x, y, w, h
+						fields := [4]^types.ViewportValue{&rects[i].x, &rects[i].y, &rects[i].w, &rects[i].h}
 						for j in 0 ..< 4 {
-							lua_rawgeti(L, rect_idx, i32(j + 1))
+							lua_rawgeti(L, rect_idx, i32(j + 2))
 							if lua_isnumber(L, -1) {
-								rects[i][j] = f32(lua_tonumber(L, -1))
+								fields[j]^ = f32(lua_tonumber(L, -1))
 							} else if lua_isstring(L, -1) {
 								str := string(lua_tostring_raw(L, -1))
 								if str == "full" {
-									rects[i][j] = types.SizeValue.FULL
+									fields[j]^ = types.SizeValue.FULL
 								} else {
-									rects[i][j] = parse_fraction(str)
+									fields[j]^ = parse_fraction(str)
 								}
 							}
 							lua_pop(L, 1)
@@ -1340,6 +1348,23 @@ push_input_event_as_lua :: proc(L: ^Lua_State, event: types.InputEvent) {
 		lua_rawseti(L, -2, 2)
 		lua_pushnumber(L, f64(rl.GetScreenHeight()))
 		lua_rawseti(L, -2, 3)
+	}
+}
+
+parse_anchor :: proc(s: string) -> types.ViewportAnchor {
+	switch s {
+	case "top_left":      return .TOP_LEFT
+	case "top_center":    return .TOP_CENTER
+	case "top_right":     return .TOP_RIGHT
+	case "center_left":   return .CENTER_LEFT
+	case "center":        return .CENTER
+	case "center_right":  return .CENTER_RIGHT
+	case "bottom_left":   return .BOTTOM_LEFT
+	case "bottom_center": return .BOTTOM_CENTER
+	case "bottom_right":  return .BOTTOM_RIGHT
+	case:
+		fmt.eprintfln("viewport: unrecognized anchor '%s', defaulting to top_left", s)
+		return .TOP_LEFT
 	}
 }
 

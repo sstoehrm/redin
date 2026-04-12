@@ -143,7 +143,7 @@ The flattening is a single pass when the frame enters the pipeline. No fragment 
 | Attribute  | Type     | Applies to | Notes |
 | ---------- | -------- | ---------- | ----- |
 | `overflow` | string   | vbox, hbox | Overflow behavior (e.g. `"scroll-y"`) |
-| `viewport` | `[[x y w h] ...]` | stack | Absolute window-relative rects, one per child. Values: px, `"full"`, or `"M_N"` fraction. |
+| `viewport` | `[[anchor x y w h] ...]` | stack | Window-relative rects with anchor point, one per child. Anchor: `"top_left"`, `"top_center"`, `"top_right"`, `"center_left"`, `"center"`, `"center_right"`, `"bottom_left"`, `"bottom_center"`, `"bottom_right"`. Values for x/y/w/h: px, `"full"`, or `"M_N"` fraction. The anchor determines the origin and growth direction. |
 
 **Element-specific:**
 

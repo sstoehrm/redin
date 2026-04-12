@@ -27,7 +27,25 @@ ViewportValue :: union {
 	Fraction,
 }
 
-ViewportRect :: [4]ViewportValue
+ViewportAnchor :: enum u8 {
+	TOP_LEFT,
+	TOP_CENTER,
+	TOP_RIGHT,
+	CENTER_LEFT,
+	CENTER,
+	CENTER_RIGHT,
+	BOTTOM_LEFT,
+	BOTTOM_CENTER,
+	BOTTOM_RIGHT,
+}
+
+ViewportRect :: struct {
+	anchor: ViewportAnchor,
+	x:      ViewportValue,
+	y:      ViewportValue,
+	w:      ViewportValue,
+	h:      ViewportValue,
+}
 
 Path :: struct {
 	value:  []u8,
