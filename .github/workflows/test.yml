@@ -34,4 +34,6 @@ jobs:
         run: odin test src/host/parser
 
       - name: Build host
-        run: odin build src/host -out:build/redin
+        run: |
+          mkdir -p build
+          odin build src/host -out:build/redin
