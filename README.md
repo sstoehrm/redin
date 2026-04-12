@@ -13,26 +13,38 @@ Write reactive desktop apps in Fennel (or Lua) with the same dataflow model that
 | Host / renderer | Odin + Raylib |
 | Scripting | LuaJIT (Lua 5.1) |
 | App language | Fennel (or plain Lua) |
-| AI interface | HTTP dev server + MCP |
+| AI interface | HTTP dev server |
 
 ## Getting started
 
+The easiest way to start is with [redin-cli](https://github.com/sstoehrm/redin-cli):
+
 ```bash
-# Build from source
-odin build src/host -out:build/redin
+# Install the CLI (requires Babashka)
+curl -sL https://raw.githubusercontent.com/sstoehrm/redin-cli/main/install.sh | bash
 
-# Run an app
-./build/redin examples/kitchen-sink.fnl
+# Create a Fennel project
+redin-cli new-fnl my-app
+cd my-app
+./redinw --dev main.fnl
 
-# Run with dev server + hot reload
-./build/redin --dev examples/kitchen-sink.fnl
+# Or a Lua project
+redin-cli new-lua my-app
 ```
 
-## Prerequisites
+The CLI downloads a pinned redin binary into `.redin/` — no build tools needed. See `redin-cli help` for all commands.
+
+### Building from source
 
 ```bash
-# Ubuntu/Debian
+# Prerequisites (Ubuntu/Debian)
 sudo apt-get install -y luajit libluajit-5.1-dev libssl-dev
+
+# Build
+odin build src/host -out:build/redin
+
+# Run
+./build/redin --dev examples/kitchen-sink.fnl
 ```
 
 | Dependency | Purpose | Required |
@@ -41,12 +53,11 @@ sudo apt-get install -y luajit libluajit-5.1-dev libssl-dev
 | **Raylib** | Bundled with Odin | -- |
 | **LuaJIT** (`luajit` + `libluajit-5.1-dev`) | Runs tests, AOT compiles Fennel | Yes |
 | **OpenSSL** (`libssl-dev`) | HTTPS support via odin-http | Yes |
-| **Babashka** (`bb`) | Runs MCP server | Optional |
 
 ## Test
 
 ```bash
-# Fennel runtime tests (95 tests)
+# Fennel runtime tests
 luajit test/lua/runner.lua test/lua/test_*.fnl
 
 # Build check
@@ -60,14 +71,14 @@ src/host/                Odin host application
   main.odin              Entry point and main loop
   render.odin            Raylib renderer
   bridge/                Lua/Fennel bridge
+  canvas/                Canvas provider system
   input/                 Input handling
-  parser/                File parsers
   types/                 Shared type definitions
 src/runtime/             Fennel runtime modules
 examples/                Demo apps
 test/lua/                Fennel unit tests
 test/ui/                 UI integration tests (Babashka)
-mcp/                     MCP server for AI tools
+skills/                  Claude Code development skill
 docs/                    Documentation
 ```
 
