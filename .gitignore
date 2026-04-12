@@ -23,3 +23,4 @@ test/integration/testapp/
 .lsp
 .nrepl-port
 docs/superpowers
+.worktrees/
