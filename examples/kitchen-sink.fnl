@@ -161,43 +161,50 @@
 
 ;; ===== View =====
 
-(global main_view
-        (fn []
-          (let [items (subscribe :items)
-                input-val (subscribe :input-value)]
-            [:vbox
-             {}
-             [:stack
-              {:viewport [[:top_left 0 0 :full :full]
-                          [:top_left 0 0 :full :full]
-                          [:bottom_center 0 0 :1_4 42]]}
-              [:canvas {:provider :background :width :full :height :full}]
-              [:vbox
-               {:aspect :surface :layout :center}
-               [:text {:aspect :heading :layout :center} "Todo List"]
-               [:input
-                {:aspect :input
-                 :width 250
-                 :height 42
-                 :value input-val
-                 :change [:test/input]
-                 :key [:test/add]}]
-               [:button
-                {:width 250 :height 42 :aspect :button :click [:test/add]}
-                "Add"]
-               [:vbox
-                {:overflow :scroll-y :aspect :muted}
-                (icollect [i item (ipairs (or items []))]
-                  [:hbox
-                   {:layout :center
-                    :aspect :row
-                    :height 42
-                    :draggable [:row :event/drag i]
-                    :dropable [:row :event/drop i]}
-                   [:text {:aspect :body} item.text]
-                   [:button
-                    {:width 250 :aspect :button :click [:test/remove i]}
-                    "remove"]])]]
-              [:hbox
-               {:height 42 :aspect :status-field}
-               [:text {:aspect :body} (.. "Todos: " (length items))]]]])))
+(global main_view (fn []
+                    (let [items (subscribe :items)
+                          input-val (subscribe :input-value)]
+                      [:vbox
+                       {}
+                       [:stack
+                        {:viewport [[:top_left 0 0 :full :full]
+                                    [:top_left 0 0 :full :full]
+                                    [:bottom_center 0 0 :1_4 42]]}
+                        [:canvas
+                         {:provider :background :width :full :height :full}]
+                        [:vbox
+                         {:aspect :surface}
+                         [:text {:aspect :heading :layout :center} "Todo List"]
+                         [:input
+                          {:aspect :input
+                           :width 250
+                           :height 42
+                           :value input-val
+                           :change [:test/input]
+                           :key [:test/add]}]
+                         [:button
+                          {:width 250
+                           :height 42
+                           :aspect :button
+                           :click [:test/add]}
+                          "Add"]
+                         [:vbox
+                          {:overflow :scroll-y :aspect :muted}
+                          (icollect [i item (ipairs (or items []))]
+                            [:hbox
+                             {:layout :center
+                              :aspect :row
+                              :height 42
+                              :draggable [:row :event/drag i]
+                              :dropable [:row :event/drop i]}
+                             [:text {:aspect :body} item.text]
+                             [:button
+                              {:width 250
+                               :aspect :button
+                               :click [:test/remove i]}
+                              "remove"]])]]
+                        [:hbox
+                         {:height 42 :aspect :status-field :layout :center}
+                         [:text
+                          {:aspect :body :layout :center}
+                          (.. "Todos: " (length items))]]]])))
