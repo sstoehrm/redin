@@ -280,6 +280,298 @@ redin_canvas_unregister :: proc "c" (L: ^Lua_State) -> i32 {
 	return 0
 }
 
+// ---------------------------------------------------------------------------
+// Canvas draw helpers
+// ---------------------------------------------------------------------------
+
+// Read a number from a Lua table at integer index
+lua_rawgeti_number :: proc(L: ^Lua_State, idx: i32, i: i32) -> f64 {
+	lua_rawgeti(L, idx, i)
+	defer lua_pop(L, 1)
+	return lua_tonumber(L, -1)
+}
+
+// Read a color [r,g,b] or [r,g,b,a] from a table field. Returns ok=false if field missing.
+read_color_field :: proc(L: ^Lua_State, idx: i32, field: cstring) -> (rl.Color, bool) {
+	lua_getfield(L, idx, field)
+	defer lua_pop(L, 1)
+	if !lua_istable(L, -1) do return {}, false
+
+	color_idx := lua_gettop(L)
+	r := u8(lua_rawgeti_number(L, color_idx, 1))
+	g := u8(lua_rawgeti_number(L, color_idx, 2))
+	b := u8(lua_rawgeti_number(L, color_idx, 3))
+
+	lua_rawgeti(L, color_idx, 4)
+	a := u8(255)
+	if lua_isnumber(L, -1) {
+		a = u8(lua_tonumber(L, -1))
+	}
+	lua_pop(L, 1)
+
+	return rl.Color{r, g, b, a}, true
+}
+
+// Read a number field from a Lua table, default 0
+read_number_field :: proc(L: ^Lua_State, idx: i32, field: cstring) -> f32 {
+	lua_getfield(L, idx, field)
+	defer lua_pop(L, 1)
+	if lua_isnumber(L, -1) {
+		return f32(lua_tonumber(L, -1))
+	}
+	return 0
+}
+
+// ---------------------------------------------------------------------------
+// Mouse input state builder
+// ---------------------------------------------------------------------------
+
+// Push a {left=bool, right=bool, middle=bool} table for a mouse button query
+push_mouse_buttons :: proc(L: ^Lua_State, parent_idx: i32, field: cstring, query: proc "c" (button: rl.MouseButton) -> bool) {
+	lua_createtable(L, 0, 3)
+	btn_idx := lua_gettop(L)
+	lua_pushboolean(L, query(.LEFT) ? 1 : 0)
+	lua_setfield(L, btn_idx, "left")
+	lua_pushboolean(L, query(.RIGHT) ? 1 : 0)
+	lua_setfield(L, btn_idx, "right")
+	lua_pushboolean(L, query(.MIDDLE) ? 1 : 0)
+	lua_setfield(L, btn_idx, "middle")
+	lua_setfield(L, parent_idx, field)
+}
+
+// Build a Lua table with mouse state for canvas draw functions
+push_canvas_input_state :: proc(L: ^Lua_State, rect: rl.Rectangle) {
+	lua_createtable(L, 0, 6)
+	input_idx := lua_gettop(L)
+
+	mouse_pos := rl.GetMousePosition()
+	lua_pushnumber(L, f64(mouse_pos.x - rect.x))
+	lua_setfield(L, input_idx, "mouse-x")
+	lua_pushnumber(L, f64(mouse_pos.y - rect.y))
+	lua_setfield(L, input_idx, "mouse-y")
+
+	mouse_in := mouse_pos.x >= rect.x && mouse_pos.x <= rect.x + rect.width &&
+	            mouse_pos.y >= rect.y && mouse_pos.y <= rect.y + rect.height
+	lua_pushboolean(L, mouse_in ? 1 : 0)
+	lua_setfield(L, input_idx, "mouse-in")
+
+	push_mouse_buttons(L, input_idx, "mouse-down", rl.IsMouseButtonDown)
+	push_mouse_buttons(L, input_idx, "mouse-pressed", rl.IsMouseButtonPressed)
+	push_mouse_buttons(L, input_idx, "mouse-released", rl.IsMouseButtonReleased)
+}
+
+// ---------------------------------------------------------------------------
+// Canvas draw pipeline
+// ---------------------------------------------------------------------------
+
+// Call into Fennel canvas._draw, read command buffer, execute Raylib draws
+lua_canvas_draw :: proc(b: ^Bridge, name: string, rect: rl.Rectangle) {
+	L := b.L
+
+	lua_getglobal(L, "redin_canvas_draw")
+	if lua_isnil(L, -1) {
+		lua_pop(L, 1)
+		return
+	}
+
+	cname := strings.clone_to_cstring(name)
+	defer delete(cname)
+	lua_pushstring(L, cname)
+	lua_pushnumber(L, f64(rect.width))
+	lua_pushnumber(L, f64(rect.height))
+	push_canvas_input_state(L, rect)
+
+	if lua_pcall(L, 4, 1, 0) != 0 {
+		msg := lua_tostring_raw(L, -1)
+		fmt.eprintfln("Canvas draw error (%s): %s", name, msg)
+		lua_pop(L, 1)
+		return
+	}
+
+	if lua_istable(L, -1) {
+		execute_canvas_commands(L, lua_gettop(L), rect)
+	}
+	lua_pop(L, 1)
+}
+
+execute_canvas_commands :: proc(L: ^Lua_State, buf_idx: i32, rect: rl.Rectangle) {
+	rl.BeginScissorMode(i32(rect.x), i32(rect.y), i32(rect.width), i32(rect.height))
+	defer rl.EndScissorMode()
+
+	n := i32(lua_objlen(L, buf_idx))
+	for i: i32 = 1; i <= n; i += 1 {
+		lua_rawgeti(L, buf_idx, i)
+		if lua_istable(L, -1) {
+			cmd_idx := lua_gettop(L)
+			lua_rawgeti(L, cmd_idx, 1)
+			if lua_isstring(L, -1) {
+				tag := string(lua_tostring_raw(L, -1))
+				execute_canvas_command(L, cmd_idx, tag, rect.x, rect.y)
+			}
+			lua_pop(L, 1) // pop tag
+		}
+		lua_pop(L, 1) // pop entry
+	}
+}
+
+execute_canvas_command :: proc(L: ^Lua_State, idx: i32, tag: string, ox: f32, oy: f32) {
+	switch tag {
+	case "rect":
+		x := f32(lua_rawgeti_number(L, idx, 2)) + ox
+		y := f32(lua_rawgeti_number(L, idx, 3)) + oy
+		w := f32(lua_rawgeti_number(L, idx, 4))
+		h := f32(lua_rawgeti_number(L, idx, 5))
+		lua_rawgeti(L, idx, 6)
+		opts := lua_gettop(L)
+
+		r := rl.Rectangle{x, y, w, h}
+		radius := read_number_field(L, opts, "radius")
+
+		if fill, ok := read_color_field(L, opts, "fill"); ok {
+			if radius > 0 {
+				roundness := radius / min(w, h) * 2
+				rl.DrawRectangleRounded(r, roundness, 6, fill)
+			} else {
+				rl.DrawRectangleRec(r, fill)
+			}
+		}
+		if stroke, ok := read_color_field(L, opts, "stroke"); ok {
+			sw := read_number_field(L, opts, "stroke-width")
+			if sw <= 0 do sw = 1
+			if radius > 0 {
+				roundness := radius / min(w, h) * 2
+				rl.DrawRectangleRoundedLinesEx(r, roundness, 6, sw, stroke)
+			} else {
+				rl.DrawRectangleLinesEx(r, sw, stroke)
+			}
+		}
+		lua_pop(L, 1)
+
+	case "circle":
+		cx := f32(lua_rawgeti_number(L, idx, 2)) + ox
+		cy := f32(lua_rawgeti_number(L, idx, 3)) + oy
+		cr := f32(lua_rawgeti_number(L, idx, 4))
+		lua_rawgeti(L, idx, 5)
+		opts := lua_gettop(L)
+
+		if fill, ok := read_color_field(L, opts, "fill"); ok {
+			rl.DrawCircleV({cx, cy}, cr, fill)
+		}
+		if stroke, ok := read_color_field(L, opts, "stroke"); ok {
+			rl.DrawCircleLinesV({cx, cy}, cr, stroke)
+		}
+		lua_pop(L, 1)
+
+	case "ellipse":
+		cx := f32(lua_rawgeti_number(L, idx, 2)) + ox
+		cy := f32(lua_rawgeti_number(L, idx, 3)) + oy
+		rx := f32(lua_rawgeti_number(L, idx, 4))
+		ry := f32(lua_rawgeti_number(L, idx, 5))
+		lua_rawgeti(L, idx, 6)
+		opts := lua_gettop(L)
+
+		if fill, ok := read_color_field(L, opts, "fill"); ok {
+			rl.DrawEllipse(i32(cx), i32(cy), rx, ry, fill)
+		}
+		if stroke, ok := read_color_field(L, opts, "stroke"); ok {
+			rl.DrawEllipseLines(i32(cx), i32(cy), rx, ry, stroke)
+		}
+		lua_pop(L, 1)
+
+	case "line":
+		x1 := f32(lua_rawgeti_number(L, idx, 2)) + ox
+		y1 := f32(lua_rawgeti_number(L, idx, 3)) + oy
+		x2 := f32(lua_rawgeti_number(L, idx, 4)) + ox
+		y2 := f32(lua_rawgeti_number(L, idx, 5)) + oy
+		lua_rawgeti(L, idx, 6)
+		opts := lua_gettop(L)
+
+		stroke_color: rl.Color
+		if s, ok := read_color_field(L, opts, "stroke"); ok {
+			stroke_color = s
+		} else {
+			stroke_color = rl.BLACK
+		}
+		w := read_number_field(L, opts, "width")
+		if w <= 0 do w = 1
+		rl.DrawLineEx({x1, y1}, {x2, y2}, w, stroke_color)
+		lua_pop(L, 1)
+
+	case "text":
+		x := f32(lua_rawgeti_number(L, idx, 2)) + ox
+		y := f32(lua_rawgeti_number(L, idx, 3)) + oy
+		lua_rawgeti(L, idx, 4)
+		text := lua_tostring_raw(L, -1)
+		lua_pop(L, 1)
+		lua_rawgeti(L, idx, 5)
+		opts := lua_gettop(L)
+
+		size := read_number_field(L, opts, "size")
+		if size <= 0 do size = 16
+		text_color: rl.Color
+		if c, ok := read_color_field(L, opts, "color"); ok {
+			text_color = c
+		} else {
+			text_color = rl.BLACK
+		}
+		font_name := "sans"
+		lua_getfield(L, opts, "font")
+		if lua_isstring(L, -1) {
+			font_name = string(lua_tostring_raw(L, -1))
+		}
+		lua_pop(L, 1)
+
+		f := font.get(font_name, .Regular)
+		spacing := max(size / 10, 1)
+		rl.DrawTextEx(f, text, {x, y}, size, spacing, text_color)
+		lua_pop(L, 1)
+
+	case "polygon":
+		lua_rawgeti(L, idx, 2)
+		points_idx := lua_gettop(L)
+		lua_rawgeti(L, idx, 3)
+		opts := lua_gettop(L)
+
+		if lua_istable(L, points_idx) {
+			n_points := i32(lua_objlen(L, points_idx))
+			if n_points >= 3 {
+				points := make([]rl.Vector2, n_points)
+				defer delete(points)
+				for p: i32 = 1; p <= n_points; p += 1 {
+					lua_rawgeti(L, points_idx, p)
+					pt_idx := lua_gettop(L)
+					points[p - 1] = {
+						f32(lua_rawgeti_number(L, pt_idx, 1)) + ox,
+						f32(lua_rawgeti_number(L, pt_idx, 2)) + oy,
+					}
+					lua_pop(L, 1)
+				}
+
+				if fill, ok := read_color_field(L, opts, "fill"); ok {
+					for i: i32 = 1; i < n_points - 1; i += 1 {
+						rl.DrawTriangle(points[0], points[i], points[i + 1], fill)
+					}
+				}
+				if stroke, ok := read_color_field(L, opts, "stroke"); ok {
+					for i: i32 = 0; i < n_points; i += 1 {
+						next := (i + 1) % n_points
+						rl.DrawLineV(points[i], points[next], stroke)
+					}
+				}
+			}
+		}
+		lua_pop(L, 2)
+
+	case "image":
+		x := f32(lua_rawgeti_number(L, idx, 2)) + ox
+		y := f32(lua_rawgeti_number(L, idx, 3)) + oy
+		w := f32(lua_rawgeti_number(L, idx, 4))
+		h := f32(lua_rawgeti_number(L, idx, 5))
+		rl.DrawRectangleLinesEx({x, y, w, h}, 1, rl.GRAY)
+		rl.DrawText("img", i32(x) + 2, i32(y) + 2, 12, rl.GRAY)
+	}
+}
+
 redin_key_down :: proc "c" (L: ^Lua_State) -> i32 {
 	context = runtime.default_context()
 	if lua_isstring(L, 1) {
