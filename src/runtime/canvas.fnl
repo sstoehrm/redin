@@ -21,8 +21,8 @@
              (table.insert buf [:text x y str (or ?opts {})]))
      :polygon (fn [points ?opts]
                 (table.insert buf [:polygon points (or ?opts {})]))
-     :image (fn [x y w h name]
-              (table.insert buf [:image x y w h name]))
+     :image (fn [x y w h name ?opts]
+              (table.insert buf [:image x y w h name (or ?opts {})]))
      ;; Input queries
      :mouse-x (fn [] (or (. input :mouse-x) 0))
      :mouse-y (fn [] (or (. input :mouse-y) 0))
@@ -68,10 +68,13 @@
 ;; Called by Odin during render phase. Returns command buffer.
 (fn M._draw [name w h input]
   (let [draw-fn (. registry name)]
-    (when draw-fn
+    (if draw-fn
       (let [ctx (build-ctx w h (or input {}))]
         (draw-fn ctx)
-        ctx._buffer))))
+        ctx._buffer)
+      (do
+        (print (.. "Warning: no canvas draw fn registered for: " (tostring name)))
+        nil))))
 
 ;; Reset (for testing)
 (fn M._reset []
