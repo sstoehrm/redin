@@ -63,13 +63,13 @@ jobs:
           cp build/redin dist/
           mkdir -p dist/vendor/fennel
           cp vendor/fennel/fennel.lua dist/vendor/fennel/
-          mkdir -p dist/mcp
-          cp mcp/redin-mcp.bb dist/mcp/
           mkdir -p dist/docs/guide dist/docs/reference
+          cp docs/core-api.md docs/app-api.md dist/docs/
           cp docs/guide/*.md dist/docs/guide/ 2>/dev/null || true
           cp docs/reference/*.md dist/docs/reference/ 2>/dev/null || true
+          mkdir -p dist/skills/redin-dev
+          cp skills/redin-dev/SKILL.md dist/skills/redin-dev/
           [ -f LICENSE ] && cp LICENSE dist/ || true
-          [ -f README.md ] && cp README.md dist/ || true
           tar czf "redin-${VERSION}-linux-amd64.tar.gz" -C dist .
 
       - name: Upload artifact
@@ -106,11 +106,11 @@ jobs:
             - `redin` binary (Linux x86_64, LuaJIT statically linked)
             - AOT-compiled Fennel runtime
             - Fennel compiler (for --dev mode hot reload)
-            - MCP server
-            - Developer documentation
+            - Developer documentation (guides + reference)
+            - Claude Code skill for redin development
 
             ## Quick start
             ```
-            tar xzf redin-<version>-linux-amd64.tar.gz
-            ./redin --dev myapp.fnl
+            redin-cli new-fnl my-app
+            cd my-app && ./redinw --dev main.fnl
             ```
