@@ -502,7 +502,6 @@ execute_canvas_command :: proc(L: ^Lua_State, idx: i32, tag: string, ox: f32, oy
 		y := f32(lua_rawgeti_number(L, idx, 3)) + oy
 		lua_rawgeti(L, idx, 4)
 		text := lua_tostring_raw(L, -1)
-		lua_pop(L, 1)
 		lua_rawgeti(L, idx, 5)
 		opts := lua_gettop(L)
 
@@ -524,7 +523,7 @@ execute_canvas_command :: proc(L: ^Lua_State, idx: i32, tag: string, ox: f32, oy
 		f := font.get(font_name, .Regular)
 		spacing := max(size / 10, 1)
 		rl.DrawTextEx(f, text, {x, y}, size, spacing, text_color)
-		lua_pop(L, 1)
+		lua_pop(L, 2)
 
 	case "polygon":
 		lua_rawgeti(L, idx, 2)
