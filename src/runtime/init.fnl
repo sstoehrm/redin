@@ -6,10 +6,12 @@
 (local frame (require :frame))
 (local theme (require :theme))
 (local view (require :view))
+(local canvas (require :canvas))
 
 ;; Register globals
 (dataflow.register-globals)
 (effect.register-globals)
+(canvas.register-globals)
 
 ;; Wire effect handler: dataflow dispatch -> effect execute
 (dataflow.set-effect-handler effect.execute)
@@ -23,4 +25,5 @@
  :effect effect
  :frame frame
  :theme theme
- :view view}
+ :view view
+ :canvas canvas}
