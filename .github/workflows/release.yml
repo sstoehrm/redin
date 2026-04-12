@@ -43,6 +43,7 @@ jobs:
       - name: Run tests
         run: |
           luajit test/lua/runner.lua test/lua/test_*.fnl
+          mkdir -p build
           odin build src/host -out:build/redin
 
       - name: Build release binary
