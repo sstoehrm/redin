@@ -78,6 +78,7 @@ main :: proc() {
 		bridge.poll_devserver(&b, &input_events)
 		bridge.deliver_events(&b, input_events[:])
 		bridge.poll_http(&b)
+		bridge.poll_shell(&b)
 		bridge.render_tick(&b)
 		bridge.poll_timers(&b)
 

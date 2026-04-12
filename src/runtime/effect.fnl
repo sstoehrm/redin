@@ -7,6 +7,8 @@
 (var timer-queue [])
 (var pending-http {})
 (var next-http-id 0)
+(var pending-shell {})
+(var next-shell-id 0)
 
 ;; ===== Registry =====
 
@@ -58,6 +60,18 @@
             (dispatch-fn [req-info.on-success response])
             (dispatch-fn [req-info.on-error response])))))))
 
+;; ===== Shell response routing =====
+
+(fn M.handle-shell-response [response]
+  (let [req-info (. pending-shell response.id)]
+    (when req-info
+      (tset pending-shell response.id nil)
+      (let [dispatch-fn (or _G.dispatch _G.redin_dispatch)]
+        (when dispatch-fn
+          (if (= (. response :exit-code) 0)
+            (dispatch-fn [req-info.on-success response])
+            (dispatch-fn [req-info.on-error response])))))))
+
 ;; ===== Built-in effects =====
 
 (fn register-builtins []
@@ -87,7 +101,17 @@
         (tset pending-http id {:on-success params.on-success
                                :on-error params.on-error})
         (when _G.redin_http
-          (_G.redin_http id url method headers body timeout))))))
+          (_G.redin_http id url method headers body timeout)))))
+  (M.reg-fx :shell
+    (fn [params]
+      (set next-shell-id (+ next-shell-id 1))
+      (let [id (tostring next-shell-id)
+            cmd (or params.cmd [])
+            stdin (or params.stdin "")]
+        (tset pending-shell id {:on-success params.on-success
+                                :on-error params.on-error})
+        (when _G.redin_shell
+          (_G.redin_shell id cmd stdin))))))
 
 (register-builtins)
 
@@ -98,6 +122,8 @@
   (set timer-queue [])
   (set pending-http {})
   (set next-http-id 0)
+  (set pending-shell {})
+  (set next-shell-id 0)
   (register-builtins))
 
 ;; ===== Global registration =====

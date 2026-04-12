@@ -44,6 +44,11 @@
         (let [effect-mod (require :effect)]
           (effect-mod.handle-http-response (. event 2)))
 
+        ;; Shell response from host
+        (= event-type :shell-response)
+        (let [effect-mod (require :effect)]
+          (effect-mod.handle-shell-response (. event 2)))
+
         ;; Default: resolved event, dispatch directly
         (dataflow.dispatch event)))))
 

@@ -20,6 +20,7 @@ Bridge :: struct {
 	children_list:  [dynamic]types.Children,
 	theme:          map[string]types.Theme,
 	http_client:    Http_Client,
+	shell_client:   Shell_Client,
 	hot_reload:     Hot_Reload,
 	dev_server:     Dev_Server,
 	frame_changed:  bool,
@@ -32,6 +33,7 @@ init :: proc(b: ^Bridge, dev_mode: bool) {
 	g_bridge = b
 	b.dev_mode = dev_mode
 	http_client_init(&b.http_client)
+	shell_client_init(&b.shell_client)
 	b.L = luaL_newstate()
 	luaL_openlibs(b.L)
 
@@ -55,11 +57,14 @@ init :: proc(b: ^Bridge, dev_mode: bool) {
 	register_cfunc(b.L, "canvas_unregister", redin_canvas_unregister)
 	register_cfunc(b.L, "key_down", redin_key_down)
 	register_cfunc(b.L, "key_pressed", redin_key_pressed)
+	register_cfunc(b.L, "shell", redin_shell)
 	lua_setglobal(b.L, "redin")
 
-	// Also expose redin_http as a flat global for the effect system
+	// Also expose flat globals for the effect system
 	lua_pushcfunction(b.L, redin_http)
 	lua_setglobal(b.L, "redin_http")
+	lua_pushcfunction(b.L, redin_shell)
+	lua_setglobal(b.L, "redin_shell")
 
 	load_fennel(b.L)
 	load_runtime(b.L)
@@ -76,6 +81,7 @@ destroy :: proc(b: ^Bridge) {
 		hotreload_destroy(&b.hot_reload)
 	}
 	http_client_destroy(&b.http_client)
+	shell_client_destroy(&b.shell_client)
 	clear_frame(b)
 	for k in b.theme {
 		delete(k)
@@ -664,6 +670,107 @@ deliver_http_response :: proc(b: ^Bridge, resp: ^Http_Response) {
 	if lua_pcall(L, 1, 0, 0) != 0 {
 		msg := lua_tostring_raw(L, -1)
 		fmt.eprintfln("HTTP response delivery error: %s", msg)
+		lua_pop(L, 1)
+	}
+}
+
+// redin.shell(id, cmd_table, stdin) — queue async shell command
+redin_shell :: proc "c" (L: ^Lua_State) -> i32 {
+	context = runtime.default_context()
+	if g_bridge == nil do return 0
+
+	req: Shell_Request
+
+	if lua_isstring(L, 1) do req.id = strings.clone_from_cstring(lua_tostring_raw(L, 1))
+
+	// Read cmd table (sequential array of strings)
+	if lua_istable(L, 2) {
+		cmd_idx := i32(2)
+		count := int(lua_objlen(L, cmd_idx))
+		cmd := make([]string, count)
+		for i in 0 ..< count {
+			lua_rawgeti(L, cmd_idx, i32(i + 1))
+			if lua_isstring(L, -1) {
+				cmd[i] = strings.clone_from_cstring(lua_tostring_raw(L, -1))
+			}
+			lua_pop(L, 1)
+		}
+		req.cmd = cmd
+	}
+
+	if lua_isstring(L, 3) {
+		req.stdin = strings.clone_from_cstring(lua_tostring_raw(L, 3))
+	} else {
+		req.stdin = strings.clone("")
+	}
+
+	shell_client_request(&g_bridge.shell_client, req)
+	return 0
+}
+
+// Poll shell responses and deliver to Lua. Called each frame from main loop.
+poll_shell :: proc(b: ^Bridge) {
+	results: [dynamic]Shell_Response
+	defer delete(results)
+	shell_client_poll(&b.shell_client, &results)
+	for &resp in results {
+		deliver_shell_response(b, &resp)
+		shell_response_destroy(&resp)
+	}
+}
+
+deliver_shell_response :: proc(b: ^Bridge, resp: ^Shell_Response) {
+	L := b.L
+
+	lua_getglobal(L, "redin_events")
+	if lua_isnil(L, -1) {
+		lua_pop(L, 1)
+		return
+	}
+
+	// Build events table: [[:shell-response {id, stdout, stderr, exit-code, error}]]
+	lua_createtable(L, 1, 0)
+	lua_createtable(L, 2, 0)
+
+	lua_pushstring(L, ":shell-response")
+	lua_rawseti(L, -2, 1)
+
+	// Response data table
+	lua_createtable(L, 0, 5)
+
+	if len(resp.id) > 0 {
+		cid := strings.clone_to_cstring(resp.id)
+		lua_pushstring(L, cid)
+		delete(cid)
+		lua_setfield(L, -2, "id")
+	}
+
+	if len(resp.stdout) > 0 {
+		lua_pushlstring(L, cstring(raw_data(transmute([]u8)resp.stdout)), uint(len(resp.stdout)))
+		lua_setfield(L, -2, "stdout")
+	}
+
+	if len(resp.stderr) > 0 {
+		lua_pushlstring(L, cstring(raw_data(transmute([]u8)resp.stderr)), uint(len(resp.stderr)))
+		lua_setfield(L, -2, "stderr")
+	}
+
+	lua_pushnumber(L, f64(resp.exit_code))
+	lua_setfield(L, -2, "exit-code")
+
+	if len(resp.error_msg) > 0 {
+		cerr := strings.clone_to_cstring(resp.error_msg)
+		lua_pushstring(L, cerr)
+		delete(cerr)
+		lua_setfield(L, -2, "error")
+	}
+
+	lua_rawseti(L, -2, 2)
+	lua_rawseti(L, -2, 1)
+
+	if lua_pcall(L, 1, 0, 0) != 0 {
+		msg := lua_tostring_raw(L, -1)
+		fmt.eprintfln("Shell response delivery error: %s", msg)
 		lua_pop(L, 1)
 	}
 }
