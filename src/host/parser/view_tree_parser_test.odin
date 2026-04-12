@@ -51,7 +51,7 @@ test_parse_vbox_with_aspect :: proc(t: ^testing.T) {
 	vb, is_vb := tree.data.(types.NodeVbox)
 	testing.expect(t, is_vb, "should be NodeVbox")
 	testing.expect_value(t, vb.aspect, "surface")
-	testing.expect_value(t, vb.layoutX, types.LayoutX.CENTER)
+	testing.expect_value(t, vb.layout, types.Anchor.CENTER)
 }
 
 @(test)
@@ -108,7 +108,7 @@ test_parse_hbox :: proc(t: ^testing.T) {
 	h, is_h := tree.data.(types.NodeHbox)
 	testing.expect(t, is_h, "should be NodeHbox")
 	testing.expect_value(t, h.aspect, "toolbar")
-	testing.expect_value(t, h.layoutX, types.LayoutX.LEFT)
+	testing.expect_value(t, h.layout, types.Anchor.TOP_LEFT)
 }
 
 @(test)

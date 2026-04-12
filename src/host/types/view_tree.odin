@@ -1,17 +1,5 @@
 package types
 
-LayoutX :: enum {
-	CENTER,
-	LEFT, // default
-	RIGHT,
-}
-
-LayoutY :: enum {
-	CENTER, // default
-	TOP,
-	BOTTOM,
-}
-
 SizeValue :: enum {
 	FULL,
 }
@@ -27,7 +15,7 @@ ViewportValue :: union {
 	Fraction,
 }
 
-ViewportAnchor :: enum u8 {
+Anchor :: enum u8 {
 	TOP_LEFT,
 	TOP_CENTER,
 	TOP_RIGHT,
@@ -40,7 +28,7 @@ ViewportAnchor :: enum u8 {
 }
 
 ViewportRect :: struct {
-	anchor: ViewportAnchor,
+	anchor: Anchor,
 	x:      ViewportValue,
 	y:      ViewportValue,
 	w:      ViewportValue,
@@ -76,8 +64,7 @@ NodeCanvas :: struct {
 
 NodeVbox :: struct {
 	overflow:        string,
-	layoutX:         LayoutX,
-	layoutY:         LayoutY,
+	layout:          Anchor,
 	aspect:          string,
 	width:           union {
 		SizeValue,
@@ -97,8 +84,7 @@ NodeVbox :: struct {
 
 NodeHbox :: struct {
 	overflow:        string,
-	layoutX:         LayoutX,
-	layoutY:         LayoutY,
+	layout:          Anchor,
 	aspect:          string,
 	width:           union {
 		SizeValue,
@@ -149,8 +135,7 @@ NodeButton :: struct {
 }
 
 NodeText :: struct {
-	layoutX:  LayoutX,
-	layoutY:  LayoutY,
+	layout:   Anchor,
 	content:  string,
 	aspect:   string,
 	width:    union {

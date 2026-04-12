@@ -117,9 +117,9 @@ render_node :: proc(
 			render_children_stack(idx, rect, nodes, children_list, theme)
 		}
 	case types.NodeVbox:
-		draw_box(idx, rect, n.aspect, n.layoutX, true, n.overflow, nodes, children_list, theme)
+		draw_box(idx, rect, n.aspect, n.layout, true, n.overflow, nodes, children_list, theme)
 	case types.NodeHbox:
-		draw_box(idx, rect, n.aspect, n.layoutX, false, n.overflow, nodes, children_list, theme)
+		draw_box(idx, rect, n.aspect, n.layout, false, n.overflow, nodes, children_list, theme)
 	case types.NodeCanvas:
 		// Draw aspect chrome (bg, border, radius, padding)
 		content_rect := rect
@@ -260,7 +260,7 @@ draw_box :: proc(
 	idx: int,
 	rect: rl.Rectangle,
 	aspect: string,
-	layoutX: types.LayoutX,
+	layout: types.Anchor,
 	vertical: bool,
 	overflow: string,
 	nodes: []types.Node,
@@ -369,9 +369,41 @@ draw_box :: proc(
 		)
 	}
 
+	// Determine anchor axes
+	anchor_h: int = 0 // 0=left, 1=center, 2=right
+	anchor_v: int = 0 // 0=top, 1=center, 2=bottom
+	#partial switch layout {
+	case .TOP_CENTER, .CENTER, .BOTTOM_CENTER:
+		anchor_h = 1
+	case .TOP_RIGHT, .CENTER_RIGHT, .BOTTOM_RIGHT:
+		anchor_h = 2
+	}
+	#partial switch layout {
+	case .CENTER_LEFT, .CENTER, .CENTER_RIGHT:
+		anchor_v = 1
+	case .BOTTOM_LEFT, .BOTTOM_CENTER, .BOTTOM_RIGHT:
+		anchor_v = 2
+	}
+
 	// Second pass: layout and render
-	center := layoutX == .CENTER
 	pos := (vertical ? content_rect.y : content_rect.x) - scroll_off
+
+	// Main-axis alignment: offset pos based on anchor (only when no fill nodes)
+	if fill_count == 0 {
+		if vertical {
+			if anchor_v == 1 {
+				pos = content_rect.y + (available - fixed_total) / 2 - scroll_off
+			} else if anchor_v == 2 {
+				pos = content_rect.y + available - fixed_total - scroll_off
+			}
+		} else {
+			if anchor_h == 1 {
+				pos = content_rect.x + (available - fixed_total) / 2
+			} else if anchor_h == 2 {
+				pos = content_rect.x + available - fixed_total
+			}
+		}
+	}
 
 	for i in 0 ..< int(ch.length) {
 		child_idx := int(ch.value[i])
@@ -382,10 +414,15 @@ draw_box :: proc(
 			if h <= 0 do h = fill_size
 			child_x := content_rect.x
 			child_w := content_rect.width
-			if center {
+			// Cross-axis (horizontal) alignment
+			if anchor_h > 0 {
 				w := node_preferred_width(child_idx, nodes)
 				if w > 0 {
-					child_x = content_rect.x + (content_rect.width - w) / 2
+					if anchor_h == 1 {
+						child_x = content_rect.x + (content_rect.width - w) / 2
+					} else {
+						child_x = content_rect.x + content_rect.width - w
+					}
 					child_w = w
 				}
 			}
@@ -394,7 +431,21 @@ draw_box :: proc(
 		} else {
 			w := node_preferred_width(child_idx, nodes)
 			if w <= 0 do w = fill_size
-			child_rect = rl.Rectangle{pos, content_rect.y, w, content_rect.height}
+			child_y := content_rect.y
+			child_h := content_rect.height
+			// Cross-axis (vertical) alignment
+			if anchor_v > 0 {
+				h := node_preferred_height(child_idx, nodes, theme)
+				if h > 0 {
+					if anchor_v == 1 {
+						child_y = content_rect.y + (content_rect.height - h) / 2
+					} else {
+						child_y = content_rect.y + content_rect.height - h
+					}
+					child_h = h
+				}
+			}
+			child_rect = rl.Rectangle{pos, child_y, w, child_h}
 			pos += w
 		}
 
@@ -761,14 +812,34 @@ draw_text :: proc(idx: int, rect: rl.Rectangle, n: types.NodeText, theme: map[st
 		rl.BeginScissorMode(i32(rect.x), i32(rect.y), i32(rect.width), i32(rect.height))
 	}
 
+	// Vertical alignment
+	total_text_h := f32(len(lines)) * lh
+	y_offset: f32 = 0
+	#partial switch n.layout {
+	case .CENTER_LEFT, .CENTER, .CENTER_RIGHT:
+		y_offset = (rect.height - total_text_h) / 2
+	case .BOTTOM_LEFT, .BOTTOM_CENTER, .BOTTOM_RIGHT:
+		y_offset = rect.height - total_text_h
+	}
+
 	for line, i in lines {
-		ly := rect.y + f32(i) * lh - scroll_y
+		ly := rect.y + f32(i) * lh - scroll_y + y_offset
 		if ly + lh < rect.y do continue
 		if ly > rect.y + rect.height do break
 
 		if line.start < line.end {
 			cstr := strings.clone_to_cstring(n.content[line.start:line.end], context.temp_allocator)
-			rl.DrawTextEx(f, cstr, {px(rect.x - scroll_x), px(ly)}, font_size, spacing, text_color)
+			lx := rect.x - scroll_x
+			// Horizontal alignment
+			#partial switch n.layout {
+			case .TOP_CENTER, .CENTER, .BOTTOM_CENTER:
+				line_w := rl.MeasureTextEx(f, cstr, font_size, spacing).x
+				lx = rect.x + (rect.width - line_w) / 2
+			case .TOP_RIGHT, .CENTER_RIGHT, .BOTTOM_RIGHT:
+				line_w := rl.MeasureTextEx(f, cstr, font_size, spacing).x
+				lx = rect.x + rect.width - line_w
+			}
+			rl.DrawTextEx(f, cstr, {px(lx), px(ly)}, font_size, spacing, text_color)
 		}
 	}
 

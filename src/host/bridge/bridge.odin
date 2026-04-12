@@ -840,14 +840,8 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 			}
 			lua_pop(L, 1)
 			layout := lua_get_string_field_raw(L, attrs_idx, "layout")
-			switch layout {
-			case "center":
-				v.layoutX = .CENTER
-				v.layoutY = .CENTER
-			case "left":
-				v.layoutX = .LEFT
-			case "right":
-				v.layoutX = .RIGHT
+			if len(layout) > 0 {
+				v.layout = parse_anchor(layout)
 			}
 			v.draggable_group, v.draggable_event, v.draggable_ctx = lua_get_drag_drop(L, attrs_idx, "draggable")
 			v.dropable_group, v.dropable_event, v.dropable_ctx = lua_get_drag_drop(L, attrs_idx, "dropable")
@@ -862,14 +856,8 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 			h.width = lua_get_size_f32(L, attrs_idx, "width")
 			h.height = lua_get_size_f32(L, attrs_idx, "height")
 			layout := lua_get_string_field_raw(L, attrs_idx, "layout")
-			switch layout {
-			case "center":
-				h.layoutX = .CENTER
-				h.layoutY = .CENTER
-			case "left":
-				h.layoutX = .LEFT
-			case "right":
-				h.layoutX = .RIGHT
+			if len(layout) > 0 {
+				h.layout = parse_anchor(layout)
 			}
 			h.draggable_group, h.draggable_event, h.draggable_ctx = lua_get_drag_drop(L, attrs_idx, "draggable")
 			h.dropable_group, h.dropable_event, h.dropable_ctx = lua_get_drag_drop(L, attrs_idx, "dropable")
@@ -909,14 +897,8 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 			t.width = lua_get_size_f32(L, attrs_idx, "width")
 			t.height = lua_get_size_f32(L, attrs_idx, "height")
 			layout := lua_get_string_field_raw(L, attrs_idx, "layout")
-			switch layout {
-			case "center":
-				t.layoutX = .CENTER
-				t.layoutY = .CENTER
-			case "left":
-				t.layoutX = .LEFT
-			case "right":
-				t.layoutX = .RIGHT
+			if len(layout) > 0 {
+				t.layout = parse_anchor(layout)
 			}
 			t.overflow = lua_get_string_field(L, attrs_idx, "overflow")
 		}
@@ -1351,7 +1333,7 @@ push_input_event_as_lua :: proc(L: ^Lua_State, event: types.InputEvent) {
 	}
 }
 
-parse_anchor :: proc(s: string) -> types.ViewportAnchor {
+parse_anchor :: proc(s: string) -> types.Anchor {
 	switch s {
 	case "top_left":      return .TOP_LEFT
 	case "top_center":    return .TOP_CENTER

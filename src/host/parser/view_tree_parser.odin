@@ -168,6 +168,21 @@ _parse_props :: proc(p: ^_Parser) -> map[string]_Prop {
 	return props
 }
 
+_parse_anchor :: proc(s: string) -> types.Anchor {
+	switch s {
+	case "top_left":      return .TOP_LEFT
+	case "top_center":    return .TOP_CENTER
+	case "top_right":     return .TOP_RIGHT
+	case "center_left":   return .CENTER_LEFT
+	case "center":        return .CENTER
+	case "center_right":  return .CENTER_RIGHT
+	case "bottom_left":   return .BOTTOM_LEFT
+	case "bottom_center": return .BOTTOM_CENTER
+	case "bottom_right":  return .BOTTOM_RIGHT
+	case:                 return .TOP_LEFT
+	}
+}
+
 _parse_size_f32 :: proc(v: _Prop) -> union {types.SizeValue, f32} {
 	switch v.kind {
 	case .Keyword:
@@ -245,15 +260,7 @@ _parse_element :: proc(p: ^_Parser) -> (_Tree_Node, bool) {
 			v.overflow = strings.clone(ov.str_val)
 		}
 		if l, ok := props["layout"]; ok {
-			switch l.str_val {
-			case "center":
-				v.layoutX = .CENTER
-				v.layoutY = .CENTER
-			case "left":
-				v.layoutX = .LEFT
-			case "right":
-				v.layoutX = .RIGHT
-			}
+			v.layout = _parse_anchor(l.str_val)
 		}
 		if a, ok := props["aspect"]; ok do v.aspect = strings.clone(a.str_val)
 		if w, ok := props["width"]; ok {
@@ -281,15 +288,7 @@ _parse_element :: proc(p: ^_Parser) -> (_Tree_Node, bool) {
 		h: types.NodeHbox
 		if ov, ok := props["overflow"]; ok do h.overflow = strings.clone(ov.str_val)
 		if l, ok := props["layout"]; ok {
-			switch l.str_val {
-			case "center":
-				h.layoutX = .CENTER
-				h.layoutY = .CENTER
-			case "left":
-				h.layoutX = .LEFT
-			case "right":
-				h.layoutX = .RIGHT
-			}
+			h.layout = _parse_anchor(l.str_val)
 		}
 		if a, ok := props["aspect"]; ok do h.aspect = strings.clone(a.str_val)
 		if w, ok := props["width"]; ok do h.width = _parse_size_f32(w)
@@ -318,15 +317,7 @@ _parse_element :: proc(p: ^_Parser) -> (_Tree_Node, bool) {
 		if w, ok := props["width"]; ok do t.width = _parse_size_f32(w)
 		if h, ok := props["height"]; ok do t.height = _parse_size_f32(h)
 		if l, ok := props["layout"]; ok {
-			switch l.str_val {
-			case "center":
-				t.layoutX = .CENTER
-				t.layoutY = .CENTER
-			case "left":
-				t.layoutX = .LEFT
-			case "right":
-				t.layoutX = .RIGHT
-			}
+			t.layout = _parse_anchor(l.str_val)
 		}
 		result.data = t
 	case "image":
