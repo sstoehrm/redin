@@ -23,6 +23,7 @@ Canvas_Entry :: struct {
 }
 
 entries: map[string]Canvas_Entry
+current_name: string
 
 register :: proc(name: string, provider: Canvas_Provider) {
 	if existing, ok := entries[name]; ok {
@@ -51,6 +52,7 @@ unregister :: proc(name: string) {
 process :: proc(provider_name: string, rect: rl.Rectangle) {
 	entry, ok := &entries[provider_name]
 	if !ok do return
+	current_name = provider_name
 
 	switch entry.lifecycle {
 	case .Idle, .Suspended:
