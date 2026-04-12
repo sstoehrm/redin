@@ -115,4 +115,118 @@
   (assert (= captured-w 800) "width passed")
   (assert (= captured-h 600) "height passed"))
 
+;; --- registry ---
+
+(fn t.test-register-stores-draw-fn []
+  (setup)
+  (var called false)
+  (canvas.register :test-reg (fn [ctx] (set called true)))
+  (canvas._draw :test-reg 100 100 {})
+  (assert called "draw fn was called"))
+
+(fn t.test-unregister-removes-draw-fn []
+  (setup)
+  (var called false)
+  (canvas.register :test-unreg (fn [ctx] (set called true)))
+  (canvas.unregister :test-unreg)
+  (let [buf (canvas._draw :test-unreg 100 100 {})]
+    (assert (= buf nil) "returns nil after unregister")
+    (assert (not called) "draw fn not called")))
+
+(fn t.test-draw-unknown-name-returns-nil []
+  (setup)
+  (let [buf (canvas._draw :nonexistent 100 100 {})]
+    (assert (= buf nil) "nil for unknown")))
+
+(fn t.test-fresh-buffer-per-call []
+  (setup)
+  (canvas.register :test-fresh
+    (fn [ctx] (ctx.rect 0 0 10 10 {})))
+  (let [buf1 (canvas._draw :test-fresh 100 100 {})
+        buf2 (canvas._draw :test-fresh 100 100 {})]
+    (assert (= (length buf1) 1) "first call has 1")
+    (assert (= (length buf2) 1) "second call has 1")
+    (assert (~= buf1 buf2) "different buffer objects")))
+
+;; --- input queries ---
+
+(fn t.test-ctx-mouse-position []
+  (setup)
+  (var mx nil)
+  (var my nil)
+  (canvas.register :test-mouse
+    (fn [ctx]
+      (set mx (ctx.mouse-x))
+      (set my (ctx.mouse-y))))
+  (canvas._draw :test-mouse 400 300
+    {:mouse-x 150 :mouse-y 200})
+  (assert (= mx 150) "mouse-x")
+  (assert (= my 200) "mouse-y"))
+
+(fn t.test-ctx-mouse-defaults-to-zero []
+  (setup)
+  (var mx nil)
+  (canvas.register :test-mouse-default
+    (fn [ctx] (set mx (ctx.mouse-x))))
+  (canvas._draw :test-mouse-default 400 300 {})
+  (assert (= mx 0) "defaults to 0"))
+
+(fn t.test-ctx-mouse-in []
+  (setup)
+  (var inside nil)
+  (canvas.register :test-mouse-in
+    (fn [ctx] (set inside (ctx.mouse-in?))))
+  (canvas._draw :test-mouse-in 400 300 {:mouse-in true})
+  (assert (= inside true) "mouse is in"))
+
+(fn t.test-ctx-mouse-buttons []
+  (setup)
+  (var down nil)
+  (var pressed nil)
+  (var released nil)
+  (canvas.register :test-buttons
+    (fn [ctx]
+      (set down (ctx.mouse-down?))
+      (set pressed (ctx.mouse-pressed?))
+      (set released (ctx.mouse-released?))))
+  (canvas._draw :test-buttons 400 300
+    {:mouse-down {:left true :right false :middle false}
+     :mouse-pressed {:left false :right false :middle false}
+     :mouse-released {:left false :right false :middle false}})
+  (assert (= down true) "left down")
+  (assert (= pressed false) "not pressed")
+  (assert (= released false) "not released"))
+
+(fn t.test-ctx-mouse-button-right []
+  (setup)
+  (var right-down nil)
+  (canvas.register :test-right
+    (fn [ctx]
+      (set right-down (ctx.mouse-down? :right))))
+  (canvas._draw :test-right 400 300
+    {:mouse-down {:left false :right true :middle false}})
+  (assert (= right-down true) "right down"))
+
+;; --- dispatch ---
+
+(fn t.test-ctx-dispatch []
+  (setup)
+  (let [dispatched []]
+    (set _G.dispatch (fn [event] (table.insert dispatched event)))
+    (canvas.register :test-dispatch
+      (fn [ctx]
+        (ctx.dispatch [:test-event {:x 10}])))
+    (canvas._draw :test-dispatch 400 300 {})
+    (set _G.dispatch nil)
+    (assert (= (length dispatched) 1) "one event dispatched")
+    (assert (= (. (. dispatched 1) 1) :test-event) "event name")))
+
+;; --- init wiring ---
+
+(fn t.test-canvas-global-set-after-register-globals []
+  (setup)
+  (canvas.register-globals)
+  (assert _G.redin_canvas_draw "redin_canvas_draw global exists")
+  (set _G.redin_canvas_draw nil))
+
 t
