@@ -10,6 +10,7 @@ import "base:runtime"
 import "../font"
 import "../types"
 import rl "vendor:raylib"
+import "../canvas"
 
 Bridge :: struct {
 	L:              ^Lua_State,
@@ -50,6 +51,10 @@ init :: proc(b: ^Bridge, dev_mode: bool) {
 	register_cfunc(b.L, "http", redin_http)
 	register_cfunc(b.L, "json_encode", redin_json_encode)
 	register_cfunc(b.L, "json_decode", redin_json_decode)
+	register_cfunc(b.L, "canvas_register", redin_canvas_register)
+	register_cfunc(b.L, "canvas_unregister", redin_canvas_unregister)
+	register_cfunc(b.L, "key_down", redin_key_down)
+	register_cfunc(b.L, "key_pressed", redin_key_pressed)
 	lua_setglobal(b.L, "redin")
 
 	// Also expose redin_http as a flat global for the effect system
@@ -239,6 +244,62 @@ redin_http :: proc "c" (L: ^Lua_State) -> i32 {
 
 	http_client_request(&g_bridge.http_client, req)
 	return 0
+}
+
+// ---------------------------------------------------------------------------
+// Fennel canvas provider
+// ---------------------------------------------------------------------------
+
+fennel_canvas_update :: proc(rect: rl.Rectangle) {
+	if g_bridge == nil do return
+	lua_canvas_draw(g_bridge, canvas.current_name, rect)
+}
+
+fennel_canvas_provider := canvas.Canvas_Provider {
+	start   = nil,
+	update  = fennel_canvas_update,
+	suspend = nil,
+	stop    = nil,
+}
+
+redin_canvas_register :: proc "c" (L: ^Lua_State) -> i32 {
+	context = runtime.default_context()
+	if lua_isstring(L, 1) {
+		name := strings.clone_from_cstring(lua_tostring_raw(L, 1))
+		canvas.register(name, fennel_canvas_provider)
+	}
+	return 0
+}
+
+redin_canvas_unregister :: proc "c" (L: ^Lua_State) -> i32 {
+	context = runtime.default_context()
+	if lua_isstring(L, 1) {
+		name := string(lua_tostring_raw(L, 1))
+		canvas.unregister(name)
+	}
+	return 0
+}
+
+redin_key_down :: proc "c" (L: ^Lua_State) -> i32 {
+	context = runtime.default_context()
+	if lua_isstring(L, 1) {
+		key := string_to_key(string(lua_tostring_raw(L, 1)))
+		lua_pushboolean(L, rl.IsKeyDown(key) ? 1 : 0)
+	} else {
+		lua_pushboolean(L, 0)
+	}
+	return 1
+}
+
+redin_key_pressed :: proc "c" (L: ^Lua_State) -> i32 {
+	context = runtime.default_context()
+	if lua_isstring(L, 1) {
+		key := string_to_key(string(lua_tostring_raw(L, 1)))
+		lua_pushboolean(L, rl.IsKeyPressed(key) ? 1 : 0)
+	} else {
+		lua_pushboolean(L, 0)
+	}
+	return 1
 }
 
 // Poll HTTP responses and deliver to Lua. Called each frame from main loop.
@@ -1200,6 +1261,78 @@ key_to_string :: proc(key: rl.KeyboardKey) -> cstring {
 	case .EIGHT:     return "8"
 	case .NINE:      return "9"
 	case:            return "unknown"
+	}
+}
+
+string_to_key :: proc(name: string) -> rl.KeyboardKey {
+	switch name {
+	case "enter":     return .ENTER
+	case "escape":    return .ESCAPE
+	case "backspace": return .BACKSPACE
+	case "tab":       return .TAB
+	case "space":     return .SPACE
+	case "up":        return .UP
+	case "down":      return .DOWN
+	case "left":      return .LEFT
+	case "right":     return .RIGHT
+	case "delete":    return .DELETE
+	case "home":      return .HOME
+	case "end":       return .END
+	case "pageup":    return .PAGE_UP
+	case "pagedown":  return .PAGE_DOWN
+	case "insert":    return .INSERT
+	case "f1":        return .F1
+	case "f2":        return .F2
+	case "f3":        return .F3
+	case "f4":        return .F4
+	case "f5":        return .F5
+	case "f6":        return .F6
+	case "f7":        return .F7
+	case "f8":        return .F8
+	case "f9":        return .F9
+	case "f10":       return .F10
+	case "f11":       return .F11
+	case "f12":       return .F12
+	case "a":         return .A
+	case "b":         return .B
+	case "c":         return .C
+	case "d":         return .D
+	case "e":         return .E
+	case "f":         return .F
+	case "g":         return .G
+	case "h":         return .H
+	case "i":         return .I
+	case "j":         return .J
+	case "k":         return .K
+	case "l":         return .L
+	case "m":         return .M
+	case "n":         return .N
+	case "o":         return .O
+	case "p":         return .P
+	case "q":         return .Q
+	case "r":         return .R
+	case "s":         return .S
+	case "t":         return .T
+	case "u":         return .U
+	case "v":         return .V
+	case "w":         return .W
+	case "x":         return .X
+	case "y":         return .Y
+	case "z":         return .Z
+	case "0":         return .ZERO
+	case "1":         return .ONE
+	case "2":         return .TWO
+	case "3":         return .THREE
+	case "4":         return .FOUR
+	case "5":         return .FIVE
+	case "6":         return .SIX
+	case "7":         return .SEVEN
+	case "8":         return .EIGHT
+	case "9":         return .NINE
+	case "shift":     return .LEFT_SHIFT
+	case "ctrl":      return .LEFT_CONTROL
+	case "alt":       return .LEFT_ALT
+	case:             return .KEY_NULL
 	}
 }
 
