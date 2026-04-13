@@ -1,11 +1,16 @@
 (local view (require :view))
 (local dataflow (require :dataflow))
+(local effect (require :effect))
 
 (local t {})
 
 (fn setup []
   (dataflow.reset)
+  (effect.reset)
   (view.reset)
+  (dataflow.register-globals)
+  (effect.register-globals)
+  (dataflow.set-effect-handler effect.execute)
   (set _G.main_view nil))
 
 ;; --- render tick ---
@@ -123,5 +128,77 @@
   (dataflow.init {})
   (view.deliver-events [])
   (assert true "empty events list ok"))
+
+;; --- response event routing ---
+;; These tests verify the full delivery path: view.deliver-events routes
+;; response events to the correct effect handler, which dispatches to
+;; the registered callback. This catches colon-prefix mismatches between
+;; the Odin bridge (which sends the event type string) and Fennel
+;; (which compares against it).
+
+(fn t.test-deliver-http-response-routes-to-effect []
+  (setup)
+  (let [effect (require :effect)]
+    (effect.reset)
+    (dataflow.init {:result nil})
+    (dataflow.reg-handler :event/http-done
+      (fn [db event]
+        (dataflow.assoc db :result (. event 2 :body))))
+    ;; Register the http effect and queue a pending request
+    (let [calls []]
+      (set _G.redin_http (fn [id ...] (table.insert calls {:id id})))
+      (effect.execute {:db nil
+                       :http {:url "http://test"
+                              :on-success :event/http-done
+                              :on-error :event/http-fail}})
+      (let [id (. (. calls 1) :id)]
+        (set _G.redin_http nil)
+        ;; Simulate what the Odin bridge sends: event type WITHOUT colon
+        (view.deliver-events [[:http-response {:id id :status 200 :body "ok"}]])
+        (assert (= (rawget (dataflow._get-raw-db) :result) "ok")
+                "http-response routed through deliver-events to effect handler")))))
+
+(fn t.test-deliver-shell-response-routes-to-effect []
+  (setup)
+  (let [effect (require :effect)]
+    (effect.reset)
+    (dataflow.init {:output nil})
+    (dataflow.reg-handler :event/shell-done
+      (fn [db event]
+        (dataflow.assoc db :output (. event 2 :stdout))))
+    (let [calls []]
+      (set _G.redin_shell (fn [id ...] (table.insert calls {:id id})))
+      (effect.execute {:db nil
+                       :shell {:cmd ["echo" "hello"]
+                               :on-success :event/shell-done
+                               :on-error :event/shell-fail}})
+      (let [id (. (. calls 1) :id)]
+        (set _G.redin_shell nil)
+        ;; Simulate what the Odin bridge sends
+        (view.deliver-events [[:shell-response {:id id :stdout "hello\n" :stderr "" :exit-code 0}]])
+        (assert (= (rawget (dataflow._get-raw-db) :output) "hello\n")
+                "shell-response routed through deliver-events to effect handler")))))
+
+(fn t.test-deliver-shell-error-routes-to-on-error []
+  (setup)
+  (let [effect (require :effect)]
+    (effect.reset)
+    (dataflow.init {:error-code nil})
+    (dataflow.reg-handler :event/shell-done
+      (fn [db event] db))
+    (dataflow.reg-handler :event/shell-fail
+      (fn [db event]
+        (dataflow.assoc db :error-code (. event 2 :exit-code))))
+    (let [calls []]
+      (set _G.redin_shell (fn [id ...] (table.insert calls {:id id})))
+      (effect.execute {:db nil
+                       :shell {:cmd ["false"]
+                               :on-success :event/shell-done
+                               :on-error :event/shell-fail}})
+      (let [id (. (. calls 1) :id)]
+        (set _G.redin_shell nil)
+        (view.deliver-events [[:shell-response {:id id :stdout "" :stderr "fail" :exit-code 1}]])
+        (assert (= (rawget (dataflow._get-raw-db) :error-code) 1)
+                "shell error routed to on-error handler")))))
 
 t
