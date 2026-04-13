@@ -204,15 +204,61 @@ odin build src/host -out:build/redin
 
 ## Adding a host function (framework development)
 
-1. `src/host/bridge/bridge.odin` — write `proc "c" (L: ^Lua_State) -> i32` callback with `context = runtime.default_context()`
+1. `src/host/bridge/bridge.odin` — write `proc "c" (L: ^Lua_State) -> i32` callback with `context = g_context`
 2. `src/host/bridge/bridge.odin` — register with `register_cfunc(b.L, "name", callback)` in `init` proc
 3. Call from Fennel: `(redin.name ...)` or from Lua: `redin.name(...)`
+
+## redin-cli
+
+Project manager for redin. Install: `curl -sL https://raw.githubusercontent.com/sstoehrm/redin-cli/main/install.sh | bash` (requires Babashka).
+
+| Command | Description |
+|---|---|
+| `redin-cli new-fnl <name>` | Scaffold Fennel project (main.fnl, flsproject.fnl, .redin/, skills/) |
+| `redin-cli new-lua <name>` | Scaffold Lua project (main.lua, .luarc.json, .redin/, skills/) |
+| `redin-cli upgrade-to-native` | Copy Odin host source into native/ for custom canvas providers |
+| `redin-cli update [version]` | Update redin binary + runtime in .redin/ |
+| `redin-cli latest` | Print latest available version |
+| `redin-cli help` | Show all commands, project structure, dev server endpoints |
+
+### Project structure (after new-fnl/new-lua)
+
+```
+my-app/
+  .redin/          # binary + runtime + docs (gitignored)
+  skills/          # Claude Code skill (gitignored, extracted from .redin/)
+  redinw           # wrapper script: exec .redin/redin "$@"
+  main.fnl         # app code (or main.lua)
+  flsproject.fnl   # Fennel linter config (or .luarc.json for Lua)
+  .gitignore       # ignores .redin/ and skills/
+```
+
+### Native upgrade (after upgrade-to-native)
+
+```
+my-app/
+  native/          # full Odin host source + providers.odin
+    build.sh       # odin build native/ -out:build/redin
+    providers.odin # user's custom canvas providers (package host)
+    main.odin      # copied from .redin/, init_providers() injected
+    ...            # rest of host source
+  build/           # native build output (gitignored)
+  redinw           # updated: prefers build/redin over .redin/redin
+```
+
+### Running
+
+```bash
+./redinw --dev main.fnl          # dev server + hot reload
+./redinw main.fnl                # normal mode
+./redinw --track-mem main.fnl    # memory leak tracking
+```
 
 ## Key conventions
 
 - String ownership in bridge: `strings.clone_from_cstring` for persisted strings, `string(lua_tostring_raw(...))` for transient reads
 - Lua stack: every push needs a matching pop/defer-pop
-- Host callbacks: `proc "c"` needs `context = runtime.default_context()` at the start
+- Host callbacks: `proc "c"` needs `context = g_context` at the start (uses saved init context for tracking allocator compatibility)
 - Flat parallel arrays for view tree: `nodes[]`, `paths[]`, `parent_indices[]`, `children_list[]` (DFS order, i32 indices)
 - `focused_idx` lives in the `input` package, read by `render` for cursor
 - `node_rects` lives in `render`, passed as parameter to input functions
