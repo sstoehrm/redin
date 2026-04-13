@@ -214,8 +214,8 @@ Project manager for redin. Install: `curl -sL https://raw.githubusercontent.com/
 
 | Command | Description |
 |---|---|
-| `redin-cli new-fnl <name>` | Scaffold Fennel project (main.fnl, flsproject.fnl, .redin/, skills/) |
-| `redin-cli new-lua <name>` | Scaffold Lua project (main.lua, .luarc.json, .redin/, skills/) |
+| `redin-cli new-fnl <name>` | Scaffold Fennel project (main.fnl, flsproject.fnl, .redin/, .claude/skills/) |
+| `redin-cli new-lua <name>` | Scaffold Lua project (main.lua, .luarc.json, .redin/, .claude/skills/) |
 | `redin-cli upgrade-to-native` | Copy Odin host source into native/ for custom canvas providers |
 | `redin-cli update [version]` | Update redin binary + runtime in .redin/ |
 | `redin-cli latest` | Print latest available version |
@@ -226,11 +226,11 @@ Project manager for redin. Install: `curl -sL https://raw.githubusercontent.com/
 ```
 my-app/
   .redin/          # binary + runtime + docs (gitignored)
-  skills/          # Claude Code skill (gitignored, extracted from .redin/)
+  .claude/skills/  # Claude Code skill (extracted from .redin/)
   redinw           # wrapper script: exec .redin/redin "$@"
   main.fnl         # app code (or main.lua)
   flsproject.fnl   # Fennel linter config (or .luarc.json for Lua)
-  .gitignore       # ignores .redin/ and skills/
+  .gitignore       # ignores .redin/
 ```
 
 ### Native upgrade (after upgrade-to-native)
