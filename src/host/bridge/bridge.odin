@@ -28,9 +28,11 @@ Bridge :: struct {
 }
 
 g_bridge: ^Bridge
+g_context: runtime.Context
 
 init :: proc(b: ^Bridge, dev_mode: bool) {
 	g_bridge = b
+	g_context = context
 	b.dev_mode = dev_mode
 	http_client_init(&b.http_client)
 	shell_client_init(&b.shell_client)
@@ -178,7 +180,7 @@ clear_frame :: proc(b: ^Bridge) {
 // ---------------------------------------------------------------------------
 
 redin_log :: proc "c" (L: ^Lua_State) -> i32 {
-	context = runtime.default_context()
+	context = g_context
 	n := lua_gettop(L)
 	for i: i32 = 1; i <= n; i += 1 {
 		if i > 1 do fmt.print("\t")
@@ -201,7 +203,7 @@ redin_log :: proc "c" (L: ^Lua_State) -> i32 {
 }
 
 redin_now :: proc "c" (L: ^Lua_State) -> i32 {
-	context = runtime.default_context()
+	context = g_context
 	t := time.now()
 	secs := f64(time.to_unix_nanoseconds(t)) / 1e9
 	lua_pushnumber(L, secs)
@@ -209,7 +211,7 @@ redin_now :: proc "c" (L: ^Lua_State) -> i32 {
 }
 
 redin_measure_text :: proc "c" (L: ^Lua_State) -> i32 {
-	context = runtime.default_context()
+	context = g_context
 	text := lua_tostring_raw(L, 1)
 	font_size := f32(lua_tonumber(L, 2))
 	font_name := "sans"
@@ -226,7 +228,7 @@ redin_measure_text :: proc "c" (L: ^Lua_State) -> i32 {
 
 // redin.push(frame) — convert Lua frame table to flat parallel arrays
 redin_push :: proc "c" (L: ^Lua_State) -> i32 {
-	context = runtime.default_context()
+	context = g_context
 	if g_bridge == nil do return 0
 
 	clear_frame(g_bridge)
@@ -243,7 +245,7 @@ redin_push :: proc "c" (L: ^Lua_State) -> i32 {
 
 // redin.set_theme(theme) — convert Lua theme table to map[string]Theme
 redin_set_theme :: proc "c" (L: ^Lua_State) -> i32 {
-	context = runtime.default_context()
+	context = g_context
 	if g_bridge == nil do return 0
 	if lua_istable(L, 1) {
 		// Load font-face declarations before processing theme
@@ -265,7 +267,7 @@ redin_set_theme :: proc "c" (L: ^Lua_State) -> i32 {
 
 // redin.http(id, url, method, headers, body, timeout) — queue async HTTP request
 redin_http :: proc "c" (L: ^Lua_State) -> i32 {
-	context = runtime.default_context()
+	context = g_context
 	if g_bridge == nil do return 0
 
 	req: Http_Request
@@ -317,7 +319,7 @@ fennel_canvas_provider := canvas.Canvas_Provider {
 }
 
 redin_canvas_register :: proc "c" (L: ^Lua_State) -> i32 {
-	context = runtime.default_context()
+	context = g_context
 	if lua_isstring(L, 1) {
 		name := strings.clone_from_cstring(lua_tostring_raw(L, 1))
 		canvas.register(name, fennel_canvas_provider)
@@ -326,7 +328,7 @@ redin_canvas_register :: proc "c" (L: ^Lua_State) -> i32 {
 }
 
 redin_canvas_unregister :: proc "c" (L: ^Lua_State) -> i32 {
-	context = runtime.default_context()
+	context = g_context
 	if lua_isstring(L, 1) {
 		name := string(lua_tostring_raw(L, 1))
 		canvas.unregister(name)
@@ -626,7 +628,7 @@ execute_canvas_command :: proc(L: ^Lua_State, idx: i32, tag: string, ox: f32, oy
 }
 
 redin_key_down :: proc "c" (L: ^Lua_State) -> i32 {
-	context = runtime.default_context()
+	context = g_context
 	if lua_isstring(L, 1) {
 		key := string_to_key(string(lua_tostring_raw(L, 1)))
 		lua_pushboolean(L, rl.IsKeyDown(key) ? 1 : 0)
@@ -637,7 +639,7 @@ redin_key_down :: proc "c" (L: ^Lua_State) -> i32 {
 }
 
 redin_key_pressed :: proc "c" (L: ^Lua_State) -> i32 {
-	context = runtime.default_context()
+	context = g_context
 	if lua_isstring(L, 1) {
 		key := string_to_key(string(lua_tostring_raw(L, 1)))
 		lua_pushboolean(L, rl.IsKeyPressed(key) ? 1 : 0)
@@ -724,7 +726,7 @@ deliver_http_response :: proc(b: ^Bridge, resp: ^Http_Response) {
 
 // redin.shell(id, cmd_table, stdin) — queue async shell command
 redin_shell :: proc "c" (L: ^Lua_State) -> i32 {
-	context = runtime.default_context()
+	context = g_context
 	if g_bridge == nil do return 0
 
 	req: Shell_Request
