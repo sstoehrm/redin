@@ -108,12 +108,60 @@ check_hotreload :: proc(b: ^Bridge) {
 	}
 }
 
+clear_node_strings :: proc(n: types.Node) {
+	switch v in n {
+	case types.NodeStack:
+		if v.viewport != nil do delete(v.viewport)
+	case types.NodeCanvas:
+		if len(v.provider) > 0 do delete(v.provider)
+		if len(v.aspect) > 0 do delete(v.aspect)
+	case types.NodeVbox:
+		if len(v.overflow) > 0 do delete(v.overflow)
+		if len(v.aspect) > 0 do delete(v.aspect)
+		if len(v.draggable_group) > 0 do delete(v.draggable_group)
+		if len(v.draggable_event) > 0 do delete(v.draggable_event)
+		if len(v.dropable_group) > 0 do delete(v.dropable_group)
+		if len(v.dropable_event) > 0 do delete(v.dropable_event)
+	case types.NodeHbox:
+		if len(v.overflow) > 0 do delete(v.overflow)
+		if len(v.aspect) > 0 do delete(v.aspect)
+		if len(v.draggable_group) > 0 do delete(v.draggable_group)
+		if len(v.draggable_event) > 0 do delete(v.draggable_event)
+		if len(v.dropable_group) > 0 do delete(v.dropable_group)
+		if len(v.dropable_event) > 0 do delete(v.dropable_event)
+	case types.NodeInput:
+		if len(v.change) > 0 do delete(v.change)
+		if len(v.key) > 0 do delete(v.key)
+		if len(v.aspect) > 0 do delete(v.aspect)
+		if len(v.value) > 0 do delete(v.value)
+		if len(v.placeholder) > 0 do delete(v.placeholder)
+		if len(v.overflow) > 0 do delete(v.overflow)
+	case types.NodeButton:
+		if len(v.click) > 0 do delete(v.click)
+		if len(v.label) > 0 do delete(v.label)
+		if len(v.aspect) > 0 do delete(v.aspect)
+	case types.NodeText:
+		if len(v.content) > 0 do delete(v.content)
+		if len(v.aspect) > 0 do delete(v.aspect)
+		if len(v.overflow) > 0 do delete(v.overflow)
+	case types.NodeImage:
+		if len(v.aspect) > 0 do delete(v.aspect)
+	case types.NodePopout:
+		if len(v.aspect) > 0 do delete(v.aspect)
+	case types.NodeModal:
+		if len(v.aspect) > 0 do delete(v.aspect)
+	}
+}
+
 clear_frame :: proc(b: ^Bridge) {
 	for &p in b.paths {
 		delete(p.value)
 	}
 	delete(b.paths)
 	b.paths = {}
+	for &n in b.nodes {
+		clear_node_strings(n)
+	}
 	delete(b.nodes)
 	b.nodes = {}
 	delete(b.parent_indices)
@@ -619,11 +667,11 @@ deliver_http_response :: proc(b: ^Bridge, resp: ^Http_Response) {
 		return
 	}
 
-	// Build events table with 1 entry: [":http-response", {id, status, body, headers, error}]
+	// Build events table with 1 entry: ["http-response", {id, status, body, headers, error}]
 	lua_createtable(L, 1, 0)
 	lua_createtable(L, 2, 0)
 
-	lua_pushstring(L, ":http-response")
+	lua_pushstring(L, "http-response")
 	lua_rawseti(L, -2, 1)
 
 	// Response data table
@@ -732,7 +780,7 @@ deliver_shell_response :: proc(b: ^Bridge, resp: ^Shell_Response) {
 	lua_createtable(L, 1, 0)
 	lua_createtable(L, 2, 0)
 
-	lua_pushstring(L, ":shell-response")
+	lua_pushstring(L, "shell-response")
 	lua_rawseti(L, -2, 1)
 
 	// Response data table

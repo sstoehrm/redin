@@ -65,6 +65,7 @@ main :: proc() {
 	defer delete(listeners)
 
 	for !rl.WindowShouldClose() && !bridge.is_shutdown_requested(&b) {
+		free_all(context.temp_allocator)
 		bridge.check_hotreload(&b)
 
 		if b.frame_changed {
