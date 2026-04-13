@@ -11,36 +11,39 @@ import "types"
 import rl "vendor:raylib"
 
 main :: proc() {
-	when ODIN_DEBUG {
-		track: mem.Tracking_Allocator
-		mem.tracking_allocator_init(&track, context.allocator)
-		context.allocator = mem.tracking_allocator(&track)
-
-		defer {
-			if len(track.allocation_map) > 0 {
-				fmt.eprintf("=== %v allocations not freed: ===\n", len(track.allocation_map))
-				for _, entry in track.allocation_map {
-					fmt.eprintf("- %v bytes @ %v\n", entry.size, entry.location)
-				}
-			}
-			if len(track.bad_free_array) > 0 {
-				fmt.eprintf("=== %v incorrect frees: ===\n", len(track.bad_free_array))
-				for entry in track.bad_free_array {
-					fmt.eprintf("- %p @ %v\n", entry.memory, entry.location)
-				}
-			}
-			mem.tracking_allocator_destroy(&track)
-		}
-	}
-
 	dev_mode := false
+	track_mem := false
 	app_file := ""
 	for arg in os.args[1:] {
 		if arg == "--dev" {
 			dev_mode = true
+		} else if arg == "--track-mem" {
+			track_mem = true
 		} else {
 			app_file = arg
 		}
+	}
+
+	track: mem.Tracking_Allocator
+	if track_mem {
+		mem.tracking_allocator_init(&track, context.allocator)
+		context.allocator = mem.tracking_allocator(&track)
+		fmt.eprintln("Memory tracking enabled (--track-mem)")
+	}
+	defer if track_mem {
+		if len(track.allocation_map) > 0 {
+			fmt.eprintf("=== %v allocations not freed: ===\n", len(track.allocation_map))
+			for _, entry in track.allocation_map {
+				fmt.eprintf("- %v bytes @ %v\n", entry.size, entry.location)
+			}
+		}
+		if len(track.bad_free_array) > 0 {
+			fmt.eprintf("=== %v incorrect frees: ===\n", len(track.bad_free_array))
+			for entry in track.bad_free_array {
+				fmt.eprintf("- %p @ %v\n", entry.memory, entry.location)
+			}
+		}
+		mem.tracking_allocator_destroy(&track)
 	}
 
 	rl.SetConfigFlags({.WINDOW_RESIZABLE, .WINDOW_HIGHDPI, .MSAA_4X_HINT})
