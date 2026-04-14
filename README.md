@@ -78,7 +78,7 @@ src/runtime/             Fennel runtime modules
 examples/                Demo apps
 test/lua/                Fennel unit tests
 test/ui/                 UI integration tests (Babashka)
-skills/                  Claude Code development skill
+.claude/skills/          Claude Code development skills
 docs/                    Documentation
 ```
 
