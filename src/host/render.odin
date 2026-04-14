@@ -332,7 +332,7 @@ draw_box :: proc(
 	for i in 0 ..< int(ch.length) {
 		child_idx := int(ch.value[i])
 		s :=
-			vertical ? node_preferred_height(child_idx, nodes, theme) : node_preferred_width(child_idx, nodes)
+			vertical ? node_preferred_height(child_idx, nodes, theme, content_rect.width) : node_preferred_width(child_idx, nodes)
 		if s > 0 {
 			fixed_total += s
 		} else {
@@ -410,7 +410,7 @@ draw_box :: proc(
 
 		child_rect: rl.Rectangle
 		if vertical {
-			h := node_preferred_height(child_idx, nodes, theme)
+			h := node_preferred_height(child_idx, nodes, theme, content_rect.width)
 			if h <= 0 do h = fill_size
 			child_x := content_rect.x
 			child_w := content_rect.width
@@ -435,7 +435,7 @@ draw_box :: proc(
 			child_h := content_rect.height
 			// Cross-axis (vertical) alignment
 			if anchor_v > 0 {
-				h := node_preferred_height(child_idx, nodes, theme)
+				h := node_preferred_height(child_idx, nodes, theme, w)
 				if h > 0 {
 					if anchor_v == 1 {
 						child_y = content_rect.y + (content_rect.height - h) / 2
@@ -520,6 +520,7 @@ node_preferred_height :: proc(
 	idx: int,
 	nodes: []types.Node,
 	theme: map[string]types.Theme,
+	available_width: f32 = 0,
 ) -> f32 {
 	switch n in nodes[idx] {
 	case types.NodeInput:
@@ -529,12 +530,26 @@ node_preferred_height :: proc(
 	case types.NodeText:
 		h := size_f32(n.height)
 		if h > 0 do return h
+
+		font_size: f32 = 18
+		font_name := "sans"
+		font_weight: u8 = 0
 		if len(n.aspect) > 0 {
-			if t, ok := theme[n.aspect]; ok && t.font_size > 0 {
-				return f32(t.font_size) + 4
+			if t, ok := theme[n.aspect]; ok {
+				if t.font_size > 0 do font_size = f32(t.font_size)
+				if len(t.font) > 0 do font_name = t.font
+				font_weight = t.weight
 			}
 		}
-		return 22
+		lh := text_pkg.line_height(font_size)
+
+		if available_width > 0 && len(n.content) > 0 && n.overflow != "scroll-x" {
+			f := font.get(font_name, font.style_from_weight(font.Font_Weight(font_weight)))
+			lines := text_pkg.compute_lines(n.content, f, font_size, 0, available_width)
+			defer delete(lines)
+			return f32(len(lines)) * lh
+		}
+		return lh
 	case types.NodeImage:
 		return size_f32(n.height)
 	case types.NodeVbox:
