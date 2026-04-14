@@ -69,7 +69,7 @@ jobs:
           cp docs/guide/*.md dist/docs/guide/ 2>/dev/null || true
           cp docs/reference/*.md dist/docs/reference/ 2>/dev/null || true
           mkdir -p dist/skills/redin-dev
-          cp skills/redin-dev/SKILL.md dist/skills/redin-dev/
+          cp .claude/skills/redin-dev/SKILL.md dist/skills/redin-dev/
           [ -f LICENSE ] && cp LICENSE dist/ || true
           tar czf "redin-${VERSION}-linux-amd64.tar.gz" -C dist .
 
