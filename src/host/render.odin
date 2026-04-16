@@ -331,8 +331,14 @@ draw_box :: proc(
 	fill_count: int = 0
 	for i in 0 ..< int(ch.length) {
 		child_idx := int(ch.value[i])
-		s :=
-			vertical ? node_preferred_height(child_idx, nodes, theme, content_rect.width) : node_preferred_width(child_idx, nodes)
+		s: f32
+		if vertical {
+			s = scrollable \
+				? intrinsic_height(child_idx, nodes, children_list, theme, content_rect.width) \
+				: node_preferred_height(child_idx, nodes, theme, content_rect.width)
+		} else {
+			s = node_preferred_width(child_idx, nodes)
+		}
 		if s > 0 {
 			fixed_total += s
 		} else {
@@ -410,7 +416,9 @@ draw_box :: proc(
 
 		child_rect: rl.Rectangle
 		if vertical {
-			h := node_preferred_height(child_idx, nodes, theme, content_rect.width)
+			h := scrollable \
+				? intrinsic_height(child_idx, nodes, children_list, theme, content_rect.width) \
+				: node_preferred_height(child_idx, nodes, theme, content_rect.width)
 			if h <= 0 do h = fill_size
 			child_x := content_rect.x
 			child_w := content_rect.width
@@ -562,6 +570,69 @@ node_preferred_height :: proc(
 		return size_f16(n.height)
 	case types.NodeStack, types.NodeModal:
 		return 0
+	}
+	return 0
+}
+
+// Natural content height for use in scrollable containers. When a child
+// inside a scroll-y vbox has no explicit height, layout must still give
+// it a non-zero rect — otherwise children collapse to the same Y. For
+// nested boxes this means recursing over the subtree.
+intrinsic_height :: proc(
+	idx: int,
+	nodes: []types.Node,
+	children_list: []types.Children,
+	theme: map[string]types.Theme,
+	available_width: f32,
+) -> f32 {
+	if idx < 0 || idx >= len(nodes) do return 0
+
+	switch n in nodes[idx] {
+	case types.NodeVbox:
+		h := size_f16(n.height)
+		if h > 0 do return h
+		pad: [4]u8
+		if len(n.aspect) > 0 {
+			if t, ok := theme[n.aspect]; ok do pad = t.padding
+		}
+		inner_w := available_width - f32(pad[1]) - f32(pad[3])
+		total := f32(pad[0]) + f32(pad[2])
+		ch := children_list[idx]
+		for i in 0 ..< int(ch.length) {
+			total += intrinsic_height(int(ch.value[i]), nodes, children_list, theme, inner_w)
+		}
+		return total
+
+	case types.NodeHbox:
+		h := size_f32(n.height)
+		if h > 0 do return h
+		pad: [4]u8
+		if len(n.aspect) > 0 {
+			if t, ok := theme[n.aspect]; ok do pad = t.padding
+		}
+		ch := children_list[idx]
+		if ch.length == 0 do return f32(pad[0]) + f32(pad[2])
+		inner_w := available_width - f32(pad[1]) - f32(pad[3])
+		share := inner_w / f32(ch.length)
+		max_h: f32 = 0
+		for i in 0 ..< int(ch.length) {
+			ch_h := intrinsic_height(int(ch.value[i]), nodes, children_list, theme, share)
+			if ch_h > max_h do max_h = ch_h
+		}
+		return max_h + f32(pad[0]) + f32(pad[2])
+
+	case types.NodeStack:
+		ch := children_list[idx]
+		max_h: f32 = 0
+		for i in 0 ..< int(ch.length) {
+			ch_h := intrinsic_height(int(ch.value[i]), nodes, children_list, theme, available_width)
+			if ch_h > max_h do max_h = ch_h
+		}
+		return max_h
+
+	case types.NodeText, types.NodeInput, types.NodeButton, types.NodeImage,
+	     types.NodeCanvas, types.NodePopout, types.NodeModal:
+		return node_preferred_height(idx, nodes, theme, available_width)
 	}
 	return 0
 }
