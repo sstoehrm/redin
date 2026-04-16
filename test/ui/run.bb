@@ -10,6 +10,7 @@
 (def host (or (some->> cli-args (partition 2 1) (filter #(= (first %) "--host")) first second)
               "localhost"))
 (def port (or (some->> cli-args (partition 2 1) (filter #(= (first %) "--port")) first second parse-long)
+              (read-port-file)
               8800))
 
 (def test-files

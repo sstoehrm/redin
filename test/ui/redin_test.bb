@@ -5,7 +5,14 @@
 
 (ns redin-test
   (:require [babashka.http-client :as http]
-            [cheshire.core :as json]))
+            [cheshire.core :as json]
+            [clojure.string :as str]))
+
+(defn read-port-file
+  "Read the dev server port from ./.redin-port if it exists."
+  []
+  (let [f (clojure.java.io/file ".redin-port")]
+    (when (.isFile f) (some-> (slurp f) str/trim parse-long))))
 
 ;; ---------------------------------------------------------------------------
 ;; Connection state
@@ -21,10 +28,12 @@
 ;; ---------------------------------------------------------------------------
 
 (defn connect!
-  "Open HTTP connection to the dev server."
+  "Open HTTP connection to the dev server.
+   Port defaults to ./.redin-port if present, else 8800."
   ([] (connect! {}))
-  ([{:keys [host port] :or {host "localhost" port 8800}}]
-   (let [base (str "http://" host ":" port)]
+  ([{:keys [host port] :or {host "localhost"}}]
+   (let [port (or port (read-port-file) 8800)
+         base (str "http://" host ":" port)]
      (reset! conn {:base-url base})
      @conn)))
 

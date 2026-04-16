@@ -17,7 +17,7 @@ These docs are the source of truth. When implementing, follow them exactly.
 
 - **Host/renderer:** Odin + Raylib
 - **Scripting:** LuaJIT (Lua 5.1 API) with Fennel compiled to Lua 5.1 target
-- **AI interface:** localhost HTTP dev server (port 8800, `--dev` mode)
+- **AI interface:** localhost HTTP dev server (`--dev` mode). Default port 8800; if busy, walks upward to the next free port. Actual port is written to `./.redin-port` and cleaned up on shutdown.
 
 ## Building
 
@@ -85,7 +85,7 @@ src/runtime/        Fennel runtime (loaded by bridge at startup)
 
 ## Dev server HTTP API
 
-Available when running with `--dev` on `http://localhost:8800`. Used by UI tests and for interactive debugging.
+Available when running with `--dev`. Listens on port 8800 by default; walks upward (8801, 8802, ...) if busy, and writes the bound port to `./.redin-port`. Used by UI tests and for interactive debugging.
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -99,7 +99,7 @@ Available when running with `--dev` on `http://localhost:8800`. Used by UI tests
 | `POST` | `/shutdown` | Request graceful shutdown |
 | `PUT` | `/aspects` | Replace the theme map (JSON body) |
 
-Example: `curl http://localhost:8800/state/counter`
+Example: `curl http://localhost:$(cat .redin-port)/state/counter`
 
 ## Key conventions
 

@@ -36,12 +36,17 @@ Sync_Queue :: struct {
 Dev_Server :: struct {
 	bridge:             ^Bridge,
 	tcp_sock:           net.TCP_Socket,
+	port:               int,
 	server_thread:      ^thread.Thread,
 	incoming:           Sync_Queue,
 	event_queue:        [dynamic]types.InputEvent,
 	running:            bool,
 	shutdown_requested: bool,
 }
+
+PORT_FILE :: ".redin-port"
+PORT_BASE :: 8800
+PORT_RANGE :: 100
 
 // --- Sync queue ---
 
@@ -68,26 +73,42 @@ devserver_init :: proc(ds: ^Dev_Server, b: ^Bridge) {
 	ds.running = true
 	queue.init(&ds.incoming.q)
 
-	endpoint := net.Endpoint{
-		address = net.IP4_Loopback,
-		port    = 8800,
+	sock: net.TCP_Socket
+	bound_port := 0
+	last_err: net.Network_Error
+	for offset in 0 ..< PORT_RANGE {
+		p := PORT_BASE + offset
+		s, err := net.listen_tcp(net.Endpoint{address = net.IP4_Loopback, port = p})
+		if err == nil {
+			sock = s
+			bound_port = p
+			break
+		}
+		last_err = err
 	}
-	sock, sock_err := net.listen_tcp(endpoint)
-	if sock_err != nil {
-		fmt.eprintfln("Dev server listen error: %v", sock_err)
+	if bound_port == 0 {
+		fmt.eprintfln("Dev server listen error (tried %d-%d): %v", PORT_BASE, PORT_BASE + PORT_RANGE - 1, last_err)
 		ds.running = false
 		return
 	}
+
 	ds.tcp_sock = sock
+	ds.port = bound_port
+
+	port_str := fmt.tprintf("%d", bound_port)
+	if err := os.write_entire_file(PORT_FILE, port_str); err != nil {
+		fmt.eprintfln("Warning: could not write %s: %v", PORT_FILE, err)
+	}
+
 	ds.server_thread = thread.create_and_start_with_poly_data(ds, server_thread_proc, context)
-	fmt.println("Dev server listening on http://localhost:8800")
+	fmt.printfln("Dev server listening on http://localhost:%d", bound_port)
 }
 
 devserver_destroy :: proc(ds: ^Dev_Server) {
 	if ds.running {
 		ds.running = false
 		// Connect to unblock the accept call
-		if unblock, err := net.dial_tcp(net.Endpoint{address = net.IP4_Loopback, port = 8800}); err == nil {
+		if unblock, err := net.dial_tcp(net.Endpoint{address = net.IP4_Loopback, port = ds.port}); err == nil {
 			net.close(unblock)
 		}
 		if ds.server_thread != nil {
@@ -95,6 +116,7 @@ devserver_destroy :: proc(ds: ^Dev_Server) {
 			thread.destroy(ds.server_thread)
 		}
 		net.close(ds.tcp_sock)
+		os.remove(PORT_FILE)
 	}
 	queue.destroy(&ds.incoming.q)
 	delete(ds.event_queue)

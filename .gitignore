@@ -15,6 +15,9 @@ test/*/leak_test
 # Build output
 build/
 
+# Dev server runtime port file (written by --dev mode)
+.redin-port
+
 # Integration test working directory
 test/integration/testapp/
 

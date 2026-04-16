@@ -9,7 +9,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 BINARY="$ROOT_DIR/build/redin"
-PORT=8800
+PORT_FILE="$ROOT_DIR/.redin-port"
+PORT=""
 TOTAL_PASSED=0
 TOTAL_FAILED=0
 
@@ -21,7 +22,13 @@ echo ""
 wait_for_server() {
   local timeout=10
   local start=$SECONDS
-  while ! curl -s "http://localhost:$PORT/frames" >/dev/null 2>&1; do
+  while true; do
+    if [ -f "$PORT_FILE" ]; then
+      PORT="$(cat "$PORT_FILE")"
+      if [ -n "$PORT" ] && curl -s "http://localhost:$PORT/frames" >/dev/null 2>&1; then
+        return 0
+      fi
+    fi
     if (( SECONDS - start >= timeout )); then
       echo "ERROR: Dev server did not start within ${timeout}s"
       return 1
@@ -43,6 +50,7 @@ for test_file in "$SCRIPT_DIR"/test_*.bb; do
   echo "=== $name ==="
 
   # Start dev server in background
+  rm -f "$PORT_FILE"
   "$BINARY" --dev "$app_file" &
   SERVER_PID=$!
 
