@@ -50,8 +50,8 @@
 (local consumption
   {:text    {:color true :font true :font-size true :weight true :line-height true :align true :opacity true}
    :image   {:opacity true}
-   :hbox    {:bg true :padding true :gap true :opacity true}
-   :vbox    {:bg true :padding true :gap true :opacity true}
+   :hbox    {:bg true :padding true :opacity true}
+   :vbox    {:bg true :padding true :opacity true}
    :input   {:bg true :color true :border true :font true :font-size true :weight true :line-height true :align true :padding true :radius true :border-width true :opacity true}
    :modal   {:bg true :opacity true}
    :popout  {:bg true :border true :padding true :radius true :border-width true :opacity true :shadow true}
@@ -70,7 +70,7 @@
 (local color-props {:bg true :color true :border true :cursor true :selection true :placeholder true :scrollbar true})
 (local weight-values {:normal true :bold true})
 (local align-values {:left true :center true :right true})
-(local numeric-props {:font-size true :radius true :border-width true :gap true :line-height true :scrollbar-width true :scrollbar-radius true})
+(local numeric-props {:font-size true :radius true :border-width true :line-height true :scrollbar-width true :scrollbar-radius true})
 
 (fn validate-color [v aspect prop errors]
   (if (~= (type v) "table")

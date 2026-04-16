@@ -27,7 +27,7 @@ A translation guide for developers who know re-frame. The programming model is t
 
 **No namespaced keywords.** Use `/` in strings: `"event/increment"`, `"sub/counter"`.
 
-**Visual properties belong in the theme only.** Never put `color`, `bg`, `font-size`, etc. on a frame element. Define an aspect in the theme and reference it: `{:aspect :button}`. Elements carry structural attributes only (`gap`, `padding`, `width`, `align`).
+**Visual properties belong in the theme only.** Never put `color`, `bg`, `font-size`, etc. on a frame element. Define an aspect in the theme and reference it: `{:aspect :button}`. Elements carry structural attributes only (`padding`, `width`, `align`).
 
 **State variants use `#`.** Theme keys like `:button#hover` and `:input#focus` use `#` as the separator between the base aspect and the state variant.
 
@@ -80,7 +80,7 @@ A translation guide for developers who know re-frame. The programming model is t
   (fn []
     (let [count (subscribe :sub/counter)]
       {:frame
-       [:vbox {:gap 16 :padding [24 24 24 24]}
+       [:vbox {:padding [24 24 24 24]}
          [:text {:aspect :heading} (tostring count)]
          [:button {:aspect :button :click [:event/increment]} "+1"]]
        :bind {}})))

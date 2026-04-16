@@ -75,7 +75,7 @@ A frame is a nested array: `[tag, attrs, ...children]`.
 - Position 3+: children (nested frames) or content (string for `text`, `button`)
 
 ```fennel
-[:vbox {:gap 8}
+[:vbox {}
   [:text {:aspect :body} "hello"]
   [:hbox {}
     [:text {} "content"]]]
@@ -87,7 +87,7 @@ Children that are nested lists (a table whose first element is a table, not a st
 
 ```fennel
 ;; icollect returns a list -- flattened into vbox's children
-[:vbox {:gap 8}
+[:vbox {}
   [:text {:aspect :heading} "Todos"]
   (icollect [_ item (ipairs items)]
     [:hbox {} [:text {} item.text]])
@@ -98,7 +98,7 @@ Children that are nested lists (a table whose first element is a table, not a st
   [[:text {:aspect :muted} status]
    [:text {:aspect :muted} "v1.0"]])
 
-[:hbox {:gap 8}
+[:hbox {}
   [:text {} "File"]
   (status-icons "Ready")]
 ```
@@ -157,7 +157,7 @@ The flattening is a single pass when the frame enters the pipeline. No fragment 
 | `x`        | number                  | popout (fixed position x) |
 | `y`        | number                  | popout (fixed position y) |
 
-**Rule:** Visual properties (`bg`, `color`, `border`, `font-size`, `font`, `weight`, `radius`, `border-width`, `opacity`, `shadow`, `line-height`, `padding`, `gap`) belong in the theme only, never on elements.
+**Rule:** Visual properties (`bg`, `color`, `border`, `font-size`, `font`, `weight`, `radius`, `border-width`, `opacity`, `shadow`, `line-height`, `padding`) belong in the theme only, never on elements.
 
 ### Sizing model
 
@@ -234,7 +234,6 @@ The theme is a global flat map: `keyword -> property-table`. Elements reference 
 |            | `align`                                                              | `"left"` `"center"` `"right"`    |
 | Shape      | `radius` `border-width`                                              | px number                        |
 | Spacing    | `padding`                                                            | px or `[v h]` or `[t r b l]`     |
-|            | `gap`                                                                | px number                        |
 | Display    | `opacity`                                                            | 0--1                             |
 |            | `shadow`                                                             | `[x y blur [r g b a]]`           |
 
@@ -243,16 +242,16 @@ The theme is a global flat map: `keyword -> property-table`. Elements reference 
 ### Which elements consume which properties
 
 ```
-            bg  color  border  font  padding  radius  border-w  gap  opacity  shadow
-text         .    x      .      x      .        .       .       .      x       .
-image        .    .      .      .      .        .       .       .      x       .
-hbox         x    .      .      .      x        .       .       x      x       .
-vbox         x    .      .      .      x        .       .       x      x       .
-input        x    x      x      x      x        x       x       .      x       .
-button       x    x      .      .      .        x       .       .      .       .
-modal        x    .      .      .      .        .       .       .      x       .
-popout       x    .      x      .      x        x       x       .      x       x
-canvas       x    .      x      .      x        x       x       .      x       .
+            bg  color  border  font  padding  radius  border-w  opacity  shadow
+text         .    x      .      x      .        .       .         x       .
+image        .    .      .      .      .        .       .         x       .
+hbox         x    .      .      .      x        .       .         x       .
+vbox         x    .      .      .      x        .       .         x       .
+input        x    x      x      x      x        x       x         x       .
+button       x    x      .      .      .        x       .         .       .
+modal        x    .      .      .      .        .       .         x       .
+popout       x    .      x      .      x        x       x         x       x
+canvas       x    .      x      .      x        x       x         x       .
 ```
 
 Properties not consumed by an element are ignored silently.

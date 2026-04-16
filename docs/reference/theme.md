@@ -103,15 +103,15 @@ Weight values: 0 = normal (default), 1 = bold, 2 = italic.
 Properties not consumed by an element are ignored silently. The consumption matrix is defined in `src/runtime/theme.fnl`.
 
 ```
-            bg  color  border  font  padding  radius  border-w  gap  opacity  shadow
-text         .    x      .      x      .        .       .       .      x       .
-image        .    .      .      .      .        .       .       .      x       .
-hbox         x    .      .      .      x        .       .       x      x       .
-vbox         x    .      .      .      x        .       .       x      x       .
-input        x    x      x      x      x        x       x       .      x       .
-modal        x    .      .      .      .        .       .       .      x       .
-popout       x    .      x      .      x        x       x       .      x       x
-canvas       x    .      x      .      x        x       x       .      x       .
+            bg  color  border  font  padding  radius  border-w  opacity  shadow
+text         .    x      .      x      .        .       .         x       .
+image        .    .      .      .      .        .       .         x       .
+hbox         x    .      .      .      x        .       .         x       .
+vbox         x    .      .      .      x        .       .         x       .
+input        x    x      x      x      x        x       x         x       .
+modal        x    .      .      .      .        .       .         x       .
+popout       x    .      x      .      x        x       x         x       x
+canvas       x    .      x      .      x        x       x         x       .
 ```
 
 Column key: `x` = consumed, `.` = ignored. `font` covers `font-size`, `weight`, `line-height`, `align`. `border-w` = `border-width`.
@@ -199,6 +199,6 @@ Validation is implemented in `src/runtime/theme.fnl`. Checks include:
 | | `weight` must be `"normal"` or `"bold"` |
 | | `align` must be `"left"`, `"center"`, or `"right"` |
 | Opacity range | `opacity` must be a number in `[0, 1]` |
-| Numeric types | `font-size`, `radius`, `border-width`, `gap`, `line-height`, `scrollbar-width`, `scrollbar-radius` must be numbers |
+| Numeric types | `font-size`, `radius`, `border-width`, `line-height`, `scrollbar-width`, `scrollbar-radius` must be numbers |
 | Shadow format | `shadow` must be `[x y blur [r g b a]]` |
 | Padding format | `padding` must be a number, `[v h]`, or `[t r b l]` |

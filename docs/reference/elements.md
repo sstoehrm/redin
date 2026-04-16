@@ -30,7 +30,7 @@ A frame is a nested array: `[tag, attrs, ...children]`.
 | 3+ | Children (nested frames) or string content (for `text`) |
 
 ```fennel
-[:vbox {:gap 8}
+[:vbox {}
   [:text {:aspect :body} "hello"]
   [:button {:click :event/save :aspect :button} "Save"]]
 ```
@@ -40,7 +40,7 @@ A frame is a nested array: `[tag, attrs, ...children]`.
 A child whose first element is itself a table (not a string tag) is automatically spliced into the parent's children. This means loops and multi-element component functions need no wrapper container.
 
 ```fennel
-[:vbox {:gap 8}
+[:vbox {}
   [:text {:aspect :heading} "Todos"]
   (icollect [_ item (ipairs items)]
     [:hbox {} [:text {} item.text]])]
@@ -210,7 +210,7 @@ When `viewport` is set, the entry count must exactly match the child count. The 
 ;; Basic stack (no viewport) -- children overlap at full size
 [:stack {}
   [:canvas {:provider :dot-grid :width "full" :height "full"}]
-  [:vbox {:gap 16}
+  [:vbox {}
     [:text {:aspect :heading} "App title"]]]
 
 ;; Viewport stack -- absolute positioning
@@ -232,13 +232,12 @@ Lays out children in a horizontal row, left to right.
 
 | Attribute | Type | Default | Notes |
 | --------- | ---- | ------- | ----- |
-| `gap` | px number | `0` | Space between children. |
 | `overflow` | string | -- | Overflow handling strategy. |
 | `layoutX` | `"left"` \| `"center"` \| `"right"` | `"left"` | Horizontal alignment. |
 | `layoutY` | `"top"` \| `"center"` \| `"bottom"` | `"center"` | Vertical alignment. |
 
 ```fennel
-[:hbox {:gap 8}
+[:hbox {}
   [:image {:src "assets/avatar.png" :width 32 :height 32}]
   [:text {:aspect :body} "Alice"]]
 ```
@@ -251,14 +250,14 @@ Lays out children in a vertical column, top to bottom.
 
 **Required attrs:** none
 
-**Optional attrs:** identical to `hbox` -- `gap`, `overflow`, `layoutX`, `layoutY`.
+**Optional attrs:** identical to `hbox` -- `overflow`, `layoutX`, `layoutY`.
 
 `layoutX` affects horizontal (cross-axis) alignment; `layoutY` affects vertical (main-axis) alignment.
 
 ```fennel
-[:vbox {:gap 12}
+[:vbox {}
   [:text {:aspect :heading} "Settings"]
-  [:hbox {:gap 8}
+  [:hbox {}
     [:text {:aspect :label} "Theme"]
     [:input {:aspect :input :value (subscribe :theme-name) :change :event/theme-changed}]]]
 ```
@@ -276,14 +275,14 @@ Background color and opacity come from `aspect`.
 
 ```fennel
 [:vbox {}
-  [:hbox {:gap 8}
+  [:hbox {}
     [:text {:aspect :heading} "Dashboard"]]
 
   (when (subscribe :modal-open?)
     [:modal {:aspect :overlay}
-      [:vbox {:gap 12}
+      [:vbox {}
         [:text {:aspect :heading} "Delete item?"]
-        [:hbox {:gap 8}
+        [:hbox {}
           [:button {:click :event/cancel :aspect :button} "Cancel"]
           [:button {:click :event/confirm :aspect [:button :danger]} "Delete"]]]])]
 ```
@@ -311,7 +310,7 @@ Visual properties come from `aspect`.
   [:button {:click :event/open-menu :aspect :button} "File"]
   (when (subscribe :file-menu-open?)
     [:popout {:aspect :surface}
-      [:vbox {:gap 2}
+      [:vbox {}
         [:button {:click :event/new-file :aspect :button} "New File"]
         [:button {:click :event/open-file :aspect :button} "Open..."]
         [:button {:click :event/quit :aspect :button} "Quit"]]])]

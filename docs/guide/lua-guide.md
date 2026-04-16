@@ -110,10 +110,10 @@ both use `{}`. Maps use `key = value`; arrays use positional values.
 
 ```lua
 -- Map
-{gap = 16, padding = 24}
+{padding = 24, width = 200}
 
 -- Array / frame node
-{"vbox", {gap = 16}, {"text", {}, "hello"}}
+{"vbox", {}, {"text", {}, "hello"}}
 ```
 
 ### Event vectors
