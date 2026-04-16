@@ -257,7 +257,7 @@ int_to_str :: proc(buf: []u8, val: int) -> string {
 	return string(buf[i:])
 }
 
-CORS_HEADERS :: "Access-Control-Allow-Origin: http://localhost:8800\r\nAccess-Control-Allow-Methods: GET, POST, PUT, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type"
+CORS_HEADERS :: "Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, PUT, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type"
 
 find_content_length :: proc(headers: string) -> int {
 	lower := strings.to_lower(headers, context.temp_allocator)
