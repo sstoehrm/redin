@@ -110,7 +110,8 @@ devserver_drain_events :: proc(ds: ^Dev_Server, events: ^[dynamic]types.InputEve
 // --- Simple blocking HTTP server thread ---
 
 server_thread_proc :: proc(ds: ^Dev_Server) {
-	buf: [8192]u8
+	stack_buf: [8192]u8
+	MAX_BODY :: 1024 * 1024
 
 	for ds.running {
 		client, _, accept_err := net.accept_tcp(ds.tcp_sock)
@@ -118,8 +119,13 @@ server_thread_proc :: proc(ds: ^Dev_Server) {
 			break
 		}
 
+		buf: []u8 = stack_buf[:]
+		heap_buf: []u8
+		defer if heap_buf != nil do delete(heap_buf)
+
 		// Read full request into buffer
 		total := 0
+		too_large := false
 		for {
 			n, recv_err := net.recv_tcp(client, buf[total:])
 			if recv_err != nil || n <= 0 {
@@ -133,18 +139,36 @@ server_thread_proc :: proc(ds: ^Dev_Server) {
 					// Check Content-Length for body
 					cl := find_content_length(req_str[:header_end])
 					body_start := header_end + 4
-					if cl > 0 {
-						needed := body_start + cl
-						for total < needed && total < len(buf) {
-							n2, err2 := net.recv_tcp(client, buf[total:])
-							if err2 != nil || n2 <= 0 do break
-							total += n2
-						}
+					if cl > MAX_BODY {
+						too_large = true
+						break
+					}
+					needed := body_start + cl
+					if needed > len(buf) {
+						heap_buf = make([]u8, needed)
+						copy(heap_buf, buf[:total])
+						buf = heap_buf
+					}
+					for total < needed {
+						n2, err2 := net.recv_tcp(client, buf[total:])
+						if err2 != nil || n2 <= 0 do break
+						total += n2
 					}
 					break
 				}
 			}
-			if total >= len(buf) do break
+			if total >= len(buf) {
+				// Headers did not fit in the stack buffer
+				too_large = true
+				break
+			}
+		}
+
+		if too_large {
+			resp := "HTTP/1.1 413 Payload Too Large\r\n" + CORS_HEADERS + "\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+			net.send_tcp(client, transmute([]u8)resp)
+			net.close(client)
+			continue
 		}
 
 		if total == 0 {
