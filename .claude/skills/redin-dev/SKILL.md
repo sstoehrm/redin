@@ -63,6 +63,14 @@ Layout uses the Anchor enum: `top_left`, `top_center`, `top_right`, `center_left
 - **Text**: both axes control text alignment within its rect
 - Main-axis centering only applies when all children have explicit sizes (no fill nodes)
 
+## Scrolling
+
+`:overflow :scroll-y` on vbox or `:overflow :scroll-x` on hbox clips children to the container rect and maps the mouse wheel to a per-element scroll offset (shift + vertical wheel → horizontal scroll).
+
+- **scroll-y children** may omit `:height` — intrinsic height is measured recursively (text line count × line height; nested vbox sums; nested hbox/stack takes max).
+- **scroll-x children** must set `:width`. No intrinsic width is computed. Missing width → 0-width render + stderr warning.
+- Text nodes accept both; `:scroll-x` on text disables word-wrap and turns content into a single scrollable line.
+
 ## Viewport (stack)
 
 ```fennel

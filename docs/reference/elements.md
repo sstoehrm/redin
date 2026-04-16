@@ -232,7 +232,7 @@ Lays out children in a horizontal row, left to right.
 
 | Attribute | Type | Default | Notes |
 | --------- | ---- | ------- | ----- |
-| `overflow` | string | -- | Overflow handling strategy. |
+| `overflow` | `"scroll-x"` | -- | Clip + horizontal wheel scroll. Children must set `:width`. See Scrolling. |
 | `layoutX` | `"left"` \| `"center"` \| `"right"` | `"left"` | Horizontal alignment. |
 | `layoutY` | `"top"` \| `"center"` \| `"bottom"` | `"center"` | Vertical alignment. |
 
@@ -250,7 +250,7 @@ Lays out children in a vertical column, top to bottom.
 
 **Required attrs:** none
 
-**Optional attrs:** identical to `hbox` -- `overflow`, `layoutX`, `layoutY`.
+**Optional attrs:** identical to `hbox`. `overflow` is `"scroll-y"` (see Scrolling).
 
 `layoutX` affects horizontal (cross-axis) alignment; `layoutY` affects vertical (main-axis) alignment.
 
@@ -314,6 +314,33 @@ Visual properties come from `aspect`.
         [:button {:click :event/new-file :aspect :button} "New File"]
         [:button {:click :event/open-file :aspect :button} "Open..."]
         [:button {:click :event/quit :aspect :button} "Quit"]]])]
+```
+
+---
+
+## Scrolling
+
+Attach `:overflow :scroll-y` to a vbox or `:overflow :scroll-x` to an hbox to clip its children to the container rect and enable wheel-driven scrolling on that axis. (Text nodes also accept both and scroll their own content inline.) Shift + vertical wheel is promoted to horizontal scroll for trackpads / mice without a lateral axis.
+
+Child sizing rules differ by axis:
+
+- **`scroll-y` on vbox** — children can omit `:height`. The renderer recurses through each unsized child to compute its natural height: text uses wrapped-line count × line height, nested vbox sums its children, nested hbox/stack takes the max. Explicit `:height` is honored when set.
+- **`scroll-x` on hbox** — children **must** set `:width`. Intrinsic width is not inferred because it is ill-defined for wrapped text (the width is both input and output of measurement). Any child without a positive preferred width renders at zero width and a warning is printed to stderr.
+
+Both modes draw a 4px translucent scrollbar along the trailing edge when content exceeds the container. Scroll offsets are stored per-element and persist across renders as long as the element's idx is stable.
+
+```fennel
+;; Chat log: variable-height message bubbles
+[:vbox {:height :full :overflow :scroll-y}
+  (icollect [_ msg (ipairs messages)]
+    [:vbox {:aspect :bubble}
+      [:text {:aspect :body} msg.text]])]
+
+;; Tab bar: horizontal list of fixed-width tabs
+[:hbox {:width 600 :height 36 :overflow :scroll-x}
+  (icollect [_ tab (ipairs tabs)]
+    [:button {:aspect :tab :width 140 :height 32
+              :click [:event/select-tab tab.id]} tab.label])]
 ```
 
 ---

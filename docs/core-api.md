@@ -142,7 +142,7 @@ The flattening is a single pass when the frame enters the pipeline. No fragment 
 
 | Attribute  | Type     | Applies to | Notes |
 | ---------- | -------- | ---------- | ----- |
-| `overflow` | string   | vbox, hbox | Overflow behavior (e.g. `"scroll-y"`) |
+| `overflow` | string   | vbox, hbox, text | `"scroll-y"` (vbox/text) or `"scroll-x"` (hbox/text). Enables clipping + wheel scroll on the matching axis. See Scrolling below. |
 | `viewport` | `[[anchor x y w h] ...]` | stack | Window-relative rects with anchor point, one per child. Anchor: `"top_left"`, `"top_center"`, `"top_right"`, `"center_left"`, `"center"`, `"center_right"`, `"bottom_left"`, `"bottom_center"`, `"bottom_right"`. Values for x/y/w/h: px, `"full"`, or `"M_N"` fraction. The anchor determines the origin and growth direction. |
 
 **Element-specific:**
@@ -177,6 +177,17 @@ Children without an explicit size default to `"full"`.
 3. Elements with `visible = false` are skipped entirely
 
 **Current limitations:** Only basic vbox/hbox layout is implemented. Percentage sizing (`"N%"`), `min-width`/`min-height` clamping, responsive breakpoints, and `"fill"` (the old name for `"full"`) are not yet supported.
+
+### Scrolling
+
+`:overflow :scroll-y` on a vbox (or `:scroll-x` on an hbox) clips the content to the element's rect and maps the mouse wheel to a per-element scroll offset. Shift + vertical wheel is promoted to horizontal scroll.
+
+The two axes handle child sizing differently:
+
+- **`scroll-y` (vbox)** — children **do not** need an explicit `:height`. The renderer computes each child's intrinsic height by recursing: text uses wrapped-line count × line height; nested vbox sums its children; nested hbox/stack takes the max.
+- **`scroll-x` (hbox)** — children **must** set `:width`. The renderer does not infer horizontal size from content. Children without an explicit width render at zero width and a warning is printed to stderr.
+
+Text nodes with `:overflow :scroll-x` additionally disable word-wrap so the content forms a single long line that can scroll horizontally.
 
 ---
 

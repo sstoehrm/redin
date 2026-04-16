@@ -27,8 +27,8 @@ MouseEvent :: struct {
 ResizeEvent :: struct {}
 
 ScrollEvent :: struct {
-	x, y:  f32, // mouse position
-	delta: f32, // wheel delta (positive = up)
+	x, y:           f32, // mouse position
+	delta_x, delta_y: f32, // wheel deltas (positive = right/up)
 }
 
 InputEvent :: union {

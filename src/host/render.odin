@@ -39,43 +39,58 @@ SCROLL_SPEED :: 30.0 // pixels per wheel tick
 
 apply_scroll_events :: proc(events: []types.InputEvent, nodes: []types.Node) {
 	for event in events {
-		if se, ok := event.(types.ScrollEvent); ok {
-			pt := rl.Vector2{se.x, se.y}
-			// Find the deepest scrollable node under the mouse
-			best_idx := -1
-			best_area: f32 = max(f32)
-			for idx in 0 ..< len(nodes) {
-				overflow := ""
-				switch n in nodes[idx] {
-				case types.NodeVbox:
-					overflow = n.overflow
-				case types.NodeHbox:
-					overflow = n.overflow
-				case types.NodeText:
-					overflow = n.overflow
-				case types.NodeStack, types.NodeCanvas, types.NodeInput,
-					types.NodeButton, types.NodeImage,
-					types.NodePopout, types.NodeModal:
-				}
-				if overflow != "scroll-y" do continue
-				if idx >= len(node_rects) do continue
-				r := node_rects[idx]
-				if rl.CheckCollisionPointRec(pt, r) {
-					area := r.width * r.height
-					if area < best_area {
-						best_area = area
-						best_idx = idx
-					}
-				}
-			}
-			if best_idx >= 0 {
-				offset := scroll_offsets[best_idx] if best_idx in scroll_offsets else 0
-				offset -= se.delta * SCROLL_SPEED
+		se, ok := event.(types.ScrollEvent)
+		if !ok do continue
+		pt := rl.Vector2{se.x, se.y}
+		if se.delta_y != 0 {
+			idx := find_deepest_overflow(nodes, pt, "scroll-y")
+			if idx >= 0 {
+				offset := scroll_offsets[idx] if idx in scroll_offsets else 0
+				offset -= se.delta_y * SCROLL_SPEED
 				if offset < 0 do offset = 0
-				scroll_offsets[best_idx] = offset
+				scroll_offsets[idx] = offset
+			}
+		}
+		if se.delta_x != 0 {
+			idx := find_deepest_overflow(nodes, pt, "scroll-x")
+			if idx >= 0 {
+				offset := scroll_offsets_x[idx] if idx in scroll_offsets_x else 0
+				offset -= se.delta_x * SCROLL_SPEED
+				if offset < 0 do offset = 0
+				scroll_offsets_x[idx] = offset
 			}
 		}
 	}
+}
+
+find_deepest_overflow :: proc(nodes: []types.Node, pt: rl.Vector2, mode: string) -> int {
+	best_idx := -1
+	best_area: f32 = max(f32)
+	for idx in 0 ..< len(nodes) {
+		overflow := ""
+		switch n in nodes[idx] {
+		case types.NodeVbox:
+			overflow = n.overflow
+		case types.NodeHbox:
+			overflow = n.overflow
+		case types.NodeText:
+			overflow = n.overflow
+		case types.NodeStack, types.NodeCanvas, types.NodeInput,
+			types.NodeButton, types.NodeImage,
+			types.NodePopout, types.NodeModal:
+		}
+		if overflow != mode do continue
+		if idx >= len(node_rects) do continue
+		r := node_rects[idx]
+		if rl.CheckCollisionPointRec(pt, r) {
+			area := r.width * r.height
+			if area < best_area {
+				best_area = area
+				best_idx = idx
+			}
+		}
+	}
+	return best_idx
 }
 
 render_tree :: proc(
@@ -324,20 +339,28 @@ draw_box :: proc(
 	ch := children_list[idx]
 	if ch.length == 0 do return
 
-	scrollable := overflow == "scroll-y" && vertical
+	scrollable_y := overflow == "scroll-y" && vertical
+	scrollable_x := overflow == "scroll-x" && !vertical
+	scrollable := scrollable_y || scrollable_x
 
-	// First pass: sum fixed sizes, count fill nodes
+	// First pass: sum fixed sizes, count fill nodes.
+	// scroll-y measures children's intrinsic height; scroll-x requires
+	// explicit widths (intrinsic-width measurement for horizontal flow
+	// is ambiguous — e.g. text would need to know its wrap width first).
 	fixed_total: f32 = 0
 	fill_count: int = 0
 	for i in 0 ..< int(ch.length) {
 		child_idx := int(ch.value[i])
 		s: f32
 		if vertical {
-			s = scrollable \
+			s = scrollable_y \
 				? intrinsic_height(child_idx, nodes, children_list, theme, content_rect.width) \
 				: node_preferred_height(child_idx, nodes, theme, content_rect.width)
 		} else {
 			s = node_preferred_width(child_idx, nodes)
+			if scrollable_x && s <= 0 {
+				fmt.eprintfln("warning: scroll-x child at idx %d has no explicit :width; it will render at zero width", child_idx)
+			}
 		}
 		if s > 0 {
 			fixed_total += s
@@ -359,16 +382,22 @@ draw_box :: proc(
 
 	// Scroll offset
 	scroll_off: f32 = 0
-	if scrollable {
+	if scrollable_y {
 		scroll_off = scroll_offsets[idx] if idx in scroll_offsets else 0
-		// Clamp scroll to content bounds
-		total_content := fixed_total
-		max_scroll := total_content - content_rect.height
+		max_scroll := fixed_total - content_rect.height
 		if max_scroll < 0 do max_scroll = 0
 		if scroll_off > max_scroll do scroll_off = max_scroll
 		if scroll_off < 0 do scroll_off = 0
 		scroll_offsets[idx] = scroll_off
-
+	} else if scrollable_x {
+		scroll_off = scroll_offsets_x[idx] if idx in scroll_offsets_x else 0
+		max_scroll := fixed_total - content_rect.width
+		if max_scroll < 0 do max_scroll = 0
+		if scroll_off > max_scroll do scroll_off = max_scroll
+		if scroll_off < 0 do scroll_off = 0
+		scroll_offsets_x[idx] = scroll_off
+	}
+	if scrollable {
 		rl.BeginScissorMode(
 			i32(content_rect.x), i32(content_rect.y),
 			i32(content_rect.width), i32(content_rect.height),
@@ -404,9 +433,9 @@ draw_box :: proc(
 			}
 		} else {
 			if anchor_h == 1 {
-				pos = content_rect.x + (available - fixed_total) / 2
+				pos = content_rect.x + (available - fixed_total) / 2 - scroll_off
 			} else if anchor_h == 2 {
-				pos = content_rect.x + available - fixed_total
+				pos = content_rect.x + available - fixed_total - scroll_off
 			}
 		}
 	}
@@ -416,7 +445,7 @@ draw_box :: proc(
 
 		child_rect: rl.Rectangle
 		if vertical {
-			h := scrollable \
+			h := scrollable_y \
 				? intrinsic_height(child_idx, nodes, children_list, theme, content_rect.width) \
 				: node_preferred_height(child_idx, nodes, theme, content_rect.width)
 			if h <= 0 do h = fill_size
@@ -463,16 +492,28 @@ draw_box :: proc(
 	if scrollable {
 		rl.EndScissorMode()
 
-		// Draw scroll bar if content overflows
-		total_content := fixed_total
-		if total_content > content_rect.height {
+		// Draw scroll bar along the trailing edge of the scroll axis
+		if scrollable_y && fixed_total > content_rect.height {
 			bar_w: f32 = 4
 			bar_x := content_rect.x + content_rect.width - bar_w
-			visible_ratio := content_rect.height / total_content
+			visible_ratio := content_rect.height / fixed_total
 			bar_h := max(content_rect.height * visible_ratio, 20)
-			max_scroll := total_content - content_rect.height
+			max_scroll := fixed_total - content_rect.height
 			scroll_ratio := scroll_off / max_scroll if max_scroll > 0 else 0
 			bar_y := content_rect.y + scroll_ratio * (content_rect.height - bar_h)
+			rl.DrawRectangleRounded(
+				{bar_x, bar_y, bar_w, bar_h},
+				1, 4,
+				rl.Color{200, 200, 200, 120},
+			)
+		} else if scrollable_x && fixed_total > content_rect.width {
+			bar_h: f32 = 4
+			bar_y := content_rect.y + content_rect.height - bar_h
+			visible_ratio := content_rect.width / fixed_total
+			bar_w := max(content_rect.width * visible_ratio, 20)
+			max_scroll := fixed_total - content_rect.width
+			scroll_ratio := scroll_off / max_scroll if max_scroll > 0 else 0
+			bar_x := content_rect.x + scroll_ratio * (content_rect.width - bar_w)
 			rl.DrawRectangleRounded(
 				{bar_x, bar_y, bar_w, bar_h},
 				1, 4,

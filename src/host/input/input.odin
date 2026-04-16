@@ -139,9 +139,17 @@ poll :: proc() -> [dynamic]types.InputEvent {
 		}
 	}
 
-	wheel := rl.GetMouseWheelMove()
-	if wheel != 0 {
-		append(&events, types.InputEvent(types.ScrollEvent{x = mouse.x, y = mouse.y, delta = wheel}))
+	wheel := rl.GetMouseWheelMoveV()
+	dx, dy := wheel.x, wheel.y
+	// Shift promotes vertical wheel to horizontal scroll.
+	if mods.shift && dy != 0 && dx == 0 {
+		dx = dy
+		dy = 0
+	}
+	if dx != 0 || dy != 0 {
+		append(&events, types.InputEvent(types.ScrollEvent{
+			x = mouse.x, y = mouse.y, delta_x = dx, delta_y = dy,
+		}))
 	}
 
 	if rl.IsWindowResized() {
