@@ -346,6 +346,27 @@
          (.write out ^bytes (:body resp))))
      (:body resp))))
 
+(def ^:private png-signature
+  (byte-array (map unchecked-byte [0x89 0x50 0x4e 0x47 0x0d 0x0a 0x1a 0x0a])))
+
+(defn- read-be-int [^bytes b offset]
+  (bit-or (bit-shift-left (bit-and (aget b offset) 0xff) 24)
+          (bit-shift-left (bit-and (aget b (+ offset 1)) 0xff) 16)
+          (bit-shift-left (bit-and (aget b (+ offset 2)) 0xff) 8)
+          (bit-and (aget b (+ offset 3)) 0xff)))
+
+(defn screenshot-dims
+  "Return [w h] for the PNG bytes produced by `screenshot`. Width and
+   height live at fixed IHDR offsets (16..19 and 20..23, big-endian),
+   so no image decoder is needed."
+  [^bytes bytes]
+  (when-not (and bytes (>= (alength bytes) 24))
+    (throw (ex-info "screenshot body too short" {:length (when bytes (alength bytes))})))
+  (dotimes [i 8]
+    (when (not= (aget bytes i) (aget png-signature i))
+      (throw (ex-info "screenshot is not a PNG" {:byte-idx i}))))
+  [(read-be-int bytes 16) (read-be-int bytes 20)])
+
 (defn wait-ms
   "Sleep for n milliseconds. Prefer wait-for."
   [ms]
