@@ -374,6 +374,8 @@ process_request :: proc(ds: ^Dev_Server, req: ^Pending_Request) {
 		} else if req.path == "/shutdown" {
 			ds.shutdown_requested = true
 			respond_json_ok(ch)
+		} else if req.path == "/resize" {
+			handle_post_resize(ch, req.body)
 		} else {
 			respond_text(ch, 404, "Not found")
 		}
@@ -643,6 +645,43 @@ handle_post_click :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string) 
 		lua_pop(L, 1)
 		append(&ds.event_queue, types.InputEvent(types.MouseEvent{x = x, y = y, button = .LEFT}))
 	}
+	respond_json_ok(ch)
+}
+
+handle_post_resize :: proc(ch: ^Response_Channel, body: string) {
+	// Parse body without leaving a value on the Lua stack — we only need width/height.
+	width, height := 0, 0
+	{
+		// Minimal hand-parse: { "width": N, "height": M }
+		b := body
+		find_int :: proc(b: string, key: string) -> int {
+			i := strings.index(b, key)
+			if i < 0 do return 0
+			rest := b[i + len(key):]
+			colon := strings.index_byte(rest, ':')
+			if colon < 0 do return 0
+			rest = strings.trim_left_space(rest[colon + 1:])
+			n := 0
+			for j := 0; j < len(rest); j += 1 {
+				c := rest[j]
+				if c >= '0' && c <= '9' {
+					n = n * 10 + int(c - '0')
+				} else if n > 0 {
+					break
+				} else if c != ' ' && c != '\t' {
+					break
+				}
+			}
+			return n
+		}
+		width = find_int(b, "\"width\"")
+		height = find_int(b, "\"height\"")
+	}
+	if width < 100 || height < 100 || width > 8192 || height > 8192 {
+		respond_json_error(ch, 400, `{"error":"width and height must be in [100, 8192]"}`)
+		return
+	}
+	rl.SetWindowSize(i32(width), i32(height))
 	respond_json_ok(ch)
 }
 

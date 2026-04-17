@@ -84,6 +84,13 @@
   [theme]
   (put-json "/aspects" theme))
 
+(defn resize!
+  "Resize the application window via POST /resize."
+  [width height]
+  (post-json "/resize" {:width width :height height})
+  ;; Give the renderer a couple frames to pick up the new size.
+  (Thread/sleep 100))
+
 (defn shutdown!
   "Send shutdown event and disconnect."
   []
