@@ -91,6 +91,24 @@
   ;; Give the renderer a couple frames to pick up the new size.
   (Thread/sleep 100))
 
+(defn maximize!
+  "Maximize the application window via POST /maximize."
+  []
+  (post-json "/maximize" {})
+  (Thread/sleep 200))
+
+(defn restore!
+  "Un-maximize / un-minimize the application window via POST /restore."
+  []
+  (post-json "/restore" {})
+  (Thread/sleep 200))
+
+(defn window-size
+  "Read the current window dimensions via GET /window. Returns [w h]."
+  []
+  (let [m (get-json "/window")]
+    [(:width m) (:height m)]))
+
 (defn shutdown!
   "Send shutdown event and disconnect."
   []

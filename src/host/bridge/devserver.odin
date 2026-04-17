@@ -363,6 +363,8 @@ process_request :: proc(ds: ^Dev_Server, req: ^Pending_Request) {
 			handle_get_aspects(ds, ch)
 		} else if req.path == "/screenshot" {
 			handle_screenshot(ch)
+		} else if req.path == "/window" {
+			handle_get_window(ch)
 		} else {
 			respond_text(ch, 404, "Not found")
 		}
@@ -376,6 +378,12 @@ process_request :: proc(ds: ^Dev_Server, req: ^Pending_Request) {
 			respond_json_ok(ch)
 		} else if req.path == "/resize" {
 			handle_post_resize(ch, req.body)
+		} else if req.path == "/maximize" {
+			rl.MaximizeWindow()
+			respond_json_ok(ch)
+		} else if req.path == "/restore" {
+			rl.RestoreWindow()
+			respond_json_ok(ch)
 		} else {
 			respond_text(ch, 404, "Not found")
 		}
@@ -646,6 +654,13 @@ handle_post_click :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string) 
 		append(&ds.event_queue, types.InputEvent(types.MouseEvent{x = x, y = y, button = .LEFT}))
 	}
 	respond_json_ok(ch)
+}
+
+handle_get_window :: proc(ch: ^Response_Channel) {
+	b := strings.builder_make()
+	defer strings.builder_destroy(&b)
+	fmt.sbprintf(&b, `{{"width":%d,"height":%d}}`, rl.GetScreenWidth(), rl.GetScreenHeight())
+	respond_json(ch, strings.to_string(b))
 }
 
 handle_post_resize :: proc(ch: ^Response_Channel, body: string) {
