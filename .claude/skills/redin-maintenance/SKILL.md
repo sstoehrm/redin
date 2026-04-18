@@ -76,6 +76,32 @@ After changes to the framework, verify in this order:
 3. **Integration tests** — `bash test/ui/run-all.sh`
 4. **Visual check** — for rendering changes, take a screenshot via `GET /screenshot` on the dev server and inspect
 5. **Memory check** — for allocation/bridge changes, run with `--track-mem` and verify no leaks on shutdown
+6. **Docs + skills** — see below
+
+## Keeping docs and skills in sync
+
+The public docs and the in-tree skills are part of the contract and ship to downstream users via the release tarball. Whenever a change touches externally visible surface area (attributes, theme properties, element types, host functions, dev-server endpoints, layout behavior, event shapes, CLI flags), update the corresponding places in the **same commit** as the code:
+
+| Source of truth | Where it shows up | Update when |
+|---|---|---|
+| `docs/core-api.md` | Attribute tables, theme properties, event/listener types, dev-server API | Any host-visible contract change |
+| `docs/app-api.md` | Dataflow, subscriptions, effects | Runtime / re-frame behavior change |
+| `docs/reference/elements.md` | Per-element attribute reference | New element, new/renamed attribute |
+| `docs/reference/theme.md` | Theme struct + consumption matrix | New theme property, new consumer |
+| `docs/reference/effects.md`, `canvas.md`, `dev-server.md` | Topic reference | When that topic changes |
+| `docs/guide/*.md` | Quickstart, cheatsheet, lua-guide, building-apps | When a guide example would mislead a reader |
+| `.claude/skills/redin-dev/SKILL.md` | Architecture overview, node types, frame format, canvas API, theme, testing | Node types, frame format, canvas/theme API, top-level workflows |
+| `.claude/skills/redin-maintenance/SKILL.md` | Verification + release workflow (this file) | New test suite, new verification step, changed release process |
+| `CLAUDE.md` | Short project summary + conventions | Only when a top-level fact changes (stack, key conventions, build/run commands) |
+
+Reality check: if the code and the docs or skills disagree, the docs/skills are wrong — they drift silently because nothing compiles them. Grep before you ship:
+
+```bash
+# Example sweeps when renaming or removing a public symbol:
+rg -n 'old-name' docs/ .claude/skills/ CLAUDE.md
+```
+
+If a contract was described incorrectly (not just incompletely), fix the doc even if the code didn't change this commit.
 
 ## When to run what
 
