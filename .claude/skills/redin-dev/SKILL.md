@@ -136,7 +136,7 @@ canvas.register("my-provider", my_provider)
 ```
 
 - State variants use `#` notation: `button#hover`, `input#focus`
-- Properties: `bg`, `color`, `border`, `border-width`, `radius`, `padding` [top right bottom left], `font-size`, `font`, `weight` (0=normal, 1=bold), `opacity` (0-1, affects bg alpha)
+- Properties: `bg`, `color`, `border`, `border-width`, `radius`, `padding` [top right bottom left], `font-size`, `font`, `weight` (0=normal, 1=bold), `line-height` (ratio, e.g. 1.5), `opacity` (0-1, affects bg alpha), `shadow` `[x y blur [r g b a]]` (drop shadow; consumed by vbox/hbox/button/popout/canvas)
 
 ## Dataflow (re-frame pattern)
 
