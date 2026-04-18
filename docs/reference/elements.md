@@ -233,8 +233,11 @@ Lays out children in a horizontal row, left to right.
 | Attribute | Type | Default | Notes |
 | --------- | ---- | ------- | ----- |
 | `overflow` | `"scroll-x"` | -- | Clip + horizontal wheel scroll. Children must set `:width`. See Scrolling. |
-| `layoutX` | `"left"` \| `"center"` \| `"right"` | `"left"` | Horizontal alignment. |
-| `layoutY` | `"top"` \| `"center"` \| `"bottom"` | `"center"` | Vertical alignment. |
+| `layout` | anchor keyword (see below) | `"top_left"` | Child alignment along both axes. |
+
+`:layout` takes one of nine two-axis anchors: `top_left`, `top_center`, `top_right`, `center_left`, `center`, `center_right`, `bottom_left`, `bottom_center`, `bottom_right`. For an hbox the horizontal component selects where the children *group* sits on the main axis; the vertical component selects how each child is aligned on the cross axis. For a vbox the roles swap. Unrecognized values log a warning and fall back to `top_left`.
+
+Main-axis centering only takes effect when every child has an explicit size (a single fill child would absorb the extra space instead).
 
 ```fennel
 [:hbox {}
@@ -252,7 +255,7 @@ Lays out children in a vertical column, top to bottom.
 
 **Optional attrs:** identical to `hbox`. `overflow` is `"scroll-y"` (see Scrolling).
 
-`layoutX` affects horizontal (cross-axis) alignment; `layoutY` affects vertical (main-axis) alignment.
+For a vbox, the horizontal component of `:layout` aligns each child across the row (cross axis), and the vertical component positions the children group within the container's height (main axis).
 
 ```fennel
 [:vbox {}

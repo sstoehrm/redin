@@ -136,7 +136,9 @@ The flattening is a single pass when the frame enters the pipeline. No fragment 
 | `aspect`  | keyword or `[kw ...]`      | Theme reference. Single or composed list. |
 | `width`   | px number or `"full"`      | Fixed size or fill remaining space      |
 | `height`  | px number or `"full"`      | Fixed size or fill remaining space      |
-| `layout`  | `"center"` `"left"` `"right"` | Alignment shorthand (vbox, hbox, text) |
+| `layout`  | anchor keyword (see below) | Child alignment on vbox/hbox; text alignment on text. Default `"top_left"`. |
+
+`:layout` takes one of nine two-axis anchors: `"top_left"`, `"top_center"`, `"top_right"`, `"center_left"`, `"center"`, `"center_right"`, `"bottom_left"`, `"bottom_center"`, `"bottom_right"`. On a `vbox`, the horizontal component aligns each child across the row (cross axis) and the vertical component positions the children group within the container's height (main axis); on an `hbox` the roles swap. On `text`, both components control alignment of the text within its rect. Main-axis centering only takes effect when every child has an explicit size. Unknown values fall back to `"top_left"`.
 
 **Container-specific:**
 
