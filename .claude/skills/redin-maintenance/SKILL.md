@@ -87,3 +87,25 @@ After changes to the framework, verify in this order:
 | `src/host/input/` | Yes | - | Yes | - |
 | `src/host/types/` | Yes | - | Yes | - |
 | `src/host/text/` | Yes | - | Yes (multiline) | - |
+
+## Cutting a release
+
+Releases are built by the `release.yml` GitHub Actions workflow (manual dispatch). It builds the binary, AOT-compiles the Fennel runtime, packages docs + the `redin-dev` skill into a tarball, and creates a GitHub release.
+
+```bash
+# 1. Make sure main is green and everything is pushed.
+# 2. Pick the next version. Current latest:
+gh release list --limit 1
+
+# 3. Tag and push the tag.
+git tag v0.1.X && git push origin v0.1.X
+
+# 4. Trigger the workflow with the same version string.
+gh workflow run release.yml -f version=v0.1.X
+
+# 5. Watch it.
+gh run list --workflow=release.yml --limit 1
+gh run watch <run-id>
+```
+
+The workflow's `release` job runs only when `version` is non-empty, so an empty dispatch just builds a dev artifact without publishing. The local `./release.sh` script builds a tarball manually for testing but is not the canonical release path.
