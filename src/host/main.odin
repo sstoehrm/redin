@@ -46,7 +46,10 @@ main :: proc() {
 		mem.tracking_allocator_destroy(&track)
 	}
 
-	rl.SetConfigFlags({.WINDOW_RESIZABLE, .WINDOW_HIGHDPI, .MSAA_4X_HINT})
+	// WINDOW_HIGHDPI is intentionally off until Odin ships Raylib 5.6+
+	// with raysan5/raylib#4836 — on HiDPI displays the viewport is not
+	// re-scaled after a resize, leaving most of the framebuffer black.
+	rl.SetConfigFlags({.WINDOW_RESIZABLE, .MSAA_4X_HINT})
 	rl.InitWindow(1280, 800, "redin")
 	defer rl.CloseWindow()
 	rl.SetTargetFPS(60)
