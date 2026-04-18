@@ -198,6 +198,7 @@ process_user_events :: proc(
 	inp_font_weight: u8 = 0
 	inp_padding_l: f32 = 4
 	inp_padding_r: f32 = 4
+	inp_lh_ratio: f32 = 0
 	if len(n.aspect) > 0 {
 		if t, ok := theme[n.aspect]; ok {
 			if t.font_size > 0 do inp_font_size = f32(t.font_size)
@@ -205,6 +206,7 @@ process_user_events :: proc(
 			inp_font_weight = t.weight
 			if t.padding[3] > 0 do inp_padding_l = f32(t.padding[3])
 			if t.padding[1] > 0 do inp_padding_r = f32(t.padding[1])
+			inp_lh_ratio = t.line_height
 		}
 	}
 	inp_font := font.get(inp_font_name, font.style_from_weight(font.Font_Weight(inp_font_weight)))
@@ -320,7 +322,7 @@ process_user_events :: proc(
 				if rl.CheckCollisionPointRec(pt, rect) {
 					click_x := e.x - rect.x - inp_padding_l
 					click_y := e.y - rect.y
-					lh := text_pkg.line_height(inp_font_size)
+					lh := text_pkg.line_height(inp_font_size, inp_lh_ratio)
 					text_str = get_text()
 					delete(layout_lines)
 					layout_lines = text_pkg.compute_lines(text_str, inp_font, inp_font_size, inp_spacing, inp_content_w)

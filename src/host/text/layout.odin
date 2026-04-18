@@ -145,7 +145,9 @@ point_to_cursor :: proc(
 	return best_pos
 }
 
-// Compute line height from font size.
-line_height :: proc(font_size: f32) -> f32 {
+// Compute line height from font size. `ratio` is the theme line-height
+// (font_size * ratio). Pass 0 to use the default (`font_size + 4`).
+line_height :: proc(font_size: f32, ratio: f32 = 0) -> f32 {
+	if ratio > 0 do return font_size * ratio
 	return font_size + 4
 }

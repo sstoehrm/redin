@@ -50,12 +50,13 @@
 (local consumption
   {:text    {:color true :font true :font-size true :weight true :line-height true :align true :opacity true}
    :image   {:opacity true}
-   :hbox    {:bg true :padding true :opacity true}
-   :vbox    {:bg true :padding true :opacity true}
+   :hbox    {:bg true :padding true :opacity true :shadow true}
+   :vbox    {:bg true :padding true :opacity true :shadow true}
    :input   {:bg true :color true :border true :font true :font-size true :weight true :line-height true :align true :padding true :radius true :border-width true :opacity true}
+   :button  {:bg true :color true :font true :font-size true :weight true :padding true :radius true :opacity true :shadow true}
    :modal   {:bg true :opacity true}
    :popout  {:bg true :border true :padding true :radius true :border-width true :opacity true :shadow true}
-   :canvas  {:bg true :border true :padding true :radius true :border-width true :opacity true}})
+   :canvas  {:bg true :border true :padding true :radius true :border-width true :opacity true :shadow true}})
 
 (fn M.props-for [tag resolved-props]
   (let [consumed (or (. consumption tag) {})

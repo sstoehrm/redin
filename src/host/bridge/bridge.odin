@@ -1159,8 +1159,10 @@ lua_to_theme :: proc(L: ^Lua_State, index: i32) -> map[string]types.Theme {
 			t.border_width = u8(lua_get_number_field(L, props_idx, "border-width"))
 			t.radius = u8(lua_get_number_field(L, props_idx, "radius"))
 			t.font_size = f16(lua_get_number_field(L, props_idx, "font-size"))
+			t.line_height = lua_get_number_field(L, props_idx, "line-height")
 			t.font = lua_get_string_field(L, props_idx, "font")
 			t.opacity = lua_get_number_field(L, props_idx, "opacity")
+			t.shadow = lua_get_shadow_field(L, props_idx, "shadow")
 
 			lua_getfield(L, props_idx, "weight")
 			if lua_isnumber(L, -1) {
@@ -1195,6 +1197,42 @@ lua_get_rgb_field :: proc(L: ^Lua_State, index: i32, field: cstring) -> [3]u8 {
 	b := u8(lua_tonumber(L, -1))
 	lua_pop(L, 1)
 	return {r, g, b}
+}
+
+// Shadow format: [x y blur [r g b a]]
+lua_get_shadow_field :: proc(L: ^Lua_State, index: i32, field: cstring) -> types.Shadow {
+	lua_getfield(L, index, field)
+	defer lua_pop(L, 1)
+	if !lua_istable(L, -1) do return {}
+	abs := lua_gettop(L)
+	s: types.Shadow
+	lua_rawgeti(L, abs, 1)
+	s.x = f32(lua_tonumber(L, -1))
+	lua_pop(L, 1)
+	lua_rawgeti(L, abs, 2)
+	s.y = f32(lua_tonumber(L, -1))
+	lua_pop(L, 1)
+	lua_rawgeti(L, abs, 3)
+	s.blur = f32(lua_tonumber(L, -1))
+	lua_pop(L, 1)
+	lua_rawgeti(L, abs, 4)
+	if lua_istable(L, -1) {
+		col_idx := lua_gettop(L)
+		lua_rawgeti(L, col_idx, 1)
+		s.color[0] = u8(lua_tonumber(L, -1))
+		lua_pop(L, 1)
+		lua_rawgeti(L, col_idx, 2)
+		s.color[1] = u8(lua_tonumber(L, -1))
+		lua_pop(L, 1)
+		lua_rawgeti(L, col_idx, 3)
+		s.color[2] = u8(lua_tonumber(L, -1))
+		lua_pop(L, 1)
+		lua_rawgeti(L, col_idx, 4)
+		s.color[3] = u8(lua_tonumber(L, -1))
+		lua_pop(L, 1)
+	}
+	lua_pop(L, 1)
+	return s
 }
 
 lua_get_padding_field :: proc(L: ^Lua_State, index: i32, field: cstring) -> [4]u8 {

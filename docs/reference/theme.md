@@ -91,8 +91,10 @@ The host-side `Theme` struct (in `src/host/types/theme.odin`) defines the proper
 | `radius` | u8 | Corner rounding radius |
 | `weight` | u8 | 0=normal, 1=bold, 2=italic |
 | `font_size` | f16 | Font size in pixels (fractional) |
+| `line_height` | f32 | Ratio of font size (e.g. 1.5); 0 = default (`font_size + 4`) |
 | `font` | string | Font name (e.g. "sans", "mono", "serif", or custom) |
 | `opacity` | f32 | Element transparency, 0--1 |
+| `shadow` | struct | `{x, y, blur, color[r g b a]}` — drop shadow |
 
 Weight values: 0 = normal (default), 1 = bold, 2 = italic.
 
@@ -106,12 +108,13 @@ Properties not consumed by an element are ignored silently. The consumption matr
             bg  color  border  font  padding  radius  border-w  opacity  shadow
 text         .    x      .      x      .        .       .         x       .
 image        .    .      .      .      .        .       .         x       .
-hbox         x    .      .      .      x        .       .         x       .
-vbox         x    .      .      .      x        .       .         x       .
+hbox         x    .      .      .      x        .       .         x       x
+vbox         x    .      .      .      x        .       .         x       x
 input        x    x      x      x      x        x       x         x       .
+button       x    x      .      x      x        x       .         x       x
 modal        x    .      .      .      .        .       .         x       .
 popout       x    .      x      .      x        x       x         x       x
-canvas       x    .      x      .      x        x       x         x       .
+canvas       x    .      x      .      x        x       x         x       x
 ```
 
 Column key: `x` = consumed, `.` = ignored. `font` covers `font-size`, `weight`, `line-height`, `align`. `border-w` = `border-width`.

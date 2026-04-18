@@ -609,6 +609,27 @@ theme_to_json :: proc(b: ^strings.Builder, t: types.Theme) {
 		first = false
 		json_key(b, "opacity");json_number(b, f64(t.opacity))
 	}
+	if t.line_height > 0 {
+		if !first do json_comma(b)
+		first = false
+		json_key(b, "line-height");json_number(b, f64(t.line_height))
+	}
+	if t.shadow.color[3] > 0 {
+		if !first do json_comma(b)
+		first = false
+		json_key(b, "shadow")
+		json_begin_array(b)
+		json_number(b, f64(t.shadow.x));json_comma(b)
+		json_number(b, f64(t.shadow.y));json_comma(b)
+		json_number(b, f64(t.shadow.blur));json_comma(b)
+		json_begin_array(b)
+		json_int(b, i64(t.shadow.color[0]));json_comma(b)
+		json_int(b, i64(t.shadow.color[1]));json_comma(b)
+		json_int(b, i64(t.shadow.color[2]));json_comma(b)
+		json_int(b, i64(t.shadow.color[3]))
+		json_end_array(b)
+		json_end_array(b)
+	}
 	json_end_object(b)
 }
 

@@ -47,7 +47,7 @@ curl -s -X POST http://localhost:8800/shutdown
 
 ### Available test suites
 
-`smoke`, `input`, `button`, `canvas`, `drag`, `image`, `modal`, `multiline`, `popout`, `viewport`
+`smoke`, `input`, `button`, `canvas`, `drag`, `image`, `line_height`, `modal`, `multiline`, `popout`, `resize`, `scroll`, `scroll_x`, `shadow`, `viewport`
 
 ## Memory leak detection
 

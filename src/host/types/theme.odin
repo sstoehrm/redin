@@ -1,5 +1,12 @@
 package types
 
+Shadow :: struct {
+	x:     f32,
+	y:     f32,
+	blur:  f32,
+	color: [4]u8,
+}
+
 Theme :: struct {
 	bg:           [3]u8,
 	color:        [3]u8,
@@ -9,6 +16,8 @@ Theme :: struct {
 	radius:       u8,
 	weight:       u8,      // 0=normal, 1=bold, 2=italic
 	font_size:    f16,
+	line_height:  f32,     // ratio; 0 = default (font_size + 4)
 	font:         string,
 	opacity:      f32,
+	shadow:       Shadow,
 }

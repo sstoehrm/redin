@@ -140,6 +140,7 @@ render_node :: proc(
 		content_rect := rect
 		if len(n.aspect) > 0 {
 			if t, ok := theme[n.aspect]; ok {
+				draw_shadow(rect, t.shadow, t.radius)
 				if t.bg != {} {
 					bg := rl.Color{t.bg[0], t.bg[1], t.bg[2], 255}
 					if t.radius > 0 {
@@ -288,6 +289,7 @@ draw_box :: proc(
 		bg_color: rl.Color
 		has_bg := false
 		pad: [4]u8
+		shadow: types.Shadow
 
 		if t, ok := theme[aspect]; ok {
 			if t.bg != {} {
@@ -299,6 +301,7 @@ draw_box :: proc(
 				has_bg = true
 			}
 			pad = t.padding
+			shadow = t.shadow
 		}
 
 		// Apply drag theme variants (override base)
@@ -323,6 +326,7 @@ draw_box :: proc(
 			}
 		}
 
+		draw_shadow(rect, shadow, 0)
 		if has_bg {
 			rl.DrawRectangleRec(rect, bg_color)
 		}
@@ -583,14 +587,16 @@ node_preferred_height :: proc(
 		font_size: f32 = 18
 		font_name := "sans"
 		font_weight: u8 = 0
+		lh_ratio: f32 = 0
 		if len(n.aspect) > 0 {
 			if t, ok := theme[n.aspect]; ok {
 				if t.font_size > 0 do font_size = f32(t.font_size)
 				if len(t.font) > 0 do font_name = t.font
 				font_weight = t.weight
+				lh_ratio = t.line_height
 			}
 		}
-		lh := text_pkg.line_height(font_size)
+		lh := text_pkg.line_height(font_size, lh_ratio)
 
 		if available_width > 0 && len(n.content) > 0 && n.overflow != "scroll-x" {
 			f := font.get(font_name, font.style_from_weight(font.Font_Weight(font_weight)))
@@ -678,6 +684,48 @@ intrinsic_height :: proc(
 	return 0
 }
 
+// Draw a soft drop shadow behind `rect`. Approximates a gaussian blur by
+// stacking concentric rects with fading alpha. Skipped when the shadow
+// color is fully transparent.
+draw_shadow :: proc(rect: rl.Rectangle, shadow: types.Shadow, radius: u8) {
+	if shadow.color[3] == 0 do return
+
+	draw_one :: proc(r: rl.Rectangle, radius: f32, color: rl.Color) {
+		if r.width <= 0 || r.height <= 0 do return
+		if radius > 0 {
+			roundness := radius / min(r.width, r.height) * 2
+			if roundness > 1 do roundness = 1
+			rl.DrawRectangleRounded(r, roundness, 8, color)
+		} else {
+			rl.DrawRectangleRec(r, color)
+		}
+	}
+
+	if shadow.blur <= 0 {
+		sr := rl.Rectangle{rect.x + shadow.x, rect.y + shadow.y, rect.width, rect.height}
+		col := rl.Color{shadow.color[0], shadow.color[1], shadow.color[2], shadow.color[3]}
+		draw_one(sr, f32(radius), col)
+		return
+	}
+
+	// Stack 8 concentric rings with falling alpha for a soft edge.
+	layers :: 8
+	base_alpha := f32(shadow.color[3])
+	for i in 0 ..< layers {
+		t := f32(i + 1) / f32(layers)
+		grow := shadow.blur * t
+		alpha := u8(base_alpha / f32(layers))
+		col := rl.Color{shadow.color[0], shadow.color[1], shadow.color[2], alpha}
+		sr := rl.Rectangle{
+			rect.x + shadow.x - grow,
+			rect.y + shadow.y - grow,
+			rect.width + grow * 2,
+			rect.height + grow * 2,
+		}
+		draw_one(sr, f32(radius) + grow, col)
+	}
+}
+
 draw_themed_rect :: proc(rect: rl.Rectangle, aspect: string, theme: map[string]types.Theme) {
 	if len(aspect) > 0 {
 		if t, ok := theme[aspect]; ok && t.bg != {} {
@@ -707,6 +755,7 @@ draw_input :: proc(
 	border_width: f32 = 1
 	font_name := "sans"
 	font_weight: u8 = 0
+	lh_ratio: f32 = 0
 
 	if len(n.aspect) > 0 {
 		if t, ok := theme[n.aspect]; ok {
@@ -720,6 +769,7 @@ draw_input :: proc(
 			if t.padding[0] > 0 do padding_t = f32(t.padding[0])
 			if len(t.font) > 0 do font_name = t.font
 			font_weight = t.weight
+			lh_ratio = t.line_height
 		}
 		if is_focused {
 			focus_key := strings.concatenate({n.aspect, "#focus"}, context.temp_allocator)
@@ -741,7 +791,7 @@ draw_input :: proc(
 
 	f := font.get(font_name, font.style_from_weight(font.Font_Weight(font_weight)))
 	spacing: f32 = 0
-	lh := text_pkg.line_height(font_size)
+	lh := text_pkg.line_height(font_size, lh_ratio)
 
 	// Determine text to display
 	display_text: string
@@ -856,6 +906,8 @@ draw_button :: proc(rect: rl.Rectangle, n: types.NodeButton, theme: map[string]t
 	font_size: f32 = 18
 	font_name := "sans"
 	font_weight: u8 = 0
+	shadow: types.Shadow
+	radius_u8: u8 = 0
 
 	if len(n.aspect) > 0 {
 		if t, ok := theme[n.aspect]; ok {
@@ -865,8 +917,12 @@ draw_button :: proc(rect: rl.Rectangle, n: types.NodeButton, theme: map[string]t
 			if t.font_size > 0 do font_size = f32(t.font_size)
 			if len(t.font) > 0 do font_name = t.font
 			font_weight = t.weight
+			shadow = t.shadow
+			radius_u8 = t.radius
 		}
 	}
+
+	draw_shadow(rect, shadow, radius_u8)
 
 	if radius > 0 {
 		roundness := radius / min(rect.width, rect.height) * 2
@@ -893,6 +949,7 @@ draw_text :: proc(idx: int, rect: rl.Rectangle, n: types.NodeText, theme: map[st
 	text_color := rl.BLACK
 	font_name := "sans"
 	font_weight: u8 = 0
+	lh_ratio: f32 = 0
 
 	if len(n.aspect) > 0 {
 		if t, ok := theme[n.aspect]; ok {
@@ -900,12 +957,13 @@ draw_text :: proc(idx: int, rect: rl.Rectangle, n: types.NodeText, theme: map[st
 			if t.color != {} do text_color = rl.Color{t.color[0], t.color[1], t.color[2], 255}
 			if len(t.font) > 0 do font_name = t.font
 			font_weight = t.weight
+			lh_ratio = t.line_height
 		}
 	}
 
 	f := font.get(font_name, font.style_from_weight(font.Font_Weight(font_weight)))
 	spacing: f32 = 0
-	lh := text_pkg.line_height(font_size)
+	lh := text_pkg.line_height(font_size, lh_ratio)
 
 	// Compute lines: wrap if not scroll-x
 	max_width: f32 = 0

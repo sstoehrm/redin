@@ -248,7 +248,7 @@ The theme is a global flat map: `keyword -> property-table`. Elements reference 
 | Display    | `opacity`                                                            | 0--1                             |
 |            | `shadow`                                                             | `[x y blur [r g b a]]`           |
 
-**Host-side representation:** On the Odin side, theme entries are stored as `Theme` structs with fields for `bg`, `color`, `border`, `padding`, `border_width`, `radius`, `weight`, `font_size`, and `opacity`. Not all Fennel-side properties are consumed by the Odin renderer yet.
+**Host-side representation:** On the Odin side, theme entries are stored as `Theme` structs with fields for `bg`, `color`, `border`, `padding`, `border_width`, `radius`, `weight`, `font_size`, `line_height`, `font`, `opacity`, and `shadow`.
 
 ### Which elements consume which properties
 
@@ -256,13 +256,13 @@ The theme is a global flat map: `keyword -> property-table`. Elements reference 
             bg  color  border  font  padding  radius  border-w  opacity  shadow
 text         .    x      .      x      .        .       .         x       .
 image        .    .      .      .      .        .       .         x       .
-hbox         x    .      .      .      x        .       .         x       .
-vbox         x    .      .      .      x        .       .         x       .
+hbox         x    .      .      .      x        .       .         x       x
+vbox         x    .      .      .      x        .       .         x       x
 input        x    x      x      x      x        x       x         x       .
-button       x    x      .      .      .        x       .         .       .
+button       x    x      .      x      x        x       .         x       x
 modal        x    .      .      .      .        .       .         x       .
 popout       x    .      x      .      x        x       x         x       x
-canvas       x    .      x      .      x        x       x         x       .
+canvas       x    .      x      .      x        x       x         x       x
 ```
 
 Properties not consumed by an element are ignored silently.
