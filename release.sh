@@ -12,7 +12,7 @@ echo "  Binary built: build/redin"
 
 echo "Packaging ${NAME}.tar.gz..."
 rm -rf dist
-mkdir -p "${DIST}/docs/guide" "${DIST}/docs/reference" "${DIST}/src/runtime" "${DIST}/vendor" "${DIST}/skills/redin-dev"
+mkdir -p "${DIST}/docs/guide" "${DIST}/docs/reference" "${DIST}/src/runtime" "${DIST}/vendor" "${DIST}/.claude/skills/redin-dev"
 
 # Binary
 cp build/redin "${DIST}/redin"
@@ -35,7 +35,7 @@ cp docs/guide/*.md "${DIST}/docs/guide/"
 cp docs/reference/*.md "${DIST}/docs/reference/"
 
 # Skill
-cp skills/redin-dev/SKILL.md "${DIST}/skills/redin-dev/"
+cp .claude/skills/redin-dev/SKILL.md "${DIST}/.claude/skills/redin-dev/"
 
 # Create tarball
 cd dist
