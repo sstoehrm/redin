@@ -273,6 +273,9 @@ layout_box :: proc(
 				: node_preferred_height(child_idx, nodes, theme, content_rect.width)
 		} else {
 			s = node_preferred_width(child_idx, nodes)
+			if scrollable_x && s <= 0 {
+				fmt.eprintfln("warning: scroll-x child at idx %d has no explicit :width; it will render at zero width", child_idx)
+			}
 		}
 		if s > 0 do fixed_total += s
 		else     do fill_count += 1
