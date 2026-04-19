@@ -1,9 +1,17 @@
 package profile
 
+import "core:sync"
 import "core:testing"
+
+// Tests mutate package-level globals; serialize them so Odin's default
+// multi-threaded test runner doesn't race.
+@(private) test_mu: sync.Mutex
 
 @(test)
 test_ring_fill_short :: proc(t: ^testing.T) {
+    sync.lock(&test_mu)
+    defer sync.unlock(&test_mu)
+
     init(true)
     defer init(false) // reset
 
@@ -23,6 +31,9 @@ test_ring_fill_short :: proc(t: ^testing.T) {
 
 @(test)
 test_ring_wrap :: proc(t: ^testing.T) {
+    sync.lock(&test_mu)
+    defer sync.unlock(&test_mu)
+
     init(true)
     defer init(false)
 
@@ -43,6 +54,9 @@ test_ring_wrap :: proc(t: ^testing.T) {
 
 @(test)
 test_disabled_is_noop :: proc(t: ^testing.T) {
+    sync.lock(&test_mu)
+    defer sync.unlock(&test_mu)
+
     init(false)
 
     begin_frame()
