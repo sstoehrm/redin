@@ -41,6 +41,15 @@ node_content_rects: [dynamic]rl.Rectangle
 scroll_offsets: map[int]f32
 scroll_offsets_x: map[int]f32
 
+// Scroll metadata captured during layout_box for scrollable containers.
+// Read in draw_box_children to position the scrollbar without re-running
+// the recursive size pass.
+Scroll_Info :: struct {
+	total: f32, // sum of child sizes on the scroll axis
+	off:   f32, // clamped scroll offset
+}
+node_scroll_info: map[int]Scroll_Info
+
 SCROLL_SPEED :: 30.0 // pixels per wheel tick
 
 apply_scroll_events :: proc(events: []types.InputEvent, nodes: []types.Node) {
@@ -112,6 +121,7 @@ layout_tree :: proc(
 		node_rects[i] = {}
 		node_content_rects[i] = {}
 	}
+	clear(&node_scroll_info)
 
 	screen := rl.Rectangle{0, 0, f32(rl.GetScreenWidth()), f32(rl.GetScreenHeight())}
 	layout_node(0, screen, nodes, children_list, theme)
@@ -305,6 +315,10 @@ layout_box :: proc(
 		scroll_offsets_x[idx] = scroll_off
 	}
 
+	if scrollable {
+		node_scroll_info[idx] = Scroll_Info{total = fixed_total, off = scroll_off}
+	}
+
 	anchor_h: int = 0; anchor_v: int = 0
 	#partial switch layout {
 	case .TOP_CENTER, .CENTER, .BOTTOM_CENTER:        anchor_h = 1
@@ -389,10 +403,10 @@ draw_node :: proc(
 	case types.NodeStack:
 		draw_children(idx, nodes, children_list, theme)
 	case types.NodeVbox:
-		draw_box_chrome(idx, rect, n.aspect, n.overflow, true, theme)
+		draw_box_chrome(idx, rect, n.aspect, theme)
 		draw_box_children(idx, content_rect, n.overflow, true, nodes, children_list, theme)
 	case types.NodeHbox:
-		draw_box_chrome(idx, rect, n.aspect, n.overflow, false, theme)
+		draw_box_chrome(idx, rect, n.aspect, theme)
 		draw_box_children(idx, content_rect, n.overflow, false, nodes, children_list, theme)
 	case types.NodeCanvas:
 		if len(n.aspect) > 0 {
@@ -458,8 +472,6 @@ draw_box_chrome :: proc(
 	idx: int,
 	rect: rl.Rectangle,
 	aspect: string,
-	overflow: string,
-	vertical: bool,
 	theme: map[string]types.Theme,
 ) {
 	if len(aspect) == 0 do return
@@ -526,19 +538,9 @@ draw_box_children :: proc(
 	if scrollable {
 		rl.EndScissorMode()
 
-		fixed_total: f32 = 0
-		for i in 0 ..< int(ch.length) {
-			child_idx := int(ch.value[i])
-			s: f32 = vertical \
-				? (scrollable_y \
-					? intrinsic_height(child_idx, nodes, children_list, theme, content_rect.width) \
-					: node_preferred_height(child_idx, nodes, theme, content_rect.width)) \
-				: node_preferred_width(child_idx, nodes)
-			if s > 0 do fixed_total += s
-		}
-		scroll_off := scrollable_y \
-			? (scroll_offsets[idx] if idx in scroll_offsets else 0) \
-			: (scroll_offsets_x[idx] if idx in scroll_offsets_x else 0)
+		info := node_scroll_info[idx]
+		fixed_total := info.total
+		scroll_off := info.off
 
 		if scrollable_y && fixed_total > content_rect.height {
 			bar_w: f32 = 4
