@@ -7,6 +7,7 @@ import "core:os"
 import "core:strings"
 import "core:sync"
 import "core:thread"
+import "../profile"
 import "../types"
 import rl "vendor:raylib"
 
@@ -361,6 +362,8 @@ process_request :: proc(ds: ^Dev_Server, req: ^Pending_Request) {
 			handle_get_state_path(ds, ch, req.path[len("/state/"):])
 		} else if req.path == "/aspects" {
 			handle_get_aspects(ds, ch)
+		} else if req.path == "/profile" {
+			handle_get_profile(ch)
 		} else if req.path == "/screenshot" {
 			handle_screenshot(ch)
 		} else if req.path == "/window" {
@@ -531,6 +534,51 @@ handle_get_aspects :: proc(ds: ^Dev_Server, ch: ^Response_Channel) {
 		theme_to_json(&b, t)
 	}
 	json_end_object(&b)
+	respond_json(ch, strings.to_string(b))
+}
+
+handle_get_profile :: proc(ch: ^Response_Channel) {
+	if !profile.is_enabled() {
+		respond_text(ch, 404, "profile not enabled")
+		return
+	}
+
+	samples := make([dynamic]profile.FrameSample, context.temp_allocator)
+	profile.snapshot_into(&samples)
+
+	b := strings.builder_make()
+	defer strings.builder_destroy(&b)
+
+	fmt.sbprintf(&b, `{{"enabled":true,"frame_cap":%d,"count":%d,`,
+		profile.FRAME_CAP, len(samples))
+
+	// phases[]
+	strings.write_string(&b, `"phases":[`)
+	first := true
+	for phase in profile.Phase {
+		if !first do strings.write_string(&b, ",")
+		first = false
+		fmt.sbprintf(&b, `"%s"`, profile.phase_name(phase))
+	}
+	strings.write_string(&b, `],`)
+
+	// frames[]
+	strings.write_string(&b, `"frames":[`)
+	for s, i in samples {
+		if i > 0 do strings.write_string(&b, ",")
+		total_us := s.total_ns / 1000
+		fmt.sbprintf(&b, `{{"idx":%d,"total_us":%d,"phase_us":[`,
+			s.frame_idx, total_us)
+		pfirst := true
+		for phase in profile.Phase {
+			if !pfirst do strings.write_string(&b, ",")
+			pfirst = false
+			fmt.sbprintf(&b, "%d", s.phase_ns[phase] / 1000)
+		}
+		strings.write_string(&b, `]}`)
+	}
+	strings.write_string(&b, `]}`)
+
 	respond_json(ch, strings.to_string(b))
 }
 
