@@ -48,6 +48,35 @@ curl http://localhost:8800/aspects
 
 Response: full theme as JSON object (serialized from host-side `Theme` structs).
 
+### `GET /profile` -- frame timing ring buffer
+
+Returns frame-timing samples from the ring buffer. Requires `--dev` (for the server) and `--profile` (to enable collection). When the host is started without `--profile`, the route returns `404 "profile not enabled"`.
+
+**Example response:**
+
+```json
+{
+  "enabled": true,
+  "frame_cap": 120,
+  "count": 120,
+  "phases": ["input", "bridge", "layout", "render", "devserver"],
+  "frames": [
+    {"idx": 4820, "total_us": 14230, "phase_us": [310, 8420, 1890, 3480, 130]}
+  ]
+}
+```
+
+- `frame_cap` -- ring size (fixed at 120 frames, ~2 seconds at 60 FPS).
+- `count` -- number of samples currently in the ring (grows from 0 to `frame_cap`).
+- `phases` -- phase names in positional order; matches each frame's `phase_us` array.
+- `frames` -- oldest first, newest last.
+- `idx` -- monotonic frame counter since process start.
+- Units: microseconds.
+
+The sum of `phase_us` may be less than `total_us` because glue code between phases (event bookkeeping, temp_allocator reset, hotreload check) and the Raylib vsync wait inside `EndDrawing` are not attributed to any phase.
+
+**CLI flag:** `--profile` activates collection and the on-screen overlay (top-right corner). Press `F3` at runtime to hide/show the overlay without restarting. The overlay is independent of `--dev` -- you can run `--profile` alone for local eyeballing or `--profile --dev` to expose the endpoint.
+
 ### `GET /screenshot` -- PNG capture
 
 ```bash

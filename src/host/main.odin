@@ -7,20 +7,21 @@ import "core:mem"
 import "core:os"
 import "font"
 import "input"
+import "profile"
 import "types"
 import rl "vendor:raylib"
 
 main :: proc() {
 	dev_mode := false
 	track_mem := false
+	profile_mode := false
 	app_file := ""
 	for arg in os.args[1:] {
-		if arg == "--dev" {
-			dev_mode = true
-		} else if arg == "--track-mem" {
-			track_mem = true
-		} else {
-			app_file = arg
+		switch arg {
+		case "--dev":        dev_mode = true
+		case "--track-mem":  track_mem = true
+		case "--profile":    profile_mode = true
+		case:                app_file = arg
 		}
 	}
 
@@ -57,6 +58,8 @@ main :: proc() {
 	font.init()
 	defer font.destroy()
 
+	profile.init(profile_mode)
+
 	b: bridge.Bridge
 	bridge.init(&b, dev_mode)
 	defer bridge.destroy(&b)
@@ -71,6 +74,8 @@ main :: proc() {
 	defer delete(listeners)
 
 	for !rl.WindowShouldClose() && !bridge.is_shutdown_requested(&b) {
+		profile.begin_frame()
+
 		free_all(context.temp_allocator)
 		bridge.check_hotreload(&b)
 
@@ -79,23 +84,33 @@ main :: proc() {
 			listeners = input.extract_listeners(b.paths, b.nodes, b.theme)
 		}
 
+		// --- Input (1/4): raw poll ---
+		s_input1 := profile.begin(.Input)
 		input_events := input.poll()
+		profile.end(s_input1)
 		defer delete(input_events)
 
+		// --- Devserver: drain pending HTTP requests ---
+		s_ds := profile.begin(.Devserver)
 		bridge.poll_devserver(&b, &input_events)
+		profile.end(s_ds)
+
+		// --- Bridge: all Lua-side work ---
+		s_br1 := profile.begin(.Bridge)
 		bridge.deliver_events(&b, input_events[:])
 		bridge.poll_http(&b)
 		bridge.poll_shell(&b)
 		bridge.render_tick(&b)
 		bridge.poll_timers(&b)
+		profile.end(s_br1)
 
+		// --- Input (2/4): listener / focus / drag computation ---
+		s_input2a := profile.begin(.Input)
 		user_events := input.get_user_events(input_events, listeners, node_rects[:])
 		defer delete(user_events)
-
 		applied_events := input.apply_listeners(listeners, input_events, node_rects[:])
 		defer delete(applied_events)
 
-		// Handle focus changes for input state
 		for ae in applied_events {
 			switch a in ae {
 			case types.ApplyFocus:
@@ -109,32 +124,55 @@ main :: proc() {
 			case types.ApplyActive:
 			}
 		}
-		// If focus was cleared (click outside), leave input state
 		if input.state.active && input.focused_idx < 0 {
 			input.focus_leave()
 		}
 
-		// Process drag state machine
 		drag_events := input.process_drag(
 			input_events[:], listeners[:], b.nodes[:], node_rects[:],
 		)
 		defer delete(drag_events)
-		bridge.deliver_dispatch_events(&b, drag_events[:])
+		profile.end(s_input2a)
 
+		// --- Bridge: deliver drag events (Lua may mutate state before user events) ---
+		s_br2 := profile.begin(.Bridge)
+		bridge.deliver_dispatch_events(&b, drag_events[:])
+		profile.end(s_br2)
+
+		// --- Input (3/4): user-event computation ---
+		s_input2b := profile.begin(.Input)
 		dispatch_events := input.process_user_events(
 			user_events[:], input_events[:], b.nodes[:], node_rects[:], b.theme,
 		)
 		defer delete(dispatch_events)
-		bridge.deliver_dispatch_events(&b, dispatch_events[:])
+		profile.end(s_input2b)
 
+		// --- Bridge: deliver user events (Lua may mutate state before scroll apply) ---
+		s_br3 := profile.begin(.Bridge)
+		bridge.deliver_dispatch_events(&b, dispatch_events[:])
+		profile.end(s_br3)
+
+		// --- Input (4/4): scroll application ---
+		s_input2c := profile.begin(.Input)
 		apply_scroll_events(input_events[:], b.nodes[:])
+		profile.end(s_input2c)
 
 		rl.BeginDrawing()
 		rl.ClearBackground({255, 255, 255, 255})
 
-		render_tree(b.theme, b.nodes[:], b.children_list[:])
-		canvas.end_frame()
+		s_layout := profile.begin(.Layout)
+		layout_tree(b.theme, b.nodes[:], b.children_list[:])
+		profile.end(s_layout)
 
+		s_render := profile.begin(.Render)
+		draw_tree(b.theme, b.nodes[:], b.children_list[:])
+		profile.end(s_render)
+
+		profile.draw_overlay()
+
+		canvas.end_frame()
 		rl.EndDrawing()
+
+		profile.end_frame()
 	}
 }

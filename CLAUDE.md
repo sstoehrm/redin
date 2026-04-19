@@ -17,7 +17,7 @@ These docs are the source of truth. When implementing, follow them exactly.
 
 - **Host/renderer:** Odin + Raylib
 - **Scripting:** LuaJIT (Lua 5.1 API) with Fennel compiled to Lua 5.1 target
-- **AI interface:** localhost HTTP dev server (`--dev` mode). Default port 8800; if busy, walks upward to the next free port. Actual port is written to `./.redin-port` and cleaned up on shutdown.
+- **AI interface:** localhost HTTP dev server (`--dev` mode). Default port 8800; if busy, walks upward to the next free port. Actual port is written to `./.redin-port` and cleaned up on shutdown. Optional `--profile` flag adds a 5-phase frame-timing ring buffer exposed at `/profile` and an F3-togglable on-screen overlay.
 
 ## Building
 
@@ -93,6 +93,7 @@ Available when running with `--dev`. Listens on port 8800 by default; walks upwa
 | `GET` | `/state` | Full app state |
 | `GET` | `/state/<dot.path>` | Nested state lookup (e.g. `/state/form.name`) |
 | `GET` | `/aspects` | Current theme map |
+| `GET` | `/profile` | Ring-buffered frame timings (requires `--profile`) |
 | `GET` | `/screenshot` | PNG screenshot of the window |
 | `POST` | `/events` | Dispatch an event (JSON body: `[:event-name, payload]`) |
 | `POST` | `/click` | Inject a mouse click (JSON body: `{"x":N,"y":N}`) |
