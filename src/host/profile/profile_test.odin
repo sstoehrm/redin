@@ -2,6 +2,7 @@ package profile
 
 import "core:sync"
 import "core:testing"
+import "core:time"
 
 // Tests mutate package-level globals; serialize them so Odin's default
 // multi-threaded test runner doesn't race.
@@ -70,4 +71,36 @@ test_disabled_is_noop :: proc(t: ^testing.T) {
 
     testing.expect_value(t, len(samples), 0)
     testing.expect_value(t, is_enabled(), false)
+}
+
+@(test)
+test_phase_accumulation :: proc(t: ^testing.T) {
+    sync.lock(&test_mu)
+    defer sync.unlock(&test_mu)
+
+    init(true)
+    defer init(false)
+
+    begin_frame()
+    s := begin(.Input)
+    // Small spin so the tick delta is non-zero on fast machines.
+    time.sleep(100 * time.Microsecond)
+    end(s)
+    end_frame()
+
+    samples := make([dynamic]FrameSample)
+    defer delete(samples)
+    snapshot_into(&samples)
+
+    testing.expect_value(t, len(samples), 1)
+    sample := samples[0]
+    testing.expect(t, sample.phase_ns[.Input] > 0,
+        "Input phase should accumulate elapsed ns")
+    testing.expect(t, sample.total_ns >= sample.phase_ns[.Input],
+        "total_ns should cover the Input phase")
+    // Other phases were never measured this frame → zero.
+    testing.expect_value(t, sample.phase_ns[.Bridge],    i64(0))
+    testing.expect_value(t, sample.phase_ns[.Layout],    i64(0))
+    testing.expect_value(t, sample.phase_ns[.Render],    i64(0))
+    testing.expect_value(t, sample.phase_ns[.Devserver], i64(0))
 }
