@@ -21,7 +21,7 @@
   "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. ")
 (local text-1000 (string.sub (.. pattern pattern pattern pattern) 1 1000))
 
-(local ROW-COUNT 10000)
+(local ROW-COUNT (tonumber (or (os.getenv "PERF_ROWS") "10000")))
 
 ;; Build the view tree once at load time. main_view returns the same
 ;; table reference each frame — the Bridge still flattens it fresh,

@@ -17,8 +17,27 @@ measure_range :: proc(text: string, start: int, end: int, font_obj: rl.Font, fon
 	return rl.MeasureTextEx(font_obj, cstr, font_size, spacing).x
 }
 
+// Raw advance width of a single codepoint in `font`'s base units.
+// Multiply by `font_size / font.baseSize` to get pixels at a target size.
+// Mirrors the inner arithmetic of rl.MeasureTextEx so compute_lines can
+// track a running width in O(n) rather than remeasuring the growing
+// line prefix on every character.
+@(private)
+glyph_advance_raw :: proc(font_obj: rl.Font, cp: rune) -> f32 {
+	idx := rl.GetGlyphIndex(font_obj, cp)
+	if idx < 0 || idx >= font_obj.glyphCount do return 0
+	advance := font_obj.glyphs[idx].advanceX
+	if advance != 0 do return f32(advance)
+	return font_obj.recs[idx].width
+}
+
 // Compute visual line breaks for text with word-wrap and \n support.
 // max_width <= 0 means no wrapping (only break on \n).
+//
+// Tracks a running `current_px` equal to the pixel width from line_start
+// to pos. Each character contributes exactly one glyph advance, making
+// this O(n). Matches rl.MeasureTextEx semantics: scale by
+// font_size / baseSize and add `spacing` between (not before) glyphs.
 compute_lines :: proc(
 	text: string,
 	font_obj: rl.Font,
@@ -33,61 +52,82 @@ compute_lines :: proc(
 		return lines
 	}
 
+	scale: f32 = 1
+	if font_obj.baseSize > 0 {
+		scale = font_size / f32(font_obj.baseSize)
+	}
+
 	line_start := 0
 	last_space := -1          // byte offset of last space (word break point)
 	last_space_width: f32 = 0 // line width up to (not including) last_space
+	current_px: f32 = 0        // pixel width of [line_start, pos)
+	char_count := 0            // chars added to the current line (spacing gate)
 
 	pos := 0
 	for pos < len(text) {
+		c := text[pos]
+
 		// Hard line break
-		if text[pos] == '\n' {
-			w := measure_range(text, line_start, pos, font_obj, font_size, spacing)
-			append(&lines, Text_Line{start = line_start, end = pos, width = w})
+		if c == '\n' {
+			append(&lines, Text_Line{start = line_start, end = pos, width = current_px})
 			pos += 1
 			line_start = pos
+			current_px = 0
+			char_count = 0
 			last_space = -1
 			continue
 		}
 
-		// Track word boundaries
-		if text[pos] == ' ' {
+		rune_val, size := utf8.decode_rune(transmute([]u8)text[pos:])
+
+		// Record space boundary BEFORE adding its width; last_space_width
+		// is the line width up to (but not including) the space.
+		if c == ' ' {
 			last_space = pos
-			last_space_width = measure_range(text, line_start, pos, font_obj, font_size, spacing)
+			last_space_width = current_px
 		}
 
-		// Advance past this character
-		_, size := utf8.decode_rune(transmute([]u8)text[pos:])
-		next_pos := pos + size
+		glyph_px := glyph_advance_raw(font_obj, rune_val) * scale
+		next_px := current_px + glyph_px
+		if char_count > 0 do next_px += spacing
 
-		// Check if line exceeds max_width
-		if max_width > 0 && next_pos > line_start {
-			line_width := measure_range(text, line_start, next_pos, font_obj, font_size, spacing)
-			if line_width > max_width && pos > line_start {
-				if last_space >= line_start {
-					// Break at last word boundary
-					append(&lines, Text_Line{
-						start = line_start,
-						end   = last_space,
-						width = last_space_width,
-					})
-					line_start = last_space + 1 // skip the space
-					last_space = -1
-				} else {
-					// No word boundary — break at character level
-					w := measure_range(text, line_start, pos, font_obj, font_size, spacing)
-					append(&lines, Text_Line{start = line_start, end = pos, width = w})
-					line_start = pos
-					last_space = -1
-				}
+		// Wrap if the candidate width would exceed max_width. The
+		// `pos > line_start` guard prevents an infinite loop on a line
+		// whose very first char is already wider than max_width.
+		if max_width > 0 && next_px > max_width && pos > line_start {
+			if last_space >= line_start {
+				// Break at last word boundary; skip the space.
+				append(&lines, Text_Line{
+					start = line_start,
+					end   = last_space,
+					width = last_space_width,
+				})
+				line_start = last_space + 1
+				pos = line_start
+				current_px = 0
+				char_count = 0
+				last_space = -1
+				continue
 			}
+
+			// No space on this line — break at char boundary. The
+			// current char becomes the first char of the new line, so
+			// don't advance pos; the next iteration handles it.
+			append(&lines, Text_Line{start = line_start, end = pos, width = current_px})
+			line_start = pos
+			current_px = 0
+			char_count = 0
+			last_space = -1
+			continue
 		}
 
-		pos = next_pos
+		current_px = next_px
+		char_count += 1
+		pos += size
 	}
 
 	// Emit final line
-	w := measure_range(text, line_start, len(text), font_obj, font_size, spacing)
-	append(&lines, Text_Line{start = line_start, end = len(text), width = w})
+	append(&lines, Text_Line{start = line_start, end = len(text), width = current_px})
 
 	return lines
 }
