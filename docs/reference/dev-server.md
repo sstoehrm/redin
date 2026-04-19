@@ -50,7 +50,7 @@ Response: full theme as JSON object (serialized from host-side `Theme` structs).
 
 ### `GET /profile` -- frame timing ring buffer
 
-Returns frame-timing samples from the ring buffer. Only registered when the host runs with both `--dev` and `--profile`; otherwise returns `404`.
+Returns frame-timing samples from the ring buffer. Requires `--dev` (for the server) and `--profile` (to enable collection). When the host is started without `--profile`, the route returns `404 "profile not enabled"`.
 
 **Example response:**
 

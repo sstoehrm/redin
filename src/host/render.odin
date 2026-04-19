@@ -568,14 +568,6 @@ draw_box_children :: proc(
 	}
 }
 
-render_tree :: proc(
-	theme: map[string]types.Theme,
-	nodes: []types.Node,
-	children_list: []types.Children,
-) {
-	layout_tree(theme, nodes, children_list)
-	draw_tree(theme, nodes, children_list)
-}
 
 // Helper: extract f32 from union{SizeValue, f32}
 size_f32 :: proc(size: union {
