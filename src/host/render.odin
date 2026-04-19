@@ -31,6 +31,12 @@ resolve_vp :: proc(v: types.ViewportValue, window_dim: f32) -> f32 {
 // Used by input handling for hit testing in the next frame.
 node_rects: [dynamic]rl.Rectangle
 
+// Content rects (post-padding) for container nodes. Populated by
+// layout_tree alongside node_rects. Only meaningful for Vbox, Hbox,
+// Canvas, Stack, Popout, Modal. Draw phase reads this for scissor
+// clipping and to avoid recomputing padding.
+node_content_rects: [dynamic]rl.Rectangle
+
 // Per-node scroll offsets for overflow containers.
 scroll_offsets: map[int]f32
 scroll_offsets_x: map[int]f32
@@ -93,24 +99,25 @@ find_deepest_overflow :: proc(nodes: []types.Node, pt: rl.Vector2, mode: string)
 	return best_idx
 }
 
-render_tree :: proc(
+layout_tree :: proc(
 	theme: map[string]types.Theme,
 	nodes: []types.Node,
 	children_list: []types.Children,
 ) {
 	if len(nodes) == 0 do return
 
-	// Reset rects array to match current tree size
 	resize(&node_rects, len(nodes))
-	for &r in node_rects {
-		r = {}
+	resize(&node_content_rects, len(nodes))
+	for i in 0 ..< len(nodes) {
+		node_rects[i] = {}
+		node_content_rects[i] = {}
 	}
 
 	screen := rl.Rectangle{0, 0, f32(rl.GetScreenWidth()), f32(rl.GetScreenHeight())}
-	render_node(0, screen, nodes, children_list, theme)
+	layout_node(0, screen, nodes, children_list, theme)
 }
 
-render_node :: proc(
+layout_node :: proc(
 	idx: int,
 	rect: rl.Rectangle,
 	nodes: []types.Node,
@@ -118,55 +125,27 @@ render_node :: proc(
 	theme: map[string]types.Theme,
 ) {
 	if idx < 0 || idx >= len(nodes) do return
-
-	// Store layout rect for hit testing
-	if idx < len(node_rects) {
-		node_rects[idx] = rect
-	}
+	node_rects[idx] = rect
+	node_content_rects[idx] = rect
 
 	switch n in nodes[idx] {
 	case types.NodeStack:
 		if len(n.viewport) > 0 {
-			render_children_viewport(idx, n, nodes, children_list, theme)
+			layout_children_viewport(idx, n, nodes, children_list, theme)
 		} else {
-			render_children_stack(idx, rect, nodes, children_list, theme)
+			layout_children_stack(idx, rect, nodes, children_list, theme)
 		}
 	case types.NodeVbox:
-		draw_box(idx, rect, n.aspect, n.layout, true, n.overflow, nodes, children_list, theme)
+		layout_box(idx, rect, n.aspect, n.layout, true, n.overflow, nodes, children_list, theme)
 	case types.NodeHbox:
-		draw_box(idx, rect, n.aspect, n.layout, false, n.overflow, nodes, children_list, theme)
+		layout_box(idx, rect, n.aspect, n.layout, false, n.overflow, nodes, children_list, theme)
 	case types.NodeCanvas:
-		// Draw aspect chrome (bg, border, radius, padding)
+		// Apply padding to content_rect; draw pass uses this for canvas.process.
 		content_rect := rect
 		if len(n.aspect) > 0 {
 			if t, ok := theme[n.aspect]; ok {
-				draw_shadow(rect, t.shadow, t.radius)
-				if t.bg != {} {
-					bg := rl.Color{t.bg[0], t.bg[1], t.bg[2], 255}
-					if t.radius > 0 {
-						roundness := f32(t.radius) / min(rect.width, rect.height) * 2
-						rl.DrawRectangleRounded(rect, roundness, 6, bg)
-					} else {
-						rl.DrawRectangleRec(rect, bg)
-					}
-				}
-				if t.border != {} && t.border_width > 0 {
-					border := rl.Color{t.border[0], t.border[1], t.border[2], 255}
-					if t.radius > 0 {
-						roundness := f32(t.radius) / min(rect.width, rect.height) * 2
-						rl.DrawRectangleRoundedLinesEx(
-							rect,
-							roundness,
-							6,
-							f32(t.border_width),
-							border,
-						)
-					} else {
-						rl.DrawRectangleLinesEx(rect, f32(t.border_width), border)
-					}
-				}
 				if t.padding != {} {
-					content_rect = rl.Rectangle {
+					content_rect = rl.Rectangle{
 						rect.x + f32(t.padding[3]),
 						rect.y + f32(t.padding[0]),
 						rect.width - f32(t.padding[1]) - f32(t.padding[3]),
@@ -175,38 +154,20 @@ render_node :: proc(
 				}
 			}
 		}
-		// Dispatch to canvas provider or draw placeholder
-		if len(n.provider) > 0 {
-			canvas.process(n.provider, content_rect)
-		} else {
-			rl.DrawRectangleLinesEx(content_rect, 1, rl.LIGHTGRAY)
-			rl.DrawText("canvas", i32(content_rect.x) + 4, i32(content_rect.y) + 4, 16, rl.GRAY)
-		}
-	case types.NodeInput:
-		draw_input(idx, rect, n, theme)
-	case types.NodeButton:
-		draw_button(rect, n, theme)
-	case types.NodeText:
-		draw_text(idx, rect, n, theme)
-	case types.NodeImage:
-		draw_themed_rect(rect, n.aspect, theme)
-		rl.DrawRectangleLinesEx(rect, 1, rl.GRAY)
-		rl.DrawText("image", i32(rect.x) + 4, i32(rect.y) + 4, 14, rl.GRAY)
+		node_content_rects[idx] = content_rect
+	case types.NodeInput, types.NodeButton, types.NodeText, types.NodeImage:
+		// Leaf — no children, rect already stored.
 	case types.NodePopout:
-		render_children_stack(idx, rect, nodes, children_list, theme)
+		layout_children_stack(idx, rect, nodes, children_list, theme)
 	case types.NodeModal:
-		// Modal always covers the full screen, regardless of parent layout
 		screen := rl.Rectangle{0, 0, f32(rl.GetScreenWidth()), f32(rl.GetScreenHeight())}
-		if idx < len(node_rects) {
-			node_rects[idx] = screen
-		}
-		draw_themed_rect(screen, n.aspect, theme)
-		render_children_stack(idx, screen, nodes, children_list, theme)
+		node_rects[idx] = screen
+		node_content_rects[idx] = screen
+		layout_children_stack(idx, screen, nodes, children_list, theme)
 	}
 }
 
-// stack: each child gets the full parent rect (overlapping)
-render_children_stack :: proc(
+layout_children_stack :: proc(
 	idx: int,
 	rect: rl.Rectangle,
 	nodes: []types.Node,
@@ -216,12 +177,11 @@ render_children_stack :: proc(
 	ch := children_list[idx]
 	for i in 0 ..< int(ch.length) {
 		child_idx := int(ch.value[i])
-		render_node(child_idx, rect, nodes, children_list, theme)
+		layout_node(child_idx, rect, nodes, children_list, theme)
 	}
 }
 
-// stack with viewport: each child gets an absolute window-relative rect
-render_children_viewport :: proc(
+layout_children_viewport :: proc(
 	idx: int,
 	stack: types.NodeStack,
 	nodes: []types.Node,
@@ -244,35 +204,24 @@ render_children_viewport :: proc(
 		offset_x := px(resolve_vp(vr.x, win_w))
 		offset_y := px(resolve_vp(vr.y, win_h))
 
-		x: f32
-		y: f32
-
+		x: f32; y: f32
 		#partial switch vr.anchor {
-		case .TOP_LEFT, .CENTER_LEFT, .BOTTOM_LEFT:
-			x = offset_x
-		case .TOP_CENTER, .CENTER, .BOTTOM_CENTER:
-			x = win_w / 2 - w / 2 + offset_x
-		case .TOP_RIGHT, .CENTER_RIGHT, .BOTTOM_RIGHT:
-			x = win_w - w + offset_x
+		case .TOP_LEFT, .CENTER_LEFT, .BOTTOM_LEFT:     x = offset_x
+		case .TOP_CENTER, .CENTER, .BOTTOM_CENTER:      x = win_w / 2 - w / 2 + offset_x
+		case .TOP_RIGHT, .CENTER_RIGHT, .BOTTOM_RIGHT:  x = win_w - w + offset_x
 		}
-
 		#partial switch vr.anchor {
-		case .TOP_LEFT, .TOP_CENTER, .TOP_RIGHT:
-			y = offset_y
-		case .CENTER_LEFT, .CENTER, .CENTER_RIGHT:
-			y = win_h / 2 - h / 2 + offset_y
-		case .BOTTOM_LEFT, .BOTTOM_CENTER, .BOTTOM_RIGHT:
-			y = win_h - h + offset_y
+		case .TOP_LEFT, .TOP_CENTER, .TOP_RIGHT:        y = offset_y
+		case .CENTER_LEFT, .CENTER, .CENTER_RIGHT:      y = win_h / 2 - h / 2 + offset_y
+		case .BOTTOM_LEFT, .BOTTOM_CENTER, .BOTTOM_RIGHT: y = win_h - h + offset_y
 		}
-
 		child_rect := rl.Rectangle{px(x), px(y), w, h}
 		child_idx := int(ch.value[i])
-		render_node(child_idx, child_rect, nodes, children_list, theme)
+		layout_node(child_idx, child_rect, nodes, children_list, theme)
 	}
 }
 
-// Unified box layout for vbox (vertical=true) and hbox (vertical=false)
-draw_box :: proc(
+layout_box :: proc(
 	idx: int,
 	rect: rl.Rectangle,
 	aspect: string,
@@ -284,54 +233,19 @@ draw_box :: proc(
 	theme: map[string]types.Theme,
 ) {
 	content_rect := rect
-
+	pad: [4]u8
 	if len(aspect) > 0 {
-		bg_color: rl.Color
-		has_bg := false
-		pad: [4]u8
-		shadow: types.Shadow
-
-		if t, ok := theme[aspect]; ok {
-			if t.bg != {} {
-				alpha := u8(255)
-				if t.opacity > 0 && t.opacity < 1 {
-					alpha = u8(t.opacity * 255)
-				}
-				bg_color = rl.Color{t.bg[0], t.bg[1], t.bg[2], alpha}
-				has_bg = true
-			}
-			pad = t.padding
-			shadow = t.shadow
-		}
-
-		// Apply drag theme variants (override base)
+		if t, ok := theme[aspect]; ok do pad = t.padding
 		if input.dragging_idx == idx {
 			drag_start_key := strings.concatenate({aspect, "#drag-start"}, context.temp_allocator)
-			if dt, ok := theme[drag_start_key]; ok {
-				if dt.bg != {} {
-					bg_color = rl.Color{dt.bg[0], dt.bg[1], dt.bg[2], 255}
-					has_bg = true
-				}
-				if dt.padding != {} do pad = dt.padding
-			}
+			if dt, ok := theme[drag_start_key]; ok && dt.padding != {} do pad = dt.padding
 		}
 		if input.drag_over_idx == idx {
 			drag_key := strings.concatenate({aspect, "#drag"}, context.temp_allocator)
-			if dt, ok := theme[drag_key]; ok {
-				if dt.bg != {} {
-					bg_color = rl.Color{dt.bg[0], dt.bg[1], dt.bg[2], 255}
-					has_bg = true
-				}
-				if dt.padding != {} do pad = dt.padding
-			}
-		}
-
-		draw_shadow(rect, shadow, 0)
-		if has_bg {
-			rl.DrawRectangleRec(rect, bg_color)
+			if dt, ok := theme[drag_key]; ok && dt.padding != {} do pad = dt.padding
 		}
 		if pad != {} {
-			content_rect = rl.Rectangle {
+			content_rect = rl.Rectangle{
 				rect.x + f32(pad[3]),
 				rect.y + f32(pad[0]),
 				rect.width - f32(pad[1]) - f32(pad[3]),
@@ -339,6 +253,7 @@ draw_box :: proc(
 			}
 		}
 	}
+	node_content_rects[idx] = content_rect
 
 	ch := children_list[idx]
 	if ch.length == 0 do return
@@ -347,10 +262,6 @@ draw_box :: proc(
 	scrollable_x := overflow == "scroll-x" && !vertical
 	scrollable := scrollable_y || scrollable_x
 
-	// First pass: sum fixed sizes, count fill nodes.
-	// scroll-y measures children's intrinsic height; scroll-x requires
-	// explicit widths (intrinsic-width measurement for horizontal flow
-	// is ambiguous — e.g. text would need to know its wrap width first).
 	fixed_total: f32 = 0
 	fill_count: int = 0
 	for i in 0 ..< int(ch.length) {
@@ -362,29 +273,18 @@ draw_box :: proc(
 				: node_preferred_height(child_idx, nodes, theme, content_rect.width)
 		} else {
 			s = node_preferred_width(child_idx, nodes)
-			if scrollable_x && s <= 0 {
-				fmt.eprintfln("warning: scroll-x child at idx %d has no explicit :width; it will render at zero width", child_idx)
-			}
 		}
-		if s > 0 {
-			fixed_total += s
-		} else {
-			fill_count += 1
-		}
+		if s > 0 do fixed_total += s
+		else     do fill_count += 1
 	}
 
 	available := vertical ? content_rect.height : content_rect.width
 	fill_size: f32 = 0
-
-	if scrollable {
-		// In scroll mode, give fill nodes a zero size (content determines layout)
-		fill_size = 0
-	} else if fill_count > 0 {
+	if !scrollable && fill_count > 0 {
 		remaining := available - fixed_total
 		if remaining > 0 do fill_size = remaining / f32(fill_count)
 	}
 
-	// Scroll offset
 	scroll_off: f32 = 0
 	if scrollable_y {
 		scroll_off = scroll_offsets[idx] if idx in scroll_offsets else 0
@@ -401,69 +301,43 @@ draw_box :: proc(
 		if scroll_off < 0 do scroll_off = 0
 		scroll_offsets_x[idx] = scroll_off
 	}
-	if scrollable {
-		rl.BeginScissorMode(
-			i32(content_rect.x), i32(content_rect.y),
-			i32(content_rect.width), i32(content_rect.height),
-		)
-	}
 
-	// Determine anchor axes
-	anchor_h: int = 0 // 0=left, 1=center, 2=right
-	anchor_v: int = 0 // 0=top, 1=center, 2=bottom
+	anchor_h: int = 0; anchor_v: int = 0
 	#partial switch layout {
-	case .TOP_CENTER, .CENTER, .BOTTOM_CENTER:
-		anchor_h = 1
-	case .TOP_RIGHT, .CENTER_RIGHT, .BOTTOM_RIGHT:
-		anchor_h = 2
+	case .TOP_CENTER, .CENTER, .BOTTOM_CENTER:        anchor_h = 1
+	case .TOP_RIGHT, .CENTER_RIGHT, .BOTTOM_RIGHT:    anchor_h = 2
 	}
 	#partial switch layout {
-	case .CENTER_LEFT, .CENTER, .CENTER_RIGHT:
-		anchor_v = 1
-	case .BOTTOM_LEFT, .BOTTOM_CENTER, .BOTTOM_RIGHT:
-		anchor_v = 2
+	case .CENTER_LEFT, .CENTER, .CENTER_RIGHT:        anchor_v = 1
+	case .BOTTOM_LEFT, .BOTTOM_CENTER, .BOTTOM_RIGHT: anchor_v = 2
 	}
 
-	// Second pass: layout and render
 	pos := (vertical ? content_rect.y : content_rect.x) - scroll_off
-
-	// Main-axis alignment: offset pos based on anchor (only when no fill nodes)
 	if fill_count == 0 {
 		if vertical {
-			if anchor_v == 1 {
-				pos = content_rect.y + (available - fixed_total) / 2 - scroll_off
-			} else if anchor_v == 2 {
-				pos = content_rect.y + available - fixed_total - scroll_off
-			}
+			if anchor_v == 1 do pos = content_rect.y + (available - fixed_total) / 2 - scroll_off
+			else if anchor_v == 2 do pos = content_rect.y + available - fixed_total - scroll_off
 		} else {
-			if anchor_h == 1 {
-				pos = content_rect.x + (available - fixed_total) / 2 - scroll_off
-			} else if anchor_h == 2 {
-				pos = content_rect.x + available - fixed_total - scroll_off
-			}
+			if anchor_h == 1 do pos = content_rect.x + (available - fixed_total) / 2 - scroll_off
+			else if anchor_h == 2 do pos = content_rect.x + available - fixed_total - scroll_off
 		}
 	}
 
 	for i in 0 ..< int(ch.length) {
 		child_idx := int(ch.value[i])
-
 		child_rect: rl.Rectangle
 		if vertical {
 			h := scrollable_y \
 				? intrinsic_height(child_idx, nodes, children_list, theme, content_rect.width) \
 				: node_preferred_height(child_idx, nodes, theme, content_rect.width)
 			if h <= 0 do h = fill_size
-			child_x := content_rect.x
-			child_w := content_rect.width
-			// Cross-axis (horizontal) alignment
+			child_x := content_rect.x; child_w := content_rect.width
 			if anchor_h > 0 {
 				w := node_preferred_width(child_idx, nodes)
 				if w > 0 {
-					if anchor_h == 1 {
-						child_x = content_rect.x + (content_rect.width - w) / 2
-					} else {
-						child_x = content_rect.x + content_rect.width - w
-					}
+					child_x = anchor_h == 1 \
+						? content_rect.x + (content_rect.width - w) / 2 \
+						: content_rect.x + content_rect.width - w
 					child_w = w
 				}
 			}
@@ -472,31 +346,197 @@ draw_box :: proc(
 		} else {
 			w := node_preferred_width(child_idx, nodes)
 			if w <= 0 do w = fill_size
-			child_y := content_rect.y
-			child_h := content_rect.height
-			// Cross-axis (vertical) alignment
+			child_y := content_rect.y; child_h := content_rect.height
 			if anchor_v > 0 {
 				h := node_preferred_height(child_idx, nodes, theme, w)
 				if h > 0 {
-					if anchor_v == 1 {
-						child_y = content_rect.y + (content_rect.height - h) / 2
-					} else {
-						child_y = content_rect.y + content_rect.height - h
-					}
+					child_y = anchor_v == 1 \
+						? content_rect.y + (content_rect.height - h) / 2 \
+						: content_rect.y + content_rect.height - h
 					child_h = h
 				}
 			}
 			child_rect = rl.Rectangle{pos, child_y, w, child_h}
 			pos += w
 		}
+		layout_node(child_idx, child_rect, nodes, children_list, theme)
+	}
+}
 
-		render_node(child_idx, child_rect, nodes, children_list, theme)
+draw_tree :: proc(
+	theme: map[string]types.Theme,
+	nodes: []types.Node,
+	children_list: []types.Children,
+) {
+	if len(nodes) == 0 do return
+	draw_node(0, nodes, children_list, theme)
+}
+
+draw_node :: proc(
+	idx: int,
+	nodes: []types.Node,
+	children_list: []types.Children,
+	theme: map[string]types.Theme,
+) {
+	if idx < 0 || idx >= len(nodes) do return
+	rect := node_rects[idx]
+	content_rect := node_content_rects[idx]
+
+	switch n in nodes[idx] {
+	case types.NodeStack:
+		draw_children(idx, nodes, children_list, theme)
+	case types.NodeVbox:
+		draw_box_chrome(idx, rect, n.aspect, n.overflow, true, theme)
+		draw_box_children(idx, content_rect, n.overflow, true, nodes, children_list, theme)
+	case types.NodeHbox:
+		draw_box_chrome(idx, rect, n.aspect, n.overflow, false, theme)
+		draw_box_children(idx, content_rect, n.overflow, false, nodes, children_list, theme)
+	case types.NodeCanvas:
+		if len(n.aspect) > 0 {
+			if t, ok := theme[n.aspect]; ok {
+				draw_shadow(rect, t.shadow, t.radius)
+				if t.bg != {} {
+					bg := rl.Color{t.bg[0], t.bg[1], t.bg[2], 255}
+					if t.radius > 0 {
+						roundness := f32(t.radius) / min(rect.width, rect.height) * 2
+						rl.DrawRectangleRounded(rect, roundness, 6, bg)
+					} else {
+						rl.DrawRectangleRec(rect, bg)
+					}
+				}
+				if t.border != {} && t.border_width > 0 {
+					border := rl.Color{t.border[0], t.border[1], t.border[2], 255}
+					if t.radius > 0 {
+						roundness := f32(t.radius) / min(rect.width, rect.height) * 2
+						rl.DrawRectangleRoundedLinesEx(rect, roundness, 6, f32(t.border_width), border)
+					} else {
+						rl.DrawRectangleLinesEx(rect, f32(t.border_width), border)
+					}
+				}
+			}
+		}
+		if len(n.provider) > 0 {
+			canvas.process(n.provider, content_rect)
+		} else {
+			rl.DrawRectangleLinesEx(content_rect, 1, rl.LIGHTGRAY)
+			rl.DrawText("canvas", i32(content_rect.x) + 4, i32(content_rect.y) + 4, 16, rl.GRAY)
+		}
+	case types.NodeInput:
+		draw_input(idx, rect, n, theme)
+	case types.NodeButton:
+		draw_button(rect, n, theme)
+	case types.NodeText:
+		draw_text(idx, rect, n, theme)
+	case types.NodeImage:
+		draw_themed_rect(rect, n.aspect, theme)
+		rl.DrawRectangleLinesEx(rect, 1, rl.GRAY)
+		rl.DrawText("image", i32(rect.x) + 4, i32(rect.y) + 4, 14, rl.GRAY)
+	case types.NodePopout:
+		draw_children(idx, nodes, children_list, theme)
+	case types.NodeModal:
+		draw_themed_rect(rect, n.aspect, theme)
+		draw_children(idx, nodes, children_list, theme)
+	}
+}
+
+draw_children :: proc(
+	idx: int,
+	nodes: []types.Node,
+	children_list: []types.Children,
+	theme: map[string]types.Theme,
+) {
+	ch := children_list[idx]
+	for i in 0 ..< int(ch.length) {
+		draw_node(int(ch.value[i]), nodes, children_list, theme)
+	}
+}
+
+draw_box_chrome :: proc(
+	idx: int,
+	rect: rl.Rectangle,
+	aspect: string,
+	overflow: string,
+	vertical: bool,
+	theme: map[string]types.Theme,
+) {
+	if len(aspect) == 0 do return
+
+	bg_color: rl.Color
+	has_bg := false
+	shadow: types.Shadow
+
+	if t, ok := theme[aspect]; ok {
+		if t.bg != {} {
+			alpha := u8(255)
+			if t.opacity > 0 && t.opacity < 1 do alpha = u8(t.opacity * 255)
+			bg_color = rl.Color{t.bg[0], t.bg[1], t.bg[2], alpha}
+			has_bg = true
+		}
+		shadow = t.shadow
+	}
+	if input.dragging_idx == idx {
+		drag_start_key := strings.concatenate({aspect, "#drag-start"}, context.temp_allocator)
+		if dt, ok := theme[drag_start_key]; ok && dt.bg != {} {
+			bg_color = rl.Color{dt.bg[0], dt.bg[1], dt.bg[2], 255}
+			has_bg = true
+		}
+	}
+	if input.drag_over_idx == idx {
+		drag_key := strings.concatenate({aspect, "#drag"}, context.temp_allocator)
+		if dt, ok := theme[drag_key]; ok && dt.bg != {} {
+			bg_color = rl.Color{dt.bg[0], dt.bg[1], dt.bg[2], 255}
+			has_bg = true
+		}
+	}
+
+	draw_shadow(rect, shadow, 0)
+	if has_bg do rl.DrawRectangleRec(rect, bg_color)
+}
+
+draw_box_children :: proc(
+	idx: int,
+	content_rect: rl.Rectangle,
+	overflow: string,
+	vertical: bool,
+	nodes: []types.Node,
+	children_list: []types.Children,
+	theme: map[string]types.Theme,
+) {
+	ch := children_list[idx]
+	if ch.length == 0 do return
+
+	scrollable_y := overflow == "scroll-y" && vertical
+	scrollable_x := overflow == "scroll-x" && !vertical
+	scrollable := scrollable_y || scrollable_x
+
+	if scrollable {
+		rl.BeginScissorMode(
+			i32(content_rect.x), i32(content_rect.y),
+			i32(content_rect.width), i32(content_rect.height),
+		)
+	}
+
+	for i in 0 ..< int(ch.length) {
+		draw_node(int(ch.value[i]), nodes, children_list, theme)
 	}
 
 	if scrollable {
 		rl.EndScissorMode()
 
-		// Draw scroll bar along the trailing edge of the scroll axis
+		fixed_total: f32 = 0
+		for i in 0 ..< int(ch.length) {
+			child_idx := int(ch.value[i])
+			s: f32 = vertical \
+				? (scrollable_y \
+					? intrinsic_height(child_idx, nodes, children_list, theme, content_rect.width) \
+					: node_preferred_height(child_idx, nodes, theme, content_rect.width)) \
+				: node_preferred_width(child_idx, nodes)
+			if s > 0 do fixed_total += s
+		}
+		scroll_off := scrollable_y \
+			? (scroll_offsets[idx] if idx in scroll_offsets else 0) \
+			: (scroll_offsets_x[idx] if idx in scroll_offsets_x else 0)
+
 		if scrollable_y && fixed_total > content_rect.height {
 			bar_w: f32 = 4
 			bar_x := content_rect.x + content_rect.width - bar_w
@@ -506,9 +546,7 @@ draw_box :: proc(
 			scroll_ratio := scroll_off / max_scroll if max_scroll > 0 else 0
 			bar_y := content_rect.y + scroll_ratio * (content_rect.height - bar_h)
 			rl.DrawRectangleRounded(
-				{bar_x, bar_y, bar_w, bar_h},
-				1, 4,
-				rl.Color{200, 200, 200, 120},
+				{bar_x, bar_y, bar_w, bar_h}, 1, 4, rl.Color{200, 200, 200, 120},
 			)
 		} else if scrollable_x && fixed_total > content_rect.width {
 			bar_h: f32 = 4
@@ -519,12 +557,19 @@ draw_box :: proc(
 			scroll_ratio := scroll_off / max_scroll if max_scroll > 0 else 0
 			bar_x := content_rect.x + scroll_ratio * (content_rect.width - bar_w)
 			rl.DrawRectangleRounded(
-				{bar_x, bar_y, bar_w, bar_h},
-				1, 4,
-				rl.Color{200, 200, 200, 120},
+				{bar_x, bar_y, bar_w, bar_h}, 1, 4, rl.Color{200, 200, 200, 120},
 			)
 		}
 	}
+}
+
+render_tree :: proc(
+	theme: map[string]types.Theme,
+	nodes: []types.Node,
+	children_list: []types.Children,
+) {
+	layout_tree(theme, nodes, children_list)
+	draw_tree(theme, nodes, children_list)
 }
 
 // Helper: extract f32 from union{SizeValue, f32}
