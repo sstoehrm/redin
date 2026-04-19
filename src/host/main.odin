@@ -84,7 +84,7 @@ main :: proc() {
 			listeners = input.extract_listeners(b.paths, b.nodes, b.theme)
 		}
 
-		// --- Input: poll raw events ---
+		// --- Input (1/4): raw poll ---
 		s_input1 := profile.begin(.Input)
 		input_events := input.poll()
 		profile.end(s_input1)
@@ -104,8 +104,8 @@ main :: proc() {
 		bridge.poll_timers(&b)
 		profile.end(s_br1)
 
-		// --- Input: post-processing (continues Input phase) ---
-		s_input2 := profile.begin(.Input)
+		// --- Input (2/4): listener / focus / drag computation ---
+		s_input2a := profile.begin(.Input)
 		user_events := input.get_user_events(input_events, listeners, node_rects[:])
 		defer delete(user_events)
 		applied_events := input.apply_listeners(listeners, input_events, node_rects[:])
@@ -132,18 +132,30 @@ main :: proc() {
 			input_events[:], listeners[:], b.nodes[:], node_rects[:],
 		)
 		defer delete(drag_events)
+		profile.end(s_input2a)
+
+		// --- Bridge: deliver drag events (Lua may mutate state before user events) ---
+		s_br2 := profile.begin(.Bridge)
+		bridge.deliver_dispatch_events(&b, drag_events[:])
+		profile.end(s_br2)
+
+		// --- Input (3/4): user-event computation ---
+		s_input2b := profile.begin(.Input)
 		dispatch_events := input.process_user_events(
 			user_events[:], input_events[:], b.nodes[:], node_rects[:], b.theme,
 		)
 		defer delete(dispatch_events)
-		apply_scroll_events(input_events[:], b.nodes[:])
-		profile.end(s_input2)
+		profile.end(s_input2b)
 
-		// --- Bridge: event delivery back into Lua ---
-		s_br2 := profile.begin(.Bridge)
-		bridge.deliver_dispatch_events(&b, drag_events[:])
+		// --- Bridge: deliver user events (Lua may mutate state before scroll apply) ---
+		s_br3 := profile.begin(.Bridge)
 		bridge.deliver_dispatch_events(&b, dispatch_events[:])
-		profile.end(s_br2)
+		profile.end(s_br3)
+
+		// --- Input (4/4): scroll application ---
+		s_input2c := profile.begin(.Input)
+		apply_scroll_events(input_events[:], b.nodes[:])
+		profile.end(s_input2c)
 
 		rl.BeginDrawing()
 		rl.ClearBackground({255, 255, 255, 255})

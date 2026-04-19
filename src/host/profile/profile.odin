@@ -31,7 +31,9 @@ Scope :: struct {
 @(private) ring:         Ring
 @(private) snapshot_mu:  sync.Mutex
 
-// Per-frame scratch state — populated by begin/end, flushed by end_frame.
+// Per-frame scratch state — mutated by begin/end on the main thread only.
+// Flushed into the ring by end_frame. Do NOT read from other threads
+// (e.g., the devserver handler) — read `ring` via snapshot_into instead.
 @(private) frame_start:    time.Tick
 @(private) phase_scratch:  [Phase]i64
 
