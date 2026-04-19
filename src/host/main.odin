@@ -168,6 +168,8 @@ main :: proc() {
 		draw_tree(b.theme, b.nodes[:], b.children_list[:])
 		profile.end(s_render)
 
+		profile.draw_overlay()
+
 		canvas.end_frame()
 		rl.EndDrawing()
 
