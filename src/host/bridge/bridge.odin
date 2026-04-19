@@ -8,6 +8,7 @@ import "core:time"
 import "core:unicode/utf8"
 import "base:runtime"
 import "../font"
+import text_pkg "../text"
 import "../types"
 import rl "vendor:raylib"
 import "../canvas"
@@ -156,6 +157,10 @@ clear_node_strings :: proc(n: types.Node) {
 }
 
 clear_frame :: proc(b: ^Bridge) {
+	// Any cross-frame caches keyed by node string pointers become stale
+	// the moment strings are freed. Invalidate before any delete calls.
+	text_pkg.invalidate_height_cache()
+
 	for &p in b.paths {
 		delete(p.value)
 	}

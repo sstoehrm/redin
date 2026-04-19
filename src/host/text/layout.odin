@@ -4,6 +4,35 @@ import "core:strings"
 import "core:unicode/utf8"
 import rl "vendor:raylib"
 
+// Cross-frame cache for wrapped-text heights. Keyed by content.data
+// pointer: as long as Bridge hasn't re-flattened the tree, the same
+// NodeText has the same pointer each frame and the cache hits. On
+// re-flatten, Bridge calls invalidate_height_cache so stale pointers
+// never return a false positive if an address is reused.
+Height_Key :: struct {
+	content_ptr: uintptr,
+	content_len: int,
+	font_size:   f32,
+	width:       f32,
+	lh_ratio:    f32,
+	font_tex_id: u32,
+}
+@(private)
+height_cache: map[Height_Key]f32
+
+lookup_height :: proc(key: Height_Key) -> (f32, bool) {
+	h, ok := height_cache[key]
+	return h, ok
+}
+
+cache_height :: proc(key: Height_Key, h: f32) {
+	height_cache[key] = h
+}
+
+invalidate_height_cache :: proc() {
+	clear(&height_cache)
+}
+
 Text_Line :: struct {
 	start: int, // byte offset inclusive
 	end:   int, // byte offset exclusive

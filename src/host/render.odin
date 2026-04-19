@@ -2,7 +2,6 @@ package host
 
 import "canvas"
 import "core:fmt"
-import "core:hash"
 import "core:math"
 import "core:strings"
 import "font"
@@ -62,19 +61,8 @@ Intrinsic_Entry :: struct {
 }
 node_intrinsic_cache: [dynamic]Intrinsic_Entry
 
-// Cross-frame cache for NodeText height. Bridge re-clones string content
-// every frame so node idx + width is only stable within a frame; content
-// bytes are the only stable identity across frames. Key includes length
-// in addition to the hash to avoid the (vanishingly rare) hash collision.
-Text_Height_Key :: struct {
-	content_hash: u64,
-	content_len:  int,
-	font_size:    f32,
-	width:        f32,
-	lh_ratio:     f32,
-	font_tex_id:  u32, // font.texture.id — distinguishes loaded font atlases
-}
-text_height_cache: map[Text_Height_Key]f32
+// Cross-frame text-height cache lives in text_pkg; Bridge invalidates
+// it from clear_frame. See text_pkg.Height_Key.
 
 SCROLL_SPEED :: 30.0 // pixels per wheel tick
 
@@ -695,23 +683,23 @@ node_preferred_height :: proc(
 		// stable font-atlas identity.
 		f := font.get(font_name, font.style_from_weight(font.Font_Weight(font_weight)))
 
-		// Level 2: cross-frame cache keyed by content bytes. Bridge
-		// reclones strings each frame, so pointer identity is lost —
-		// the fnv64a hash of the bytes is the stable key.
+		// Level 2: cross-frame cache keyed by content.data pointer.
+		// Valid for as long as Bridge hasn't re-flattened the tree —
+		// bridge.clear_frame calls text_pkg.invalidate_height_cache.
 		can_wrap := available_width > 0 && len(n.content) > 0 && n.overflow != "scroll-x"
-		key: Text_Height_Key
+		key: text_pkg.Height_Key
 		have_key := false
 		if can_wrap {
-			key = Text_Height_Key{
-				content_hash = hash.fnv64a(transmute([]u8)n.content),
-				content_len  = len(n.content),
-				font_size    = font_size,
-				width        = available_width,
-				lh_ratio     = lh_ratio,
-				font_tex_id  = f.texture.id,
+			key = text_pkg.Height_Key{
+				content_ptr = uintptr(raw_data(n.content)),
+				content_len = len(n.content),
+				font_size   = font_size,
+				width       = available_width,
+				lh_ratio    = lh_ratio,
+				font_tex_id = f.texture.id,
 			}
 			have_key = true
-			if cached, ok := text_height_cache[key]; ok {
+			if cached, ok := text_pkg.lookup_height(key); ok {
 				if idx >= 0 && idx < len(node_intrinsic_cache) {
 					node_intrinsic_cache[idx] = Intrinsic_Entry{
 						width = available_width, height = cached,
@@ -727,7 +715,7 @@ node_preferred_height :: proc(
 			defer delete(lines)
 			result = f32(len(lines)) * lh
 			if have_key {
-				text_height_cache[key] = result
+				text_pkg.cache_height(key, result)
 			}
 		}
 		if idx >= 0 && idx < len(node_intrinsic_cache) {
