@@ -234,10 +234,27 @@ select_all :: proc() {
 
 // --- Clipboard ---
 
-copy_selection :: proc() {
-	if !has_selection() do return
+// Returns the substring implied by the active selection, branching by Selection_Kind.
+// node_content is used for .Text kind; ignored for .Input kind.
+copy_selection_source_text :: proc(node_content: string) -> string {
+	if !has_selection() do return ""
 	lo, hi := selection_range()
-	text := string(state.text[lo:hi])
+	switch state.selection_kind {
+	case .Input:
+		return string(state.text[lo:hi])
+	case .Text:
+		clamped_hi := min(hi, len(node_content))
+		if clamped_hi <= lo do return ""
+		return node_content[lo:clamped_hi]
+	case .None:
+		return ""
+	}
+	return ""
+}
+
+copy_selection :: proc(node_content_for_text: string = "") {
+	text := copy_selection_source_text(node_content_for_text)
+	if len(text) == 0 do return
 	cstr := strings.clone_to_cstring(text, context.temp_allocator)
 	rl.SetClipboardText(cstr)
 }

@@ -51,3 +51,41 @@ test_focus_enter_clears_text_selection :: proc(t: ^testing.T) {
 	testing.expect_value(t, state.selection_kind, Selection_Kind.Input)
 	testing.expect_value(t, len(state.selection_path), 0)
 }
+
+@(test)
+test_copy_selection_source_text_for_text_kind :: proc(t: ^testing.T) {
+	state_init()
+	defer state_destroy()
+	set_text_selection([]u8{0x01}, 4, 9)
+	got := copy_selection_source_text("the quick brown fox")
+	testing.expect_value(t, got, "quick")
+}
+
+@(test)
+test_copy_selection_source_text_for_input_kind :: proc(t: ^testing.T) {
+	state_init()
+	defer state_destroy()
+	focus_enter("hello world")
+	// focus_enter placed cursor at end; manually set a selection.
+	state.selection_start = 6
+	state.selection_end = 11
+	got := copy_selection_source_text("")
+	testing.expect_value(t, got, "world")
+}
+
+@(test)
+test_copy_selection_source_text_none_kind :: proc(t: ^testing.T) {
+	state_init()
+	defer state_destroy()
+	got := copy_selection_source_text("ignored")
+	testing.expect_value(t, got, "")
+}
+
+@(test)
+test_copy_selection_source_text_clamps_text_kind :: proc(t: ^testing.T) {
+	state_init()
+	defer state_destroy()
+	set_text_selection([]u8{0x01}, 2, 100)   // hi beyond content
+	got := copy_selection_source_text("hello")
+	testing.expect_value(t, got, "llo")
+}
