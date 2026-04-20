@@ -166,6 +166,8 @@ main :: proc() {
 		layout_tree(b.theme, b.nodes[:], b.children_list[:])
 		profile.end(s_layout)
 
+		g_paths = b.paths[:]
+
 		s_render := profile.begin(.Render)
 		draw_tree(b.theme, b.nodes[:], b.children_list[:])
 		profile.end(s_render)

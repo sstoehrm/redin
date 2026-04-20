@@ -37,6 +37,10 @@ node_rects: [dynamic]rl.Rectangle
 // clipping and to avoid recomputing padding.
 node_content_rects: [dynamic]rl.Rectangle
 
+// Per-frame: set by main to b.paths[:] before layout/draw runs so
+// render can match the selection path against this tree's paths.
+g_paths: []types.Path
+
 // Per-node scroll offsets for overflow containers.
 scroll_offsets: map[int]f32
 scroll_offsets_x: map[int]f32
@@ -1120,6 +1124,43 @@ draw_text :: proc(idx: int, rect: rl.Rectangle, n: types.NodeText, theme: map[st
 		y_offset = (rect.height - total_text_h) / 2
 	case .BOTTOM_LEFT, .BOTTOM_CENTER, .BOTTOM_RIGHT:
 		y_offset = rect.height - total_text_h
+	}
+
+	// Render text-selection highlight when this NodeText is the active target.
+	if input.state.selection_kind == .Text && idx < len(g_paths) {
+		this_path := g_paths[idx]
+		sel_path := input.state.selection_path
+		matches := int(this_path.length) == len(sel_path)
+		if matches {
+			for j in 0 ..< int(this_path.length) {
+				if this_path.value[j] != sel_path[j] {
+					matches = false
+					break
+				}
+			}
+		}
+		if matches && input.has_selection() {
+			lo, hi := input.selection_range()
+			if hi > len(n.content) do hi = len(n.content)
+			if lo < hi {
+				sel_color := rl.Color{51, 153, 255, 100}
+				if len(n.aspect) > 0 {
+					if aspect, ok := theme[n.aspect]; ok {
+						if aspect.selection != ([4]u8{}) {
+							sel_color = rl.Color{
+								aspect.selection[0], aspect.selection[1],
+								aspect.selection[2], aspect.selection[3],
+							}
+						}
+					}
+				}
+				draw_selection_rects(
+					lines[:], n.content, lo, hi,
+					f, font_size, spacing, lh,
+					rect, 0, sel_color,
+				)
+			}
+		}
 	}
 
 	for line, i in lines {
