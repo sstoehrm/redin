@@ -73,7 +73,36 @@ process_text_selection :: proc(
 		}
 	}
 
-	// Phase B (drag) + Phase C (release) are Task 8.
+	// Phase B: drag extension while LMB is held.
+	if gesture.active_drag && rl.IsMouseButtonDown(.LEFT) {
+		idx := find_node_by_path(paths, gesture.anchor_path[:])
+		if idx < 0 || idx >= len(node_rects) {
+			gesture.active_drag = false
+		} else {
+			text_node, is_text := nodes[idx].(types.NodeText)
+			if is_text {
+				mouse := rl.GetMousePosition()
+				rect := node_rects[idx]
+				offset := node_byte_offset_at(text_node, rect, mouse, theme)
+				if offset == gesture.anchor_offset {
+					// Collapsed to a caret; drop the selection range.
+					state.selection_start = -1
+					state.selection_end = -1
+				} else if offset > gesture.anchor_offset {
+					state.selection_start = gesture.anchor_offset
+					state.selection_end = offset
+				} else {
+					state.selection_start = offset
+					state.selection_end = gesture.anchor_offset
+				}
+			}
+		}
+	}
+
+	// Phase C: mouse released — stop tracking drags.
+	if gesture.active_drag && !rl.IsMouseButtonDown(.LEFT) {
+		gesture.active_drag = false
+	}
 }
 
 // Map a point inside a NodeText's rect to a byte offset in its content.
@@ -113,4 +142,22 @@ node_byte_offset_at :: proc(
 	line := lines[line_idx]
 
 	return x_to_cursor_in_line(n.content, line, pt.x - rect.x, f, font_size, spacing)
+}
+
+// Find the node whose path value equals `p`. Returns -1 if not found.
+// Exported — also used by the per-frame resolver and the devserver's
+// /selection handler to look up the current text-selection node.
+find_node_by_path :: proc(paths: []types.Path, p: []u8) -> int {
+	for i in 0 ..< len(paths) {
+		if int(paths[i].length) != len(p) do continue
+		match := true
+		for j in 0 ..< len(p) {
+			if paths[i].value[j] != p[j] {
+				match = false
+				break
+			}
+		}
+		if match do return i
+	}
+	return -1
 }
