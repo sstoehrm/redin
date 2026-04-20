@@ -822,6 +822,33 @@ draw_themed_rect :: proc(rect: rl.Rectangle, aspect: string, theme: map[string]t
 	}
 }
 
+// Draw one selection rect per wrapped line, clipping the [lo, hi) byte range
+// against each line's byte span. `rect` is the text content rect (top-left is
+// content_x/content_y). `scroll_y` is the vertical scroll offset in pixels.
+// `lines` must be from text_pkg.compute_lines for `text` at the same width.
+draw_selection_rects :: proc(
+	lines: []text_pkg.Text_Line,
+	text: string,
+	lo, hi: int,
+	font_obj: rl.Font,
+	font_size, spacing, line_height: f32,
+	rect: rl.Rectangle,
+	scroll_y: f32,
+	color: rl.Color,
+) {
+	if lo >= hi do return
+	for line, i in lines {
+		ly := rect.y + f32(i) * line_height - scroll_y
+		if ly + line_height < rect.y || ly > rect.y + rect.height do continue
+		line_lo := max(lo, line.start)
+		line_hi := min(hi, line.end)
+		if line_lo >= line_hi do continue
+		x0 := text_pkg.measure_range(text, line.start, line_lo, font_obj, font_size, spacing)
+		x1 := text_pkg.measure_range(text, line.start, line_hi, font_obj, font_size, spacing)
+		rl.DrawRectangleRec(rl.Rectangle{rect.x + x0, ly, x1 - x0, line_height}, color)
+	}
+}
+
 draw_input :: proc(
 	idx: int,
 	rect: rl.Rectangle,
@@ -931,19 +958,8 @@ draw_input :: proc(
 	// Draw selection highlight (behind text)
 	if is_focused && input.state.active && input.has_selection() {
 		lo, hi := input.selection_range()
-		for line, i in lines {
-			ly := content_y + f32(i) * lh - scroll_y
-			if ly + lh < content_y || ly > content_y + content_h do continue
-
-			sel_start := max(lo, line.start)
-			sel_end := min(hi, line.end)
-			if sel_start >= sel_end do continue
-
-			x0 := text_pkg.measure_range(display_text, line.start, sel_start, f, font_size, spacing)
-			x1 := text_pkg.measure_range(display_text, line.start, sel_end, f, font_size, spacing)
-			sel_rect := rl.Rectangle{content_x + x0, ly, x1 - x0, lh}
-			rl.DrawRectangleRec(sel_rect, selection_color)
-		}
+		content_rect := rl.Rectangle{content_x, content_y, content_w, content_h}
+		draw_selection_rects(lines[:], display_text, lo, hi, f, font_size, spacing, lh, content_rect, scroll_y, selection_color)
 	}
 
 	// Draw text lines
