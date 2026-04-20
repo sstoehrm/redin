@@ -100,7 +100,7 @@ node_byte_offset_at :: proc(
 		}
 	}
 	f := font.get(font_name, font.style_from_weight(font.Font_Weight(font_weight)))
-	spacing := max(font_size / 10, 1)
+	spacing: f32 = 0
 	lh := text_pkg.line_height(font_size, lh_ratio)
 
 	lines := text_pkg.compute_lines(n.content, f, font_size, spacing, rect.width)
