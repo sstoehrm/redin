@@ -834,7 +834,19 @@ draw_input :: proc(
 	bg_color := rl.Color{0, 0, 0, 0}
 	text_color := rl.WHITE
 	placeholder_color := rl.Color{128, 128, 128, 128}
+	// Theme selection color; fall back to the legacy blue when the aspect
+	// does not set :selection (sentinel is all-zero).
 	selection_color := rl.Color{51, 153, 255, 100}
+	if len(n.aspect) > 0 {
+		if aspect, ok := theme[n.aspect]; ok {
+			if aspect.selection != ([4]u8{}) {
+				selection_color = rl.Color{
+					aspect.selection[0], aspect.selection[1],
+					aspect.selection[2], aspect.selection[3],
+				}
+			}
+		}
+	}
 	font_size: f32 = 14
 	padding_l: f32 = 4
 	padding_r: f32 = 4
