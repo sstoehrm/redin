@@ -395,3 +395,20 @@ key_to_string_input :: proc(key: rl.KeyboardKey) -> string {
 	case:            return "unknown"
 	}
 }
+
+// Set the system mouse cursor to I-beam while hovering a selectable text,
+// otherwise DEFAULT. Safe to call every frame; Raylib debounces redundant
+// sets internally.
+set_hover_cursor :: proc(listeners: []types.Listener, node_rects: []rl.Rectangle) {
+	mouse := rl.GetMousePosition()
+	for listener in listeners {
+		tl, ok := listener.(types.Text_Select_Listener)
+		if !ok do continue
+		if tl.node_idx >= len(node_rects) do continue
+		if rl.CheckCollisionPointRec(mouse, node_rects[tl.node_idx]) {
+			rl.SetMouseCursor(.IBEAM)
+			return
+		}
+	}
+	rl.SetMouseCursor(.DEFAULT)
+}

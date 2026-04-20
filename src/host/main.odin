@@ -134,6 +134,7 @@ main :: proc() {
 		defer delete(drag_events)
 
 		input.process_text_selection(input_events[:], listeners[:], b.nodes[:], b.paths[:], node_rects[:], b.theme)
+		input.set_hover_cursor(listeners[:], node_rects[:])
 		profile.end(s_input2a)
 
 		// --- Bridge: deliver drag events (Lua may mutate state before user events) ---
