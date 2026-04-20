@@ -132,6 +132,9 @@ main :: proc() {
 			input_events[:], listeners[:], b.nodes[:], node_rects[:],
 		)
 		defer delete(drag_events)
+
+		input.process_text_selection(input_events[:], listeners[:], b.nodes[:], b.paths[:], node_rects[:], b.theme)
+		input.set_hover_cursor(listeners[:], node_rects[:])
 		profile.end(s_input2a)
 
 		// --- Bridge: deliver drag events (Lua may mutate state before user events) ---
@@ -142,7 +145,7 @@ main :: proc() {
 		// --- Input (3/4): user-event computation ---
 		s_input2b := profile.begin(.Input)
 		dispatch_events := input.process_user_events(
-			user_events[:], input_events[:], b.nodes[:], node_rects[:], b.theme,
+			user_events[:], input_events[:], b.nodes[:], b.paths[:], node_rects[:], b.theme,
 		)
 		defer delete(dispatch_events)
 		profile.end(s_input2b)
@@ -163,6 +166,9 @@ main :: proc() {
 		s_layout := profile.begin(.Layout)
 		layout_tree(b.theme, b.nodes[:], b.children_list[:])
 		profile.end(s_layout)
+
+		input.resolve_text_selection(b.paths[:], b.nodes[:])
+		g_paths = b.paths[:]
 
 		s_render := profile.begin(.Render)
 		draw_tree(b.theme, b.nodes[:], b.children_list[:])

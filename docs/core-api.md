@@ -445,6 +445,12 @@ Calls into Lua (`view.get-last-push`) to retrieve the last pushed frame.
 
 Path navigation: `/state/items.0.text` walks into the state table. Note: the `redin_get_state` global must be defined by the app for these endpoints to return data.
 
+### Selection
+
+| Method | Path          | Body | Response                                                                   |
+| ------ | ------------- | ---- | -------------------------------------------------------------------------- |
+| GET    | `/selection`  | --   | Current text/input selection: `{kind: none\|input\|text, start, end, text}` |
+
 ### Events
 
 | Method | Path      | Body          | Response        |

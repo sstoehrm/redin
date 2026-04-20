@@ -83,6 +83,7 @@ Renders a string of text. The text content is the last positional argument, not 
 | Attribute | Type | Default | Notes |
 | --------- | ---- | ------- | ----- |
 | `wrap` | `"word"` \| `"char"` \| `"none"` | `"word"` | Line-wrapping strategy. |
+| `selectable` | boolean | `true` | Set to `false` to opt the node out of mouse-selection. |
 
 Typography (`font-size`, `weight`, `color`) comes from `aspect`.
 

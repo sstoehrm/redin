@@ -1068,6 +1068,10 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 				t.layout = parse_anchor(layout)
 			}
 			t.overflow = lua_get_string_field(L, attrs_idx, "overflow")
+			// :selectable defaults true; only an explicit false opts out.
+			if sel, exists := lua_get_bool_field_opt(L, attrs_idx, "selectable"); exists {
+				t.not_selectable = !sel
+			}
 		}
 		if len(text_content) > 0 do t.content = text_content
 		return t
@@ -1173,6 +1177,7 @@ lua_to_theme :: proc(L: ^Lua_State, index: i32) -> map[string]types.Theme {
 			t.font = lua_get_string_field(L, props_idx, "font")
 			t.opacity = lua_get_number_field(L, props_idx, "opacity")
 			t.shadow = lua_get_shadow_field(L, props_idx, "shadow")
+			t.selection = lua_get_rgba_field(L, props_idx, "selection")
 
 			lua_getfield(L, props_idx, "weight")
 			if lua_isnumber(L, -1) {
@@ -1190,6 +1195,20 @@ lua_to_theme :: proc(L: ^Lua_State, index: i32) -> map[string]types.Theme {
 	}
 
 	return theme
+}
+
+lua_get_rgba_field :: proc(L: ^Lua_State, index: i32, field: cstring) -> [4]u8 {
+	lua_getfield(L, index, field)
+	defer lua_pop(L, 1)
+	if !lua_istable(L, -1) do return {}
+	abs := lua_gettop(L)
+	out: [4]u8
+	for i in 0 ..< 4 {
+		lua_rawgeti(L, abs, i32(i + 1))
+		out[i] = u8(lua_tonumber(L, -1))
+		lua_pop(L, 1)
+	}
+	return out
 }
 
 lua_get_rgb_field :: proc(L: ^Lua_State, index: i32, field: cstring) -> [3]u8 {
@@ -1696,6 +1715,18 @@ lua_get_drag_drop :: proc(L: ^Lua_State, index: i32, field: cstring) -> (group: 
 	}
 
 	return
+}
+
+// Read an optional boolean field. Returns (value, true) when the field exists
+// and is a boolean, (false, false) otherwise. Callers use the existence flag to
+// distinguish "absent" from an explicit false.
+lua_get_bool_field_opt :: proc(L: ^Lua_State, index: i32, field: cstring) -> (value: bool, exists: bool) {
+	lua_getfield(L, index, field)
+	defer lua_pop(L, 1)
+	if lua_type(L, -1) == LUA_TBOOLEAN {
+		return lua_toboolean(L, -1) != 0, true
+	}
+	return false, false
 }
 
 key_to_string :: proc(key: rl.KeyboardKey) -> cstring {

@@ -53,6 +53,9 @@ extract_listeners :: proc(
 			}
 		case types.NodeText:
 			aspect = n.aspect
+			if !n.not_selectable {
+				append(&listeners, types.Listener(types.Text_Select_Listener{node_idx = idx}))
+			}
 		case types.NodeImage:
 			aspect = n.aspect
 		case types.NodePopout:
@@ -165,6 +168,7 @@ process_user_events :: proc(
 	user_events: []types.UserEvent,
 	input_events: []types.InputEvent,
 	nodes: []types.Node,
+	paths: []types.Path,
 	node_rects: []rl.Rectangle,
 	theme: map[string]types.Theme,
 ) -> [dynamic]types.Dispatch_Event {
@@ -179,6 +183,21 @@ process_user_events :: proc(
 				event_name  = btn.click,
 				context_ref = btn.click_ctx,
 			}))
+		}
+	}
+
+	// Text-kind selection: Ctrl-A / Ctrl-C against the resolved NodeText.
+	if state.selection_kind == .Text {
+		for event in input_events {
+			ke, ok := event.(types.KeyEvent)
+			if !ok do continue
+			idx := find_node_by_path(paths, state.selection_path[:])
+			content := ""
+			if idx >= 0 {
+				if tn, tn_ok := nodes[idx].(types.NodeText); tn_ok do content = tn.content
+			}
+			if ke.mods.ctrl && ke.key == .A do select_all(content)
+			if ke.mods.ctrl && ke.key == .C do copy_selection(content)
 		}
 	}
 
@@ -375,4 +394,21 @@ key_to_string_input :: proc(key: rl.KeyboardKey) -> string {
 	case .PAGE_DOWN: return "pagedown"
 	case:            return "unknown"
 	}
+}
+
+// Set the system mouse cursor to I-beam while hovering a selectable text,
+// otherwise DEFAULT. Safe to call every frame; Raylib debounces redundant
+// sets internally.
+set_hover_cursor :: proc(listeners: []types.Listener, node_rects: []rl.Rectangle) {
+	mouse := rl.GetMousePosition()
+	for listener in listeners {
+		tl, ok := listener.(types.Text_Select_Listener)
+		if !ok do continue
+		if tl.node_idx >= len(node_rects) do continue
+		if rl.CheckCollisionPointRec(mouse, node_rects[tl.node_idx]) {
+			rl.SetMouseCursor(.IBEAM)
+			return
+		}
+	}
+	rl.SetMouseCursor(.DEFAULT)
 }

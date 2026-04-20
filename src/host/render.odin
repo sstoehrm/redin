@@ -37,6 +37,10 @@ node_rects: [dynamic]rl.Rectangle
 // clipping and to avoid recomputing padding.
 node_content_rects: [dynamic]rl.Rectangle
 
+// Per-frame: set by main to b.paths[:] before layout/draw runs so
+// render can match the selection path against this tree's paths.
+g_paths: []types.Path
+
 // Per-node scroll offsets for overflow containers.
 scroll_offsets: map[int]f32
 scroll_offsets_x: map[int]f32
@@ -822,6 +826,33 @@ draw_themed_rect :: proc(rect: rl.Rectangle, aspect: string, theme: map[string]t
 	}
 }
 
+// Draw one selection rect per wrapped line, clipping the [lo, hi) byte range
+// against each line's byte span. `rect` is the text content rect (top-left is
+// content_x/content_y). `scroll_y` is the vertical scroll offset in pixels.
+// `lines` must be from text_pkg.compute_lines for `text` at the same width.
+draw_selection_rects :: proc(
+	lines: []text_pkg.Text_Line,
+	text: string,
+	lo, hi: int,
+	font_obj: rl.Font,
+	font_size, spacing, line_height: f32,
+	rect: rl.Rectangle,
+	scroll_y: f32,
+	color: rl.Color,
+) {
+	if lo >= hi do return
+	for line, i in lines {
+		ly := rect.y + f32(i) * line_height - scroll_y
+		if ly + line_height < rect.y || ly > rect.y + rect.height do continue
+		line_lo := max(lo, line.start)
+		line_hi := min(hi, line.end)
+		if line_lo >= line_hi do continue
+		x0 := text_pkg.measure_range(text, line.start, line_lo, font_obj, font_size, spacing)
+		x1 := text_pkg.measure_range(text, line.start, line_hi, font_obj, font_size, spacing)
+		rl.DrawRectangleRec(rl.Rectangle{rect.x + x0, ly, x1 - x0, line_height}, color)
+	}
+}
+
 draw_input :: proc(
 	idx: int,
 	rect: rl.Rectangle,
@@ -834,7 +865,19 @@ draw_input :: proc(
 	bg_color := rl.Color{0, 0, 0, 0}
 	text_color := rl.WHITE
 	placeholder_color := rl.Color{128, 128, 128, 128}
+	// Theme selection color; fall back to the legacy blue when the aspect
+	// does not set :selection (sentinel is all-zero).
 	selection_color := rl.Color{51, 153, 255, 100}
+	if len(n.aspect) > 0 {
+		if aspect, ok := theme[n.aspect]; ok {
+			if aspect.selection != ([4]u8{}) {
+				selection_color = rl.Color{
+					aspect.selection[0], aspect.selection[1],
+					aspect.selection[2], aspect.selection[3],
+				}
+			}
+		}
+	}
 	font_size: f32 = 14
 	padding_l: f32 = 4
 	padding_r: f32 = 4
@@ -919,19 +962,8 @@ draw_input :: proc(
 	// Draw selection highlight (behind text)
 	if is_focused && input.state.active && input.has_selection() {
 		lo, hi := input.selection_range()
-		for line, i in lines {
-			ly := content_y + f32(i) * lh - scroll_y
-			if ly + lh < content_y || ly > content_y + content_h do continue
-
-			sel_start := max(lo, line.start)
-			sel_end := min(hi, line.end)
-			if sel_start >= sel_end do continue
-
-			x0 := text_pkg.measure_range(display_text, line.start, sel_start, f, font_size, spacing)
-			x1 := text_pkg.measure_range(display_text, line.start, sel_end, f, font_size, spacing)
-			sel_rect := rl.Rectangle{content_x + x0, ly, x1 - x0, lh}
-			rl.DrawRectangleRec(sel_rect, selection_color)
-		}
+		content_rect := rl.Rectangle{content_x, content_y, content_w, content_h}
+		draw_selection_rects(lines[:], display_text, lo, hi, f, font_size, spacing, lh, content_rect, scroll_y, selection_color)
 	}
 
 	// Draw text lines
@@ -1092,6 +1124,43 @@ draw_text :: proc(idx: int, rect: rl.Rectangle, n: types.NodeText, theme: map[st
 		y_offset = (rect.height - total_text_h) / 2
 	case .BOTTOM_LEFT, .BOTTOM_CENTER, .BOTTOM_RIGHT:
 		y_offset = rect.height - total_text_h
+	}
+
+	// Render text-selection highlight when this NodeText is the active target.
+	if input.state.selection_kind == .Text && idx < len(g_paths) {
+		this_path := g_paths[idx]
+		sel_path := input.state.selection_path
+		matches := int(this_path.length) == len(sel_path)
+		if matches {
+			for j in 0 ..< int(this_path.length) {
+				if this_path.value[j] != sel_path[j] {
+					matches = false
+					break
+				}
+			}
+		}
+		if matches && input.has_selection() {
+			lo, hi := input.selection_range()
+			if hi > len(n.content) do hi = len(n.content)
+			if lo < hi {
+				sel_color := rl.Color{51, 153, 255, 100}
+				if len(n.aspect) > 0 {
+					if aspect, ok := theme[n.aspect]; ok {
+						if aspect.selection != ([4]u8{}) {
+							sel_color = rl.Color{
+								aspect.selection[0], aspect.selection[1],
+								aspect.selection[2], aspect.selection[3],
+							}
+						}
+					}
+				}
+				draw_selection_rects(
+					lines[:], n.content, lo, hi,
+					f, font_size, spacing, lh,
+					rect, 0, sel_color,
+				)
+			}
+		}
 	}
 
 	for line, i in lines {

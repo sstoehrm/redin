@@ -40,6 +40,8 @@ src/runtime/        Fennel runtime (loaded by bridge at startup)
 
 `NodeStack`, `NodeCanvas`, `NodeVbox`, `NodeHbox`, `NodeInput`, `NodeButton`, `NodeText`, `NodeImage`, `NodePopout`, `NodeModal`
 
+NodeText accepts `:selectable` (boolean, default `true`); set to `false` to opt the node out of mouse-selection.
+
 ## Frame format (Fennel)
 
 ```fennel
@@ -137,6 +139,7 @@ canvas.register("my-provider", my_provider)
 
 - State variants use `#` notation: `button#hover`, `input#focus`
 - Properties: `bg`, `color`, `border`, `border-width`, `radius`, `padding` [top right bottom left], `font-size`, `font`, `weight` (0=normal, 1=bold), `line-height` (ratio, e.g. 1.5), `opacity` (0-1, affects bg alpha), `shadow` `[x y blur [r g b a]]` (drop shadow; consumed by vbox/hbox/button/popout/canvas)
+- `:selection` controls the selection highlight color for both `:input` nodes and `:text` nodes (text selection added on feat/text-highlight)
 
 ## Dataflow (re-frame pattern)
 
@@ -173,6 +176,7 @@ canvas.register("my-provider", my_provider)
 | GET | /state | Full app state |
 | GET | /state/path.to.value | Nested state lookup |
 | GET | /aspects | Current theme |
+| GET | /selection | Current text/input selection: `{kind: none\|input\|text, start, end, text}` |
 | GET | /screenshot | PNG screenshot |
 | POST | /events | Dispatch event (JSON: `["event-name", payload]`) |
 | POST | /click | Inject click (JSON: `{"x":N,"y":N}`) |

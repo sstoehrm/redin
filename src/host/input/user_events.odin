@@ -54,7 +54,7 @@ get_user_events :: proc(
 						)
 					}
 				case types.HoverListener, types.KeyListener, types.ChangeListener,
-				     types.DragListener, types.DropListener:
+				     types.DragListener, types.DropListener, types.Text_Select_Listener:
 				}
 			}
 

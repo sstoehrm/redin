@@ -197,7 +197,7 @@ Validation is implemented in `src/runtime/theme.fnl`. Checks include:
 
 | Check | Rule |
 | ----- | ---- |
-| Color format | `bg`, `color`, `border`, `cursor`, `selection`, `placeholder`, `scrollbar` must be `[r g b]` or `[r g b a]` with channels 0--255 |
+| Color format | `bg`, `color`, `border`, `cursor`, `selection`, `placeholder`, `scrollbar` must be `[r g b]` or `[r g b a]` with channels 0--255. `:selection` controls the highlight color for both `:input` nodes (original consumer) and `:text` nodes (text selection, added in this release). |
 | Font type | `font` must be a string |
 | | `weight` must be `"normal"` or `"bold"` |
 | | `align` must be `"left"`, `"center"`, or `"right"` |

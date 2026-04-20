@@ -1,5 +1,11 @@
 package input
 
+Selection_Kind :: enum u8 {
+	None,
+	Input,
+	Text,
+}
+
 Input_State :: struct {
 	text:            [dynamic]u8,
 	cursor:          int,    // byte offset
@@ -9,13 +15,17 @@ Input_State :: struct {
 	scroll_offset_y: f32,
 	last_dispatched: string,
 	active:          bool,
+	selection_kind:  Selection_Kind,
+	selection_path:  [dynamic]u8,  // owned copy of types.Path.value
 }
 
 state: Input_State
 
 state_init :: proc() {
+	delete(state.selection_path)
 	state.selection_start = -1
 	state.selection_end = -1
+	state.selection_kind = .None
 }
 
 state_destroy :: proc() {
@@ -23,10 +33,12 @@ state_destroy :: proc() {
 	if len(state.last_dispatched) > 0 {
 		delete(state.last_dispatched)
 	}
+	delete(state.selection_path)
 }
 
 // Called when an input gains focus. Copies the node's value into the editing buffer.
 focus_enter :: proc(value: string) {
+	clear_text_selection()
 	clear(&state.text)
 	append(&state.text, ..transmute([]u8)value)
 	state.cursor = len(state.text)
@@ -34,11 +46,35 @@ focus_enter :: proc(value: string) {
 	state.selection_end = -1
 	state.scroll_offset_x = 0
 	state.scroll_offset_y = 0
+	state.selection_kind = .Input
 	state.active = true
 	if len(state.last_dispatched) > 0 {
 		delete(state.last_dispatched)
 	}
 	state.last_dispatched = strings_clone(value)
+}
+
+// Sets a text-node selection (not an input field). Copies path into owned storage.
+set_text_selection :: proc(path: []u8, lo, hi: int) {
+	clear(&state.selection_path)
+	append(&state.selection_path, ..path)
+	state.selection_start = lo
+	state.selection_end   = hi
+	state.selection_kind  = .Text
+}
+
+// Clears any text-node selection and frees the owned path storage.
+clear_text_selection :: proc() {
+	delete(state.selection_path)
+	state.selection_path  = {}
+	state.selection_kind  = .None
+	state.selection_start = -1
+	state.selection_end   = -1
+}
+
+// Returns a view into the owned path slice (no allocation).
+text_selection_path :: proc() -> []u8 {
+	return state.selection_path[:]
 }
 
 // Called when the input loses focus.
