@@ -144,7 +144,7 @@ main :: proc() {
 		// --- Input (3/4): user-event computation ---
 		s_input2b := profile.begin(.Input)
 		dispatch_events := input.process_user_events(
-			user_events[:], input_events[:], b.nodes[:], node_rects[:], b.theme,
+			user_events[:], input_events[:], b.nodes[:], b.paths[:], node_rects[:], b.theme,
 		)
 		defer delete(dispatch_events)
 		profile.end(s_input2b)

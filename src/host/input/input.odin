@@ -168,6 +168,7 @@ process_user_events :: proc(
 	user_events: []types.UserEvent,
 	input_events: []types.InputEvent,
 	nodes: []types.Node,
+	paths: []types.Path,
 	node_rects: []rl.Rectangle,
 	theme: map[string]types.Theme,
 ) -> [dynamic]types.Dispatch_Event {
@@ -182,6 +183,21 @@ process_user_events :: proc(
 				event_name  = btn.click,
 				context_ref = btn.click_ctx,
 			}))
+		}
+	}
+
+	// Text-kind selection: Ctrl-A / Ctrl-C against the resolved NodeText.
+	if state.selection_kind == .Text {
+		for event in input_events {
+			ke, ok := event.(types.KeyEvent)
+			if !ok do continue
+			idx := find_node_by_path(paths, state.selection_path[:])
+			content := ""
+			if idx >= 0 {
+				if tn, tn_ok := nodes[idx].(types.NodeText); tn_ok do content = tn.content
+			}
+			if ke.mods.ctrl && ke.key == .A do select_all(content)
+			if ke.mods.ctrl && ke.key == .C do copy_selection(content)
 		}
 	}
 

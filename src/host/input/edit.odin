@@ -226,10 +226,18 @@ move_end :: proc(shift: bool) {
 	}
 }
 
-select_all :: proc() {
-	state.selection_start = 0
-	state.selection_end = len(state.text)
-	state.cursor = len(state.text)
+select_all :: proc(text_node_content: string = "") {
+	switch state.selection_kind {
+	case .Input:
+		state.selection_start = 0
+		state.selection_end = len(state.text)
+		state.cursor = len(state.text)
+	case .Text:
+		if len(text_node_content) == 0 do return
+		state.selection_start = 0
+		state.selection_end = len(text_node_content)
+	case .None:
+	}
 }
 
 // --- Clipboard ---
