@@ -53,6 +53,9 @@ extract_listeners :: proc(
 			}
 		case types.NodeText:
 			aspect = n.aspect
+			if !n.not_selectable {
+				append(&listeners, types.Listener(types.Text_Select_Listener{node_idx = idx}))
+			}
 		case types.NodeImage:
 			aspect = n.aspect
 		case types.NodePopout:

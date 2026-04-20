@@ -32,6 +32,12 @@ DropListener :: struct {
 	group:    string,
 }
 
+// Emitted for every NodeText whose :selectable attribute is not false.
+// Consumed by input/text_select.odin.
+Text_Select_Listener :: struct {
+	node_idx: int,
+}
+
 Listener :: union {
 	HoverListener,
 	FocusListener,
@@ -40,4 +46,5 @@ Listener :: union {
 	ChangeListener,
 	DragListener,
 	DropListener,
+	Text_Select_Listener,
 }

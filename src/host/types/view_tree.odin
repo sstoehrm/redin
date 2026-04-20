@@ -135,18 +135,19 @@ NodeButton :: struct {
 }
 
 NodeText :: struct {
-	layout:   Anchor,
-	content:  string,
-	aspect:   string,
-	width:    union {
+	layout:         Anchor,
+	content:        string,
+	aspect:         string,
+	width:          union {
 		SizeValue,
 		f32,
 	},
-	height:   union {
+	height:         union {
 		SizeValue,
 		f32,
 	},
-	overflow: string,
+	overflow:       string,
+	not_selectable: bool,   // zero-value = selectable (default-on)
 }
 
 PopoutMode :: enum {

@@ -36,7 +36,7 @@ apply_listeners :: proc(
 						append(&applied, types.ApplyEvents(types.ApplyActive{idx = l.node_idx}))
 					}
 				case types.HoverListener, types.KeyListener, types.ChangeListener,
-				     types.DragListener, types.DropListener:
+				     types.DragListener, types.DropListener, types.Text_Select_Listener:
 				}
 			}
 
