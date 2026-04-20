@@ -122,6 +122,19 @@ test_parse_theme_empty :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(theme), 0)
 }
 
+@(test)
+test_parse_theme_selection :: proc(t: ^testing.T) {
+	input := `{:body {:selection [255 220 0 120]}}`
+	theme, ok := _parse_theme_string(input)
+	defer {
+		for k in theme do delete(k)
+		delete(theme)
+	}
+	testing.expect(t, ok, "parse should succeed")
+	body := theme["body"]
+	testing.expect_value(t, body.selection, [4]u8{255, 220, 0, 120})
+}
+
 // Helper: parse theme from string (wraps the file-based loader logic)
 _parse_theme_string :: proc(input: string) -> (map[string]types.Theme, bool) {
 	p := _Parser{text = input, pos = 0}

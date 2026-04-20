@@ -98,6 +98,8 @@ _parse_theme_props :: proc(p: ^_Parser) -> types.Theme {
 				}
 			case "opacity":
 				t.opacity = _read_number(p)
+			case "selection":
+				t.selection = _parse_rgba(p)
 			}
 		} else {
 			p.pos += 1
@@ -120,6 +122,25 @@ _parse_rgb :: proc(p: ^_Parser) -> [3]u8 {
 		_skip_ws(p)
 		if p.pos < len(p.text) && p.text[p.pos] == ']' do p.pos += 1
 		return {r, g, b}
+	}
+	return {}
+}
+
+_parse_rgba :: proc(p: ^_Parser) -> [4]u8 {
+	_skip_ws(p)
+	if p.pos < len(p.text) && p.text[p.pos] == '[' {
+		p.pos += 1
+		_skip_ws(p)
+		r := u8(_read_number(p))
+		_skip_ws(p)
+		g := u8(_read_number(p))
+		_skip_ws(p)
+		b := u8(_read_number(p))
+		_skip_ws(p)
+		a := u8(_read_number(p))
+		_skip_ws(p)
+		if p.pos < len(p.text) && p.text[p.pos] == ']' do p.pos += 1
+		return {r, g, b, a}
 	}
 	return {}
 }

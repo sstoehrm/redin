@@ -20,4 +20,5 @@ Theme :: struct {
 	font:         string,
 	opacity:      f32,
 	shadow:       Shadow,
+	selection:    [4]u8,   // RGBA; {0,0,0,0} = unset, use render default
 }

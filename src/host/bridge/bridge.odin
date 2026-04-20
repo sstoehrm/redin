@@ -1173,6 +1173,7 @@ lua_to_theme :: proc(L: ^Lua_State, index: i32) -> map[string]types.Theme {
 			t.font = lua_get_string_field(L, props_idx, "font")
 			t.opacity = lua_get_number_field(L, props_idx, "opacity")
 			t.shadow = lua_get_shadow_field(L, props_idx, "shadow")
+			t.selection = lua_get_rgba_field(L, props_idx, "selection")
 
 			lua_getfield(L, props_idx, "weight")
 			if lua_isnumber(L, -1) {
@@ -1190,6 +1191,20 @@ lua_to_theme :: proc(L: ^Lua_State, index: i32) -> map[string]types.Theme {
 	}
 
 	return theme
+}
+
+lua_get_rgba_field :: proc(L: ^Lua_State, index: i32, field: cstring) -> [4]u8 {
+	lua_getfield(L, index, field)
+	defer lua_pop(L, 1)
+	if !lua_istable(L, -1) do return {}
+	abs := lua_gettop(L)
+	out: [4]u8
+	for i in 0 ..< 4 {
+		lua_rawgeti(L, abs, i32(i + 1))
+		out[i] = u8(lua_tonumber(L, -1))
+		lua_pop(L, 1)
+	}
+	return out
 }
 
 lua_get_rgb_field :: proc(L: ^Lua_State, index: i32, field: cstring) -> [3]u8 {
