@@ -22,6 +22,7 @@ Input_State :: struct {
 state: Input_State
 
 state_init :: proc() {
+	delete(state.selection_path)
 	state.selection_start = -1
 	state.selection_end = -1
 	state.selection_kind = .None
@@ -64,8 +65,11 @@ set_text_selection :: proc(path: []u8, lo, hi: int) {
 
 // Clears any text-node selection and frees the owned path storage.
 clear_text_selection :: proc() {
-	clear(&state.selection_path)
-	state.selection_kind = .None
+	delete(state.selection_path)
+	state.selection_path  = {}
+	state.selection_kind  = .None
+	state.selection_start = -1
+	state.selection_end   = -1
 }
 
 // Returns a view into the owned path slice (no allocation).

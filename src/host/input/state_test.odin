@@ -33,6 +33,16 @@ test_clear_text_selection_frees_path :: proc(t: ^testing.T) {
 }
 
 @(test)
+test_clear_text_selection_resets_has_selection :: proc(t: ^testing.T) {
+	state_init()
+	defer state_destroy()
+	set_text_selection([]u8{0x01}, 3, 7)
+	testing.expect(t, has_selection(), "should have selection after set")
+	clear_text_selection()
+	testing.expect(t, !has_selection(), "should not have selection after clear")
+}
+
+@(test)
 test_focus_enter_clears_text_selection :: proc(t: ^testing.T) {
 	state_init()
 	defer state_destroy()
