@@ -12,10 +12,15 @@ import rl "vendor:raylib"
 //
 // Sentinel: width < 0 means unpopulated. Secondary key params
 // (font_size, lh_ratio, font_tex_id) are not stored — theme-change
-// invalidation covers them.
+// invalidation covers them. `lines` is optionally populated when
+// compute_lines is called during layout; draw can reuse it to skip
+// a second wrap pass at the same width. `lines_valid` gates reuse
+// since an empty slice is a valid wrap result (empty-text node).
 Intrinsic_Entry :: struct {
-	width:  f32,
-	height: f32,
+	width:       f32,
+	height:      f32,
+	lines:       [dynamic]Text_Line,
+	lines_valid: bool,
 }
 @(private)
 intrinsic_cache: [dynamic]Intrinsic_Entry
@@ -41,11 +46,50 @@ lookup_intrinsic :: proc(idx: int, width: f32) -> (f32, bool) {
 
 cache_intrinsic :: proc(idx: int, width: f32, height: f32) {
 	if idx < 0 || idx >= len(intrinsic_cache) do return
-	intrinsic_cache[idx] = Intrinsic_Entry{width = width, height = height}
+	e := &intrinsic_cache[idx]
+	// Only reset lines on a key change — preserve lines cached earlier
+	// this frame at the same width (typical: layout then draw).
+	if e.width != width {
+		if e.lines_valid {
+			delete(e.lines)
+			e.lines = {}
+			e.lines_valid = false
+		}
+	}
+	e.width = width
+	e.height = height
+}
+
+// Look up a cached line array for this node at this width. Returned
+// slice is borrowed — do NOT delete.
+lookup_lines :: proc(idx: int, width: f32) -> ([]Text_Line, bool) {
+	if idx < 0 || idx >= len(intrinsic_cache) do return nil, false
+	e := intrinsic_cache[idx]
+	if !e.lines_valid || e.width != width || e.width < 0 do return nil, false
+	return e.lines[:], true
+}
+
+// Hand ownership of a line array to the cache. After this call, the
+// caller must NOT delete `lines`. Cache frees on invalidation.
+cache_lines :: proc(idx: int, width: f32, lines: [dynamic]Text_Line) {
+	if idx < 0 || idx >= len(intrinsic_cache) {
+		// No slot — caller's responsibility to avoid a leak. Free here
+		// defensively so compute_lines allocations don't bleed.
+		lines := lines
+		delete(lines)
+		return
+	}
+	e := &intrinsic_cache[idx]
+	if e.lines_valid do delete(e.lines)
+	e.width = width
+	e.lines = lines
+	e.lines_valid = true
 }
 
 invalidate_height_cache :: proc() {
 	for i in 0 ..< len(intrinsic_cache) {
+		e := &intrinsic_cache[i]
+		if e.lines_valid do delete(e.lines)
 		intrinsic_cache[i] = Intrinsic_Entry{width = -1}
 	}
 }
