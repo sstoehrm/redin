@@ -7,6 +7,7 @@ import "core:os"
 import "core:strings"
 import "core:sync"
 import "core:thread"
+import "../input"
 import "../profile"
 import "../types"
 import rl "vendor:raylib"
@@ -362,6 +363,8 @@ process_request :: proc(ds: ^Dev_Server, req: ^Pending_Request) {
 			handle_get_state_path(ds, ch, req.path[len("/state/"):])
 		} else if req.path == "/aspects" {
 			handle_get_aspects(ds, ch)
+		} else if req.path == "/selection" {
+			handle_get_selection(ds, ch)
 		} else if req.path == "/profile" {
 			handle_get_profile(ch)
 		} else if req.path == "/screenshot" {
@@ -578,6 +581,54 @@ handle_get_profile :: proc(ch: ^Response_Channel) {
 		strings.write_string(&b, `]}`)
 	}
 	strings.write_string(&b, `]}`)
+
+	respond_json(ch, strings.to_string(b))
+}
+
+handle_get_selection :: proc(ds: ^Dev_Server, ch: ^Response_Channel) {
+	b := strings.builder_make()
+	defer strings.builder_destroy(&b)
+
+	if !input.has_selection() || input.state.selection_kind == .None {
+		fmt.sbprintf(&b, `{{"kind":"none"}}`)
+		respond_json(ch, strings.to_string(b))
+		return
+	}
+
+	lo, hi := input.selection_range()
+
+	switch input.state.selection_kind {
+	case .None:
+		fmt.sbprintf(&b, `{{"kind":"none"}}`)
+
+	case .Input:
+		// Read buffer from state.text (UTF-8 bytes).
+		content := string(input.state.text[:])
+		clamped_hi := hi
+		if clamped_hi > len(content) do clamped_hi = len(content)
+		sub := ""
+		if lo < clamped_hi do sub = content[lo:clamped_hi]
+		fmt.sbprintf(&b,
+			`{{"kind":"input","start":%d,"end":%d,"text":%q}}`,
+			lo, clamped_hi, sub,
+		)
+
+	case .Text:
+		// Resolve the selected path back to a NodeText.
+		idx := input.find_node_by_path(ds.bridge.paths[:], input.state.selection_path[:])
+		content := ""
+		if idx >= 0 && idx < len(ds.bridge.nodes) {
+			if tn, ok := ds.bridge.nodes[idx].(types.NodeText); ok do content = tn.content
+		}
+		clamped_hi := hi
+		if clamped_hi > len(content) do clamped_hi = len(content)
+		sub := ""
+		if lo < clamped_hi do sub = content[lo:clamped_hi]
+		fmt.sbprintf(&b,
+			`{{"kind":"text","start":%d,"end":%d,"text":%q}}`,
+			lo, clamped_hi, sub,
+		)
+	}
 
 	respond_json(ch, strings.to_string(b))
 }
