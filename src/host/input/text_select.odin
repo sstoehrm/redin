@@ -46,13 +46,62 @@ process_text_selection :: proc(
 
 			offset := node_byte_offset_at(text_node, node_rects[tl.node_idx], pt, theme)
 
+			// Shift-click extends the existing selection to the new offset within
+			// the same node. The anchor remains at its original byte.
+			if me.mods.shift && state.selection_kind == .Text {
+				// Only extend if this click landed on the same node.
+				same_node := len(gesture.anchor_path) == int(paths[tl.node_idx].length)
+				if same_node {
+					for j in 0 ..< len(gesture.anchor_path) {
+						if gesture.anchor_path[j] != paths[tl.node_idx].value[j] {
+							same_node = false
+							break
+						}
+					}
+				}
+				if same_node {
+					state.selection_end = offset
+					gesture.active_drag = true
+					hit = true
+					break
+				}
+			}
+
+			// Track click cadence. Promotes on rapid re-click within the same node.
+			now := rl.GetTime()
+			if now - gesture.last_click_t < 0.4 && gesture.click_count > 0 {
+				gesture.click_count += 1
+				if gesture.click_count > 3 do gesture.click_count = 3
+			} else {
+				gesture.click_count = 1
+			}
+			gesture.last_click_t = now
+
 			clear(&gesture.anchor_path)
 			p := paths[tl.node_idx]
 			append(&gesture.anchor_path, ..p.value[:p.length])
-			gesture.anchor_offset = offset
 			gesture.active_drag = true
 
-			set_text_selection(gesture.anchor_path[:], offset, offset)
+			lo, hi := offset, offset
+			switch gesture.click_count {
+			case 2:
+				content_bytes := transmute([]u8)text_node.content
+				lo = prev_word(content_bytes, offset)
+				hi = next_word(content_bytes, offset)
+			case 3:
+				// Whole wrapped line at this offset.
+				f := resolve_font(text_node, theme)
+				fs := resolve_font_size(text_node, theme)
+				lines := text_pkg.compute_lines(text_node.content, f, fs, 0, node_rects[tl.node_idx].width)
+				defer delete(lines)
+				if len(lines) > 0 {
+					line_idx, _ := text_pkg.cursor_to_line(lines[:], offset)
+					lo = lines[line_idx].start
+					hi = lines[line_idx].end
+				}
+			}
+			gesture.anchor_offset = lo
+			set_text_selection(gesture.anchor_path[:], lo, hi)
 
 			// Clear input focus for mutual exclusion (focus_enter is not
 			// the code path here — apply_focus already ran for this event
@@ -116,20 +165,15 @@ node_byte_offset_at :: proc(
 ) -> int {
 	if len(n.content) == 0 do return 0
 
-	font_size: f32 = 18
-	font_name := "sans"
-	font_weight: u8 = 0
+	f := resolve_font(n, theme)
+	font_size := resolve_font_size(n, theme)
+	spacing: f32 = 0
 	lh_ratio: f32 = 0
 	if len(n.aspect) > 0 {
 		if t, ok := theme[n.aspect]; ok {
-			if t.font_size > 0 do font_size = f32(t.font_size)
-			if len(t.font) > 0 do font_name = t.font
-			font_weight = t.weight
 			lh_ratio = t.line_height
 		}
 	}
-	f := font.get(font_name, font.style_from_weight(font.Font_Weight(font_weight)))
-	spacing: f32 = 0
 	lh := text_pkg.line_height(font_size, lh_ratio)
 
 	lines := text_pkg.compute_lines(n.content, f, font_size, spacing, rect.width)
@@ -142,6 +186,29 @@ node_byte_offset_at :: proc(
 	line := lines[line_idx]
 
 	return x_to_cursor_in_line(n.content, line, pt.x - rect.x, f, font_size, spacing)
+}
+
+@(private)
+resolve_font :: proc(n: types.NodeText, theme: map[string]types.Theme) -> rl.Font {
+	font_name := "sans"
+	font_weight: u8 = 0
+	if len(n.aspect) > 0 {
+		if t, ok := theme[n.aspect]; ok {
+			if len(t.font) > 0 do font_name = t.font
+			font_weight = t.weight
+		}
+	}
+	return font.get(font_name, font.style_from_weight(font.Font_Weight(font_weight)))
+}
+
+@(private)
+resolve_font_size :: proc(n: types.NodeText, theme: map[string]types.Theme) -> f32 {
+	if len(n.aspect) > 0 {
+		if t, ok := theme[n.aspect]; ok {
+			if t.font_size > 0 do return f32(t.font_size)
+		}
+	}
+	return 18
 }
 
 // Called once per frame after bridge updates nodes / paths. If the stored
