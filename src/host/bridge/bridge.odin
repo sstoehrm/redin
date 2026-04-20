@@ -266,6 +266,11 @@ redin_set_theme :: proc "c" (L: ^Lua_State) -> i32 {
 		}
 		delete(g_bridge.theme)
 		g_bridge.theme = lua_to_theme(L, 1)
+
+		// Theme params (font_size, lh_ratio, font atlas) feed cached
+		// intrinsic heights; invalidate since the cache is idx-keyed
+		// and doesn't detect indirect param changes on its own.
+		text_pkg.invalidate_height_cache()
 	}
 	return 0
 }

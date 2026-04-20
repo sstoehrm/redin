@@ -267,7 +267,7 @@ my-app/
 - String ownership in bridge: `strings.clone_from_cstring` for persisted strings, `string(lua_tostring_raw(...))` for transient reads
 - Lua stack: every push needs a matching pop/defer-pop
 - Host callbacks: `proc "c"` needs `context = g_context` at the start (uses saved init context for tracking allocator compatibility)
-- Flat parallel arrays for view tree: `nodes[]`, `paths[]`, `parent_indices[]`, `children_list[]` (DFS order, i32 indices)
+- Flat parallel arrays (Structure of Arrays / SoA) for view tree: `nodes[]`, `paths[]`, `parent_indices[]`, `children_list[]` — DFS order, i32 indices. Any per-node side table (scroll offsets, intrinsic-height cache, `node_rects`) should be indexed by the same idx so lookups stay O(1) and invariants hold across packages. On re-flatten, Bridge's `clear_frame` must invalidate every idx-keyed side table.
 - `focused_idx` lives in the `input` package, read by `render` for cursor
 - `node_rects` lives in `render`, passed as parameter to input functions
 

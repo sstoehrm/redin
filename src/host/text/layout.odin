@@ -4,33 +4,50 @@ import "core:strings"
 import "core:unicode/utf8"
 import rl "vendor:raylib"
 
-// Cross-frame cache for wrapped-text heights. Keyed by content.data
-// pointer: as long as Bridge hasn't re-flattened the tree, the same
-// NodeText has the same pointer each frame and the cache hits. On
-// re-flatten, Bridge calls invalidate_height_cache so stale pointers
-// never return a false positive if an address is reused.
-Height_Key :: struct {
-	content_ptr: uintptr,
-	content_len: int,
-	font_size:   f32,
-	width:       f32,
-	lh_ratio:    f32,
-	font_tex_id: u32,
+// Intrinsic-height cache indexed by node idx. Same key stability as a
+// pointer-keyed cache would be (valid while Bridge hasn't re-flattened),
+// but cheaper to hash/compare. Bridge invalidates from clear_frame
+// (on re-flatten) and from redin_set_theme (on theme swap), since a
+// theme change can alter font params without a re-flatten.
+//
+// Sentinel: width < 0 means unpopulated. Secondary key params
+// (font_size, lh_ratio, font_tex_id) are not stored — theme-change
+// invalidation covers them.
+Intrinsic_Entry :: struct {
+	width:  f32,
+	height: f32,
 }
 @(private)
-height_cache: map[Height_Key]f32
+intrinsic_cache: [dynamic]Intrinsic_Entry
 
-lookup_height :: proc(key: Height_Key) -> (f32, bool) {
-	h, ok := height_cache[key]
-	return h, ok
+// Grow the cache to at least `n` entries. New slots are initialized
+// as unpopulated. Existing entries are preserved (cross-frame hits).
+ensure_intrinsic_cache :: proc(n: int) {
+	old_len := len(intrinsic_cache)
+	if n > old_len {
+		resize(&intrinsic_cache, n)
+		for i in old_len ..< n {
+			intrinsic_cache[i] = Intrinsic_Entry{width = -1}
+		}
+	}
 }
 
-cache_height :: proc(key: Height_Key, h: f32) {
-	height_cache[key] = h
+lookup_intrinsic :: proc(idx: int, width: f32) -> (f32, bool) {
+	if idx < 0 || idx >= len(intrinsic_cache) do return 0, false
+	e := intrinsic_cache[idx]
+	if e.width == width && e.width >= 0 do return e.height, true
+	return 0, false
+}
+
+cache_intrinsic :: proc(idx: int, width: f32, height: f32) {
+	if idx < 0 || idx >= len(intrinsic_cache) do return
+	intrinsic_cache[idx] = Intrinsic_Entry{width = width, height = height}
 }
 
 invalidate_height_cache :: proc() {
-	clear(&height_cache)
+	for i in 0 ..< len(intrinsic_cache) {
+		intrinsic_cache[i] = Intrinsic_Entry{width = -1}
+	}
 }
 
 Text_Line :: struct {

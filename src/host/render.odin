@@ -50,19 +50,10 @@ Scroll_Info :: struct {
 }
 node_scroll_info: map[int]Scroll_Info
 
-// Per-frame cache for intrinsic_height. The size-emission pair in
-// layout_box calls intrinsic_height twice for each scroll-y child (once
-// to sum fixed_total, once to assign child height); also used by nested
-// Vbox recursion. Cache hit count grows with tree depth × child count.
-// Sentinel: width < 0 means unpopulated (widths are always non-negative).
-Intrinsic_Entry :: struct {
-	width:  f32,
-	height: f32,
-}
-node_intrinsic_cache: [dynamic]Intrinsic_Entry
-
-// Cross-frame text-height cache lives in text_pkg; Bridge invalidates
-// it from clear_frame. See text_pkg.Height_Key.
+// Intrinsic-height cache lives in text_pkg, keyed by node idx. It
+// serves both roles: same-frame dedup (layout_box size + emission
+// passes, nested Vbox recursion) and cross-frame survival while the
+// tree is unchanged. Bridge invalidates on re-flatten and theme swap.
 
 SCROLL_SPEED :: 30.0 // pixels per wheel tick
 
@@ -131,12 +122,13 @@ layout_tree :: proc(
 
 	resize(&node_rects, len(nodes))
 	resize(&node_content_rects, len(nodes))
-	resize(&node_intrinsic_cache, len(nodes))
 	for i in 0 ..< len(nodes) {
 		node_rects[i] = {}
 		node_content_rects[i] = {}
-		node_intrinsic_cache[i] = Intrinsic_Entry{width = -1}
 	}
+	// Grow the intrinsic cache if nodes[] did. Existing entries stay
+	// valid across frames; Bridge invalidates on re-flatten / theme swap.
+	text_pkg.ensure_intrinsic_cache(len(nodes))
 	clear(&node_scroll_info)
 
 	screen := rl.Rectangle{0, 0, f32(rl.GetScreenWidth()), f32(rl.GetScreenHeight())}
@@ -656,13 +648,8 @@ node_preferred_height :: proc(
 		h := size_f32(n.height)
 		if h > 0 do return h
 
-		// Level 1: per-frame cache keyed by node idx + width. Hits on
-		// the second layout pass for the same frame.
-		if idx >= 0 && idx < len(node_intrinsic_cache) {
-			entry := node_intrinsic_cache[idx]
-			if entry.width == available_width {
-				return entry.height
-			}
+		if cached, ok := text_pkg.lookup_intrinsic(idx, available_width); ok {
+			return cached
 		}
 
 		font_size: f32 = 18
@@ -679,48 +666,14 @@ node_preferred_height :: proc(
 		}
 		lh := text_pkg.line_height(font_size, lh_ratio)
 
-		// Resolve font once so we can key the cross-frame cache on a
-		// stable font-atlas identity.
-		f := font.get(font_name, font.style_from_weight(font.Font_Weight(font_weight)))
-
-		// Level 2: cross-frame cache keyed by content.data pointer.
-		// Valid for as long as Bridge hasn't re-flattened the tree —
-		// bridge.clear_frame calls text_pkg.invalidate_height_cache.
-		can_wrap := available_width > 0 && len(n.content) > 0 && n.overflow != "scroll-x"
-		key: text_pkg.Height_Key
-		have_key := false
-		if can_wrap {
-			key = text_pkg.Height_Key{
-				content_ptr = uintptr(raw_data(n.content)),
-				content_len = len(n.content),
-				font_size   = font_size,
-				width       = available_width,
-				lh_ratio    = lh_ratio,
-				font_tex_id = f.texture.id,
-			}
-			have_key = true
-			if cached, ok := text_pkg.lookup_height(key); ok {
-				if idx >= 0 && idx < len(node_intrinsic_cache) {
-					node_intrinsic_cache[idx] = Intrinsic_Entry{
-						width = available_width, height = cached,
-					}
-				}
-				return cached
-			}
-		}
-
 		result := lh
-		if can_wrap {
+		if available_width > 0 && len(n.content) > 0 && n.overflow != "scroll-x" {
+			f := font.get(font_name, font.style_from_weight(font.Font_Weight(font_weight)))
 			lines := text_pkg.compute_lines(n.content, f, font_size, 0, available_width)
 			defer delete(lines)
 			result = f32(len(lines)) * lh
-			if have_key {
-				text_pkg.cache_height(key, result)
-			}
 		}
-		if idx >= 0 && idx < len(node_intrinsic_cache) {
-			node_intrinsic_cache[idx] = Intrinsic_Entry{width = available_width, height = result}
-		}
+		text_pkg.cache_intrinsic(idx, available_width, result)
 		return result
 	case types.NodeImage:
 		return size_f32(n.height)
@@ -751,19 +704,12 @@ intrinsic_height :: proc(
 ) -> f32 {
 	if idx < 0 || idx >= len(nodes) do return 0
 
-	// Per-frame cache: hit when width matches. Populated at the end of
-	// this proc. Cleared in layout_tree.
-	if idx < len(node_intrinsic_cache) {
-		entry := node_intrinsic_cache[idx]
-		if entry.width == available_width {
-			return entry.height
-		}
+	if cached, ok := text_pkg.lookup_intrinsic(idx, available_width); ok {
+		return cached
 	}
 
 	h := intrinsic_height_impl(idx, nodes, children_list, theme, available_width)
-	if idx < len(node_intrinsic_cache) {
-		node_intrinsic_cache[idx] = Intrinsic_Entry{width = available_width, height = h}
-	}
+	text_pkg.cache_intrinsic(idx, available_width, h)
 	return h
 }
 
