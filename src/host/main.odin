@@ -166,6 +166,7 @@ main :: proc() {
 		layout_tree(b.theme, b.nodes[:], b.children_list[:])
 		profile.end(s_layout)
 
+		input.resolve_text_selection(b.paths[:], b.nodes[:])
 		g_paths = b.paths[:]
 
 		s_render := profile.begin(.Render)

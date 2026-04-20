@@ -144,6 +144,26 @@ node_byte_offset_at :: proc(
 	return x_to_cursor_in_line(n.content, line, pt.x - rect.x, f, font_size, spacing)
 }
 
+// Called once per frame after bridge updates nodes / paths. If the stored
+// selection path no longer resolves to a NodeText, or if its content has
+// shrunk below selection_end, clear the selection. No-op when kind != .Text.
+resolve_text_selection :: proc(paths: []types.Path, nodes: []types.Node) {
+	if state.selection_kind != .Text do return
+	idx := find_node_by_path(paths, state.selection_path[:])
+	if idx < 0 {
+		clear_text_selection()
+		return
+	}
+	text_node, is_text := nodes[idx].(types.NodeText)
+	if !is_text {
+		clear_text_selection()
+		return
+	}
+	if state.selection_end > len(text_node.content) {
+		clear_text_selection()
+	}
+}
+
 // Find the node whose path value equals `p`. Returns -1 if not found.
 // Exported — also used by the per-frame resolver and the devserver's
 // /selection handler to look up the current text-selection node.
