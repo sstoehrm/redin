@@ -33,7 +33,8 @@ DropListener :: struct {
 }
 
 // Emitted for every NodeText whose :selectable attribute is not false.
-// Consumed by input/text_select.odin.
+// Consumed by the text-selection gesture module (input/text_select.odin,
+// added in a follow-up commit).
 Text_Select_Listener :: struct {
 	node_idx: int,
 }
