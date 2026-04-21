@@ -35,23 +35,22 @@ get_user_events :: proc(
 			if is_dragging() do continue
 			pt := rl.Vector2{e.x, e.y}
 
+			// Deepest node wins: compute the innermost listener-bearing
+			// node under the pointer, then fire only that node's
+			// listeners. Ancestor click/focus listeners are suppressed.
+			// Hover is multi-fire and stays in its own loop above.
+			winner := deepest_listener_idx(listeners[:], node_rects, pt)
+			if winner < 0 do continue
+
 			for listener in listeners {
 				switch l in listener {
 				case types.ClickListener:
-					if l.node_idx < len(node_rects) &&
-					   rl.CheckCollisionPointRec(pt, node_rects[l.node_idx]) {
-						append(
-							&user_events,
-							types.UserEvent{event = .CLICK, node_idx = l.node_idx},
-						)
+					if l.node_idx == winner {
+						append(&user_events, types.UserEvent{event = .CLICK, node_idx = winner})
 					}
 				case types.FocusListener:
-					if l.node_idx < len(node_rects) &&
-					   rl.CheckCollisionPointRec(pt, node_rects[l.node_idx]) {
-						append(
-							&user_events,
-							types.UserEvent{event = .FOCUS, node_idx = l.node_idx},
-						)
+					if l.node_idx == winner {
+						append(&user_events, types.UserEvent{event = .FOCUS, node_idx = winner})
 					}
 				case types.HoverListener, types.KeyListener, types.ChangeListener,
 				     types.DragListener, types.DropListener, types.Text_Select_Listener:

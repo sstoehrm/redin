@@ -20,28 +20,29 @@ apply_listeners :: proc(
 			if e.button != .LEFT do continue
 			mouse := rl.Vector2{e.x, e.y}
 
-			hit_focus := false
-			for listener in listeners {
-				switch l in listener {
-				case types.FocusListener:
-					if l.node_idx < len(node_rects) &&
-					   rl.CheckCollisionPointRec(mouse, node_rects[l.node_idx]) {
-						focused_idx = l.node_idx
-						append(&applied, types.ApplyEvents(types.ApplyFocus{idx = l.node_idx}))
-						hit_focus = true
+			// Deepest node wins (see get_user_events). Only listeners on
+			// the innermost listener-bearing node under the pointer fire.
+			winner := deepest_listener_idx(listeners[:], node_rects, mouse)
+			new_focus := -1
+			has_active := false
+			if winner >= 0 {
+				for listener in listeners {
+					switch l in listener {
+					case types.FocusListener:
+						if l.node_idx == winner do new_focus = winner
+					case types.ClickListener:
+						if l.node_idx == winner do has_active = true
+					case types.HoverListener, types.KeyListener, types.ChangeListener,
+					     types.DragListener, types.DropListener, types.Text_Select_Listener:
 					}
-				case types.ClickListener:
-					if l.node_idx < len(node_rects) &&
-					   rl.CheckCollisionPointRec(mouse, node_rects[l.node_idx]) {
-						append(&applied, types.ApplyEvents(types.ApplyActive{idx = l.node_idx}))
-					}
-				case types.HoverListener, types.KeyListener, types.ChangeListener,
-				     types.DragListener, types.DropListener, types.Text_Select_Listener:
 				}
 			}
-
-			if !hit_focus {
-				focused_idx = -1
+			focused_idx = new_focus
+			if new_focus >= 0 {
+				append(&applied, types.ApplyEvents(types.ApplyFocus{idx = new_focus}))
+			}
+			if has_active {
+				append(&applied, types.ApplyEvents(types.ApplyActive{idx = winner}))
 			}
 
 		case types.KeyEvent, types.CharEvent, types.ScrollEvent, types.ResizeEvent:

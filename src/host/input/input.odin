@@ -9,6 +9,36 @@ import rl "vendor:raylib"
 // Currently focused node index, -1 means none.
 focused_idx: int = -1
 
+// Deepest event-listener-bearing node under `pt`, or -1 if none.
+// "Deepest" = highest node_idx among listener matches; nodes[] is
+// DFS-ordered, so a descendant always has a higher idx than its
+// ancestors. Hover is excluded: a hovered ancestor stays hovered
+// while the pointer is over a descendant, so it must not compete
+// for the single-winner slot here.
+deepest_listener_idx :: proc(
+	listeners: []types.Listener,
+	node_rects: []rl.Rectangle,
+	pt: rl.Vector2,
+) -> int {
+	best := -1
+	for listener in listeners {
+		idx: int = -1
+		switch l in listener {
+		case types.ClickListener:        idx = l.node_idx
+		case types.FocusListener:        idx = l.node_idx
+		case types.DragListener:         idx = l.node_idx
+		case types.DropListener:         idx = l.node_idx
+		case types.Text_Select_Listener: idx = l.node_idx
+		case types.HoverListener, types.KeyListener, types.ChangeListener:
+		}
+		if idx < 0 || idx >= len(node_rects) do continue
+		if idx <= best do continue
+		if !rl.CheckCollisionPointRec(pt, node_rects[idx]) do continue
+		best = idx
+	}
+	return best
+}
+
 extract_listeners :: proc(
 	paths: [dynamic]types.Path,
 	nodes: [dynamic]types.Node,
