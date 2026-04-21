@@ -961,17 +961,26 @@ draw_input :: proc(
 	// Scissor clip to content area
 	rl.BeginScissorMode(i32(content_x), i32(content_y), i32(content_w), i32(content_h))
 
+	// Vertically centre the text block when it fits inside the
+	// content area. For overflowing multi-line content (scroll case),
+	// fall back to top-align so scroll bookkeeping stays simple.
+	total_h := f32(len(lines)) * lh
+	y_offset: f32 = 0
+	if total_h < content_h {
+		y_offset = (content_h - total_h) / 2
+	}
+
 	// Draw selection highlight (behind text)
 	if is_focused && input.state.active && input.has_selection() {
 		lo, hi := input.selection_range()
-		content_rect := rl.Rectangle{content_x, content_y, content_w, content_h}
+		content_rect := rl.Rectangle{content_x, content_y + y_offset, content_w, content_h}
 		draw_selection_rects(lines[:], display_text, lo, hi, f, font_size, spacing, lh, content_rect, scroll_y, selection_color)
 	}
 
 	// Draw text lines
 	color := show_placeholder ? placeholder_color : text_color
 	for line, i in lines {
-		ly := content_y + f32(i) * lh - scroll_y
+		ly := content_y + y_offset + f32(i) * lh - scroll_y
 		if ly + lh < content_y do continue
 		if ly > content_y + content_h do break
 
@@ -981,38 +990,23 @@ draw_input :: proc(
 		}
 	}
 
-	// Draw cursor with wipe animation
+	// Draw cursor: a simple blinking vertical bar, 2.5 px thick, line
+	// height tall. 500 ms on / 500 ms off.
 	if is_focused && input.state.active {
-		cursor_line, _ := text_pkg.cursor_to_line(lines[:], input.state.cursor)
-		cur_line := lines[cursor_line]
-		cursor_x_offset := text_pkg.measure_range(
-			display_text, cur_line.start, input.state.cursor, f, font_size, spacing,
-		)
-		cursor_x := content_x + cursor_x_offset
-		cursor_y := content_y + f32(cursor_line) * lh - scroll_y
-
-		cycle := f32(rl.GetTime()) * 0.4
-		phase := cycle - f32(i32(cycle))
-		wave: f32
-		if phase < 0.5 {
-			wave = phase * 2
-		} else {
-			wave = (1 - phase) * 2
-		}
-
-		CURSOR_SLICES :: 8
-		slice_h := lh / f32(CURSOR_SLICES)
-		for s in 0 ..< i32(CURSOR_SLICES) {
-			norm := 1.0 - (f32(s) + 0.5) / f32(CURSOR_SLICES)
-			alpha_norm := clamp(wave * 2.0 - norm, 0, 1)
-			alpha := u8(alpha_norm * f32(text_color.a))
-			slice_y := cursor_y + f32(s) * slice_h
-			c := rl.Color{text_color.r, text_color.g, text_color.b, alpha}
+		if (i32(rl.GetTime() * 2) & 1) == 0 {
+			cursor_line, _ := text_pkg.cursor_to_line(lines[:], input.state.cursor)
+			cur_line := lines[cursor_line]
+			cursor_x_offset := text_pkg.measure_range(
+				display_text, cur_line.start, input.state.cursor, f, font_size, spacing,
+			)
+			cursor_x := px(content_x + cursor_x_offset)
+			cursor_y := content_y + y_offset + f32(cursor_line) * lh - scroll_y
+			CURSOR_THICKNESS :: 2.5
 			rl.DrawLineEx(
-				rl.Vector2{cursor_x, slice_y},
-				rl.Vector2{cursor_x, slice_y + slice_h},
-				1.5,
-				c,
+				rl.Vector2{cursor_x, cursor_y},
+				rl.Vector2{cursor_x, cursor_y + lh},
+				CURSOR_THICKNESS,
+				text_color,
 			)
 		}
 	}
