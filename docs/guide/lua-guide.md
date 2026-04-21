@@ -62,17 +62,14 @@ end)
 -- 5. Define the view
 function main_view()
   local count = subscribe("sub/counter")
-  return {
-    frame = {"vbox", {aspect = "surface"},
-      {"text", {aspect = "heading"}, tostring(count)},
-      {"button", {aspect = "button", click = {"event/inc"}}, "+1"}},
-    bind = {}
-  }
+  return {"vbox", {aspect = "surface"},
+    {"text", {aspect = "heading"}, tostring(count)},
+    {"button", {aspect = "button", click = {"event/inc"}}, "+1"}}
 end
 ```
 
-The runtime calls `main_view` (the global) on each render tick. The returned table must
-have `frame` and `bind` keys.
+The runtime calls `main_view` (the global) on each render tick. It must return the frame
+tree directly: a Lua table shaped like `{tag, attrs, child1, child2, ...}`.
 
 ---
 
@@ -209,20 +206,17 @@ function main_view()
     table.insert(rows, {"text", {aspect = "body"}, item.text})
   end
 
-  return {
-    frame = {"vbox", {},
-      {"stack", {},
-        {"vbox", {aspect = "surface", layout = "center"},
-          {"text", {aspect = "heading", layout = "center"}, "Todo List"},
-          {"input", {aspect = "input", width = 250, height = 42,
-                     value = input_val,
-                     change = {"todo/input"}, key = {"todo/add"}}},
-          {"button", {width = 250, height = 42, aspect = "button",
-                      click = {"todo/add"}}, "Add"},
-          {"vbox", {overflow = "scroll-y", aspect = "muted"},
-            table.unpack(rows)}}}},
-    bind = {}
-  }
+  return {"vbox", {},
+    {"stack", {},
+      {"vbox", {aspect = "surface", layout = "center"},
+        {"text", {aspect = "heading", layout = "center"}, "Todo List"},
+        {"input", {aspect = "input", width = 250, height = 42,
+                   value = input_val,
+                   change = {"todo/input"}, key = {"todo/add"}}},
+        {"button", {width = 250, height = 42, aspect = "button",
+                    click = {"todo/add"}}, "Add"},
+        {"vbox", {overflow = "scroll-y", aspect = "muted"},
+          table.unpack(rows)}}}}
 end
 ```
 
@@ -242,21 +236,27 @@ Then run your Lua app:
 ./build/redin todo.lua
 ```
 
-Dev mode starts the HTTP dev server on `localhost:8800`:
+Dev mode starts the HTTP dev server (picks port 8800 by default; walks upward if busy):
 
 ```sh
 ./build/redin --dev todo.lua
 ```
 
+The bound port is written to `./.redin-port` and a per-run bearer token to `./.redin-token`:
+
 ```sh
+PORT=$(cat .redin-port)
+TOKEN=$(cat .redin-token)
+AUTH="Authorization: Bearer $TOKEN"
+
 # Inspect live state
-curl localhost:8800/state
+curl -H "$AUTH" localhost:$PORT/state
 
 # Dispatch an event from the terminal
-curl -X POST localhost:8800/events \
-  -H 'Content-Type: application/json' \
-  -d '{"event": ["todo/add"]}'
+curl -X POST -H "$AUTH" -H 'Content-Type: application/json' \
+  -d '["todo/add"]' \
+  localhost:$PORT/events
 ```
 
-See [core-api.md](../core-api.md) and [app-api.md](../app-api.md) for the full API
-reference.
+See [core-api.md](../core-api.md), [app-api.md](../app-api.md), and
+[dev-server.md](../reference/dev-server.md) for the full API reference.
