@@ -9,6 +9,7 @@ import "core:os"
 import "core:strings"
 import "core:sync"
 import "core:thread"
+import "core:time"
 import "../input"
 import "../profile"
 import "../types"
@@ -165,6 +166,17 @@ devserver_drain_events :: proc(ds: ^Dev_Server, events: ^[dynamic]types.InputEve
 
 // --- Simple blocking HTTP server thread ---
 
+// Per-recv deadline. Slowloris variant "connect and send nothing"
+// unblocks via SO_RCVTIMEO when recv returns after this. Value kept
+// generous enough to not trip up a sluggish local client.
+CLIENT_RECV_TIMEOUT :: 5 * time.Second
+
+// Total time any one request may take from accept to end-of-body,
+// regardless of per-recv progress. Defends against drip-feed
+// slowloris where a client sends one byte every CLIENT_RECV_TIMEOUT
+// just often enough to keep the per-recv timer from firing.
+CLIENT_REQUEST_DEADLINE :: 30 * time.Second
+
 server_thread_proc :: proc(ds: ^Dev_Server) {
 	stack_buf: [8192]u8
 	MAX_BODY :: 1024 * 1024
@@ -175,6 +187,15 @@ server_thread_proc :: proc(ds: ^Dev_Server) {
 			break
 		}
 
+		// Receive timeout on this client: each recv returns within
+		// CLIENT_RECV_TIMEOUT even if the peer sends nothing, so
+		// "open TCP and stall" no longer pins the server thread.
+		// Ignore errors — a missing timeout isn't fatal, it just
+		// means we fall back to the per-request deadline below.
+		_ = net.set_option(client, .Receive_Timeout, CLIENT_RECV_TIMEOUT)
+
+		deadline := time.time_add(time.now(), CLIENT_REQUEST_DEADLINE)
+
 		buf: []u8 = stack_buf[:]
 		heap_buf: []u8
 		defer if heap_buf != nil do delete(heap_buf)
@@ -182,7 +203,12 @@ server_thread_proc :: proc(ds: ^Dev_Server) {
 		// Read full request into buffer
 		total := 0
 		too_large := false
+		timed_out := false
 		for {
+			if time.diff(time.now(), deadline) < 0 {
+				timed_out = true
+				break
+			}
 			n, recv_err := net.recv_tcp(client, buf[total:])
 			if recv_err != nil || n <= 0 {
 				break
@@ -206,6 +232,10 @@ server_thread_proc :: proc(ds: ^Dev_Server) {
 						buf = heap_buf
 					}
 					for total < needed {
+						if time.diff(time.now(), deadline) < 0 {
+							timed_out = true
+							break
+						}
 						n2, err2 := net.recv_tcp(client, buf[total:])
 						if err2 != nil || n2 <= 0 do break
 						total += n2
@@ -218,6 +248,16 @@ server_thread_proc :: proc(ds: ^Dev_Server) {
 				too_large = true
 				break
 			}
+		}
+
+		if timed_out {
+			// 408 instead of 413/200: the client didn't finish in time.
+			// Some stacks surface this to the user; for slowloris we
+			// mostly care that the server thread is freed.
+			resp := "HTTP/1.1 408 Request Timeout\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+			net.send_tcp(client, transmute([]u8)resp)
+			net.close(client)
+			continue
 		}
 
 		if too_large {
@@ -443,6 +483,7 @@ status_text :: proc(code: int) -> string {
 	case 403: return "403 Forbidden"
 	case 404: return "404 Not Found"
 	case 405: return "405 Method Not Allowed"
+	case 408: return "408 Request Timeout"
 	case 500: return "500 Internal Server Error"
 	case:     return "200 OK"
 	}
