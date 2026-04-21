@@ -961,12 +961,14 @@ draw_input :: proc(
 	// Scissor clip to content area
 	rl.BeginScissorMode(i32(content_x), i32(content_y), i32(content_w), i32(content_h))
 
-	// Vertically centre the text block when it fits inside the
-	// content area. For overflowing multi-line content (scroll case),
-	// fall back to top-align so scroll bookkeeping stays simple.
+	// Vertical alignment: centre single-line content inside the
+	// content area (common case — a chat input in a tall box looks
+	// off top-aligned). Multi-line (wrapped or explicit \n) top-
+	// aligns so editing and scrolling behave like any code/text
+	// editor.
 	total_h := f32(len(lines)) * lh
 	y_offset: f32 = 0
-	if total_h < content_h {
+	if len(lines) <= 1 && total_h < content_h {
 		y_offset = (content_h - total_h) / 2
 	}
 
