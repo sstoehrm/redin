@@ -44,7 +44,7 @@ process_text_selection :: proc(
 			text_node, is_text := nodes[tl.node_idx].(types.NodeText)
 			if !is_text do continue
 
-			offset := node_byte_offset_at(text_node, node_rects[tl.node_idx], pt, theme)
+			offset := node_byte_offset_at(tl.node_idx, text_node, node_rects[tl.node_idx], pt, theme)
 
 			// Shift-click extends the existing selection to the new offset within
 			// the same node. The anchor remains at its original byte.
@@ -89,13 +89,24 @@ process_text_selection :: proc(
 				lo = prev_word(content_bytes, offset)
 				hi = next_word(content_bytes, offset)
 			case 3:
-				// Whole wrapped line at this offset.
+				// Whole wrapped line at this offset. Reuse the cached
+				// wrap from layout/draw — same (idx, width) key.
 				f := resolve_font(text_node, theme)
 				fs := resolve_font_size(text_node, theme)
-				lines := text_pkg.compute_lines(text_node.content, f, fs, 0, node_rects[tl.node_idx].width)
-				defer delete(lines)
+				width := node_rects[tl.node_idx].width
+				lines: []text_pkg.Text_Line
+				fresh: [dynamic]text_pkg.Text_Line
+				owns := false
+				if cached, ok := text_pkg.lookup_lines(tl.node_idx, width); ok {
+					lines = cached
+				} else {
+					fresh = text_pkg.compute_lines(text_node.content, f, fs, 0, width)
+					lines = fresh[:]
+					owns = true
+				}
+				defer if owns do delete(fresh)
 				if len(lines) > 0 {
-					line_idx, _ := text_pkg.cursor_to_line(lines[:], offset)
+					line_idx, _ := text_pkg.cursor_to_line(lines, offset)
 					lo = lines[line_idx].start
 					hi = lines[line_idx].end
 				}
@@ -132,7 +143,7 @@ process_text_selection :: proc(
 			if is_text {
 				mouse := rl.GetMousePosition()
 				rect := node_rects[idx]
-				offset := node_byte_offset_at(text_node, rect, mouse, theme)
+				offset := node_byte_offset_at(idx, text_node, rect, mouse, theme)
 				if offset == gesture.anchor_offset {
 					// Collapsed to a caret; drop the selection range.
 					state.selection_start = -1
@@ -158,6 +169,7 @@ process_text_selection :: proc(
 // Uses the same font/size resolution as render.
 @(private)
 node_byte_offset_at :: proc(
+	node_idx: int,
 	n: types.NodeText,
 	rect: rl.Rectangle,
 	pt: rl.Vector2,
@@ -176,8 +188,18 @@ node_byte_offset_at :: proc(
 	}
 	lh := text_pkg.line_height(font_size, lh_ratio)
 
-	lines := text_pkg.compute_lines(n.content, f, font_size, spacing, rect.width)
-	defer delete(lines)
+	// Prefer the cache populated by layout/draw at the same (idx, width).
+	lines: []text_pkg.Text_Line
+	fresh: [dynamic]text_pkg.Text_Line
+	owns := false
+	if cached, ok := text_pkg.lookup_lines(node_idx, rect.width); ok {
+		lines = cached
+	} else {
+		fresh = text_pkg.compute_lines(n.content, f, font_size, spacing, rect.width)
+		lines = fresh[:]
+		owns = true
+	}
+	defer if owns do delete(fresh)
 
 	rel_y := pt.y - rect.y
 	line_idx := int(rel_y / lh)
