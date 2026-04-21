@@ -26,34 +26,44 @@ process_drag :: proc(
 	dispatch: [dynamic]types.Dispatch_Event
 	mouse := rl.GetMousePosition()
 
-	// Phase 1: Check for new drag initiation (mouse press on a DragListener)
+	// Phase 1: Check for new drag initiation (mouse press).
+	// Deepest node wins: only start a drag if the innermost listener
+	// under the pointer has a DragListener. A button with :click
+	// inside a draggable row is deeper than the row, so its click
+	// beats the ancestor's drag and the drag never initiates.
 	if !drag_pending && dragging_idx == -1 {
 		for event in input_events {
 			me, is_mouse := event.(types.MouseEvent)
 			if !is_mouse || me.button != .LEFT do continue
 			pt := rl.Vector2{me.x, me.y}
 
+			winner := deepest_listener_idx(listeners, node_rects, pt)
+			if winner < 0 do continue
+
+			has_drag := false
 			for listener in listeners {
 				dl, ok := listener.(types.DragListener)
 				if !ok do continue
-				if dl.node_idx >= len(node_rects) do continue
-				if !rl.CheckCollisionPointRec(pt, node_rects[dl.node_idx]) do continue
-
-				drag_pending = true
-				drag_start_pos = pt
-
-				switch n in nodes[dl.node_idx] {
-				case types.NodeVbox:
-					drag_source = {n.draggable_group, n.draggable_event, n.draggable_ctx}
-					dragging_idx = dl.node_idx
-				case types.NodeHbox:
-					drag_source = {n.draggable_group, n.draggable_event, n.draggable_ctx}
-					dragging_idx = dl.node_idx
-				case types.NodeStack, types.NodeCanvas, types.NodeInput,
-					types.NodeButton, types.NodeText, types.NodeImage,
-					types.NodePopout, types.NodeModal:
+				if dl.node_idx == winner {
+					has_drag = true
+					break
 				}
-				break
+			}
+			if !has_drag do continue
+
+			drag_pending = true
+			drag_start_pos = pt
+
+			switch n in nodes[winner] {
+			case types.NodeVbox:
+				drag_source = {n.draggable_group, n.draggable_event, n.draggable_ctx}
+				dragging_idx = winner
+			case types.NodeHbox:
+				drag_source = {n.draggable_group, n.draggable_event, n.draggable_ctx}
+				dragging_idx = winner
+			case types.NodeStack, types.NodeCanvas, types.NodeInput,
+				types.NodeButton, types.NodeText, types.NodeImage,
+				types.NodePopout, types.NodeModal:
 			}
 		}
 	}
@@ -80,7 +90,8 @@ process_drag :: proc(
 		}
 	}
 
-	// Phase 3: Active dragging - hit-test drop targets each frame
+	// Phase 3: Active dragging - hit-test drop targets each frame.
+	// Deepest-wins: nested drop zones resolve to the innermost.
 	if !drag_pending && dragging_idx >= 0 {
 		if rl.IsMouseButtonDown(.LEFT) {
 			drag_over_idx = -1
@@ -89,10 +100,8 @@ process_drag :: proc(
 				if !ok do continue
 				if dl.group != drag_source.group do continue
 				if dl.node_idx >= len(node_rects) do continue
-				if rl.CheckCollisionPointRec(mouse, node_rects[dl.node_idx]) {
-					drag_over_idx = dl.node_idx
-					break
-				}
+				if !rl.CheckCollisionPointRec(mouse, node_rects[dl.node_idx]) do continue
+				if dl.node_idx > drag_over_idx do drag_over_idx = dl.node_idx
 			}
 		} else {
 			if drag_over_idx >= 0 {
