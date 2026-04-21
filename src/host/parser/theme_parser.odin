@@ -100,6 +100,16 @@ _parse_theme_props :: proc(p: ^_Parser) -> types.Theme {
 				t.opacity = _read_number(p)
 			case "selection":
 				t.selection = _parse_rgba(p)
+			case "text-align":
+				if _peek(p) == ':' {
+					v := _read_keyword(p)
+					switch v {
+					case "top":    t.text_align = .Top
+					case "center": t.text_align = .Center
+					case "bottom": t.text_align = .Bottom
+					case "auto":   t.text_align = .Auto
+					}
+				}
 			}
 		} else {
 			p.pos += 1

@@ -9,6 +9,10 @@
    :input   {:bg [59 66 82] :color [236 239 244]
              :border [76 86 106] :border-width 1
              :radius 4 :padding [8 12 8 12] :font-size 14}
+   :input-top {:bg [59 66 82] :color [236 239 244]
+               :border [76 86 106] :border-width 1
+               :radius 4 :padding [8 12 8 12] :font-size 14
+               :text-align :top}
    :input#focus {:border [136 192 208]}})
 
 (dataflow.init

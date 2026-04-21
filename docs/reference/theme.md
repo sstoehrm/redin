@@ -97,6 +97,7 @@ The host-side `Theme` struct (in `src/host/types/theme.odin`) defines the proper
 | `font` | string | Font name (e.g. "sans", "mono", "serif", or custom) |
 | `opacity` | f32 | Element transparency, 0--1 |
 | `shadow` | struct | `{x, y, blur, color[r g b a]}` — drop shadow |
+| `text_align` | enum | NodeInput vertical alignment: `:top`, `:center`, `:bottom`, `:auto` (default). `:auto` centres single-line inputs and top-aligns multi-line. |
 
 Weight values: 0 = normal (default), 1 = bold, 2 = italic.
 

@@ -135,6 +135,27 @@ test_parse_theme_selection :: proc(t: ^testing.T) {
 	testing.expect_value(t, body.selection, [4]u8{255, 220, 0, 120})
 }
 
+@(test)
+test_parse_theme_text_align :: proc(t: ^testing.T) {
+	input := `{:a {:text-align :top}
+              :b {:text-align :center}
+              :c {:text-align :bottom}
+              :d {:text-align :auto}
+              :e {}}`
+	theme, ok := _parse_theme_string(input)
+	defer {
+		for k in theme do delete(k)
+		delete(theme)
+	}
+	testing.expect(t, ok, "parse should succeed")
+	testing.expect_value(t, theme["a"].text_align, types.Text_Align.Top)
+	testing.expect_value(t, theme["b"].text_align, types.Text_Align.Center)
+	testing.expect_value(t, theme["c"].text_align, types.Text_Align.Bottom)
+	testing.expect_value(t, theme["d"].text_align, types.Text_Align.Auto)
+	// Unspecified → Auto (zero value).
+	testing.expect_value(t, theme["e"].text_align, types.Text_Align.Auto)
+}
+
 // Helper: parse theme from string (wraps the file-based loader logic)
 _parse_theme_string :: proc(input: string) -> (map[string]types.Theme, bool) {
 	p := _Parser{text = input, pos = 0}

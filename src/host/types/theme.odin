@@ -7,6 +7,13 @@ Shadow :: struct {
 	color: [4]u8,
 }
 
+Text_Align :: enum u8 {
+	Auto   = 0, // single-line → Center, multi-line → Top
+	Top    = 1,
+	Center = 2,
+	Bottom = 3,
+}
+
 Theme :: struct {
 	bg:           [3]u8,
 	color:        [3]u8,
@@ -15,6 +22,7 @@ Theme :: struct {
 	border_width: u8,
 	radius:       u8,
 	weight:       u8,      // 0=normal, 1=bold, 2=italic
+	text_align:   Text_Align, // vertical alignment for NodeInput text
 	font_size:    f16,
 	line_height:  f32,     // ratio; 0 = default (font_size + 4)
 	font:         string,
