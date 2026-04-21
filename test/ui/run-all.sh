@@ -10,7 +10,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 BINARY="$ROOT_DIR/build/redin"
 PORT_FILE="$ROOT_DIR/.redin-port"
+TOKEN_FILE="$ROOT_DIR/.redin-token"
 PORT=""
+TOKEN=""
 TOTAL_PASSED=0
 TOTAL_FAILED=0
 
@@ -23,9 +25,12 @@ wait_for_server() {
   local timeout=10
   local start=$SECONDS
   while true; do
-    if [ -f "$PORT_FILE" ]; then
+    if [ -f "$PORT_FILE" ] && [ -f "$TOKEN_FILE" ]; then
       PORT="$(cat "$PORT_FILE")"
-      if [ -n "$PORT" ] && curl -s "http://localhost:$PORT/frames" >/dev/null 2>&1; then
+      TOKEN="$(cat "$TOKEN_FILE")"
+      if [ -n "$PORT" ] && [ -n "$TOKEN" ] \
+         && curl -s -H "Authorization: Bearer $TOKEN" \
+                 "http://localhost:$PORT/frames" >/dev/null 2>&1; then
         return 0
       fi
     fi
@@ -70,7 +75,8 @@ for test_file in "$SCRIPT_DIR"/test_*.bb; do
   fi
 
   # Shutdown
-  curl -s -X POST "http://localhost:$PORT/shutdown" >/dev/null 2>&1 || true
+  curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+       "http://localhost:$PORT/shutdown" >/dev/null 2>&1 || true
   wait "$SERVER_PID" 2>/dev/null || true
   echo ""
 done

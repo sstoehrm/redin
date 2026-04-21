@@ -428,6 +428,8 @@ Providers register in Odin via `canvas.register(name, provider)`. See the [canva
 
 Runs on `localhost:8800` when started with `--dev` flag. All responses are JSON unless noted.
 
+**Authentication.** Every non-`OPTIONS` request must include `Authorization: Bearer <token>`, where the token is read from `./.redin-token` (generated on startup, mode 0600, removed on shutdown). The server also verifies the `Host` header is `localhost:<port>` or `127.0.0.1:<port>` (DNS-rebinding defence). Missing token → `401`, bad Host → `403`, `OPTIONS` → `405` (CORS preflight not served — the endpoint is for local tools, not browsers). See [dev-server reference](../reference/dev-server.md) for usage examples.
+
 ### Frames
 
 | Method | Path      | Body | Response                             |

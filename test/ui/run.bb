@@ -12,6 +12,8 @@
 (def port (or (some->> cli-args (partition 2 1) (filter #(= (first %) "--port")) first second parse-long)
               (read-port-file)
               8800))
+(def token (or (some->> cli-args (partition 2 1) (filter #(= (first %) "--token")) first second)
+               (read-token-file)))
 
 (def test-files
   (or (seq (filter #(and (str/ends-with? % ".bb") (not (str/starts-with? % "--")))
@@ -30,7 +32,9 @@
 (flush)
 (try
   (http/get (str "http://" host ":" port "/frames")
-            {:headers {"Accept" "application/json"} :timeout 2000})
+            {:headers (merge {"Accept" "application/json"}
+                             (when token {"Authorization" (str "Bearer " token)}))
+             :timeout 2000})
   (println "OK")
   (catch Exception _
     (println "FAILED")
@@ -38,7 +42,7 @@
     (println "Start redin with --dev first.")
     (System/exit 2)))
 
-(connect! {:host host :port port})
+(connect! {:host host :port port :token token})
 
 (def total-passed (atom 0))
 (def total-failed (atom 0))

@@ -6,11 +6,29 @@ HTTP server for inspecting and driving redin apps from external tools.
 
 ## Overview
 
-Starts when the app is launched with `--dev`. Listens on `localhost:8800`. All responses are JSON unless noted. CORS headers are included on all responses.
+Starts when the app is launched with `--dev`. Listens on `localhost:8800` (walks upward if busy).
 
 Read endpoints reflect the last state pushed to the host. Write endpoints queue events into the main input channel as if they came from real user input.
 
 Implementation: `src/host/bridge/devserver.odin`.
+
+### Authentication
+
+On startup the server generates a random 256-bit token and writes it to `./.redin-token` (mode 0600, removed on shutdown). Every non-OPTIONS request must include:
+
+```
+Authorization: Bearer <contents of .redin-token>
+```
+
+The server also verifies the `Host` header matches `localhost:<port>` or `127.0.0.1:<port>` to blunt DNS-rebinding attacks. CORS preflight is not served — the endpoint is intended for local tools, not browsers. Missing token → `401`; bad Host → `403`; OPTIONS → `405`.
+
+All examples below assume:
+
+```bash
+PORT=$(cat .redin-port)
+TOKEN=$(cat .redin-token)
+AUTH="Authorization: Bearer $TOKEN"
+```
 
 ---
 
@@ -19,7 +37,7 @@ Implementation: `src/host/bridge/devserver.odin`.
 ### `GET /frames` -- full frame tree
 
 ```bash
-curl http://localhost:8800/frames
+curl -H "$AUTH" http://localhost:$PORT/frames
 ```
 
 Response: the full frame tree as JSON. Calls `view.get-last-push` in Lua to retrieve the last rendered frame.
@@ -27,7 +45,7 @@ Response: the full frame tree as JSON. Calls `view.get-last-push` in Lua to retr
 ### `GET /state` -- full app-db
 
 ```bash
-curl http://localhost:8800/state
+curl -H "$AUTH" http://localhost:$PORT/state
 ```
 
 Response: JSON-serialized Lua state table.
@@ -37,13 +55,13 @@ Response: JSON-serialized Lua state table.
 Dot-separated path. Segments are string keys into the Lua state table.
 
 ```bash
-curl http://localhost:8800/state/items.text
+curl -H "$AUTH" http://localhost:$PORT/state/items.text
 ```
 
 ### `GET /aspects` -- theme table
 
 ```bash
-curl http://localhost:8800/aspects
+curl -H "$AUTH" http://localhost:$PORT/aspects
 ```
 
 Response: full theme as JSON object (serialized from host-side `Theme` structs).
@@ -80,7 +98,7 @@ The sum of `phase_us` may be less than `total_us` because glue code between phas
 ### `GET /screenshot` -- PNG capture
 
 ```bash
-curl http://localhost:8800/screenshot -o screenshot.png
+curl -H "$AUTH" http://localhost:$PORT/screenshot -o screenshot.png
 ```
 
 Returns binary PNG. Content-Type: `image/png`. Captures the current Raylib window.
@@ -92,7 +110,7 @@ Returns binary PNG. Content-Type: `image/png`. Captures the current Raylib windo
 ### `POST /events` -- dispatch an event
 
 ```bash
-curl -X POST http://localhost:8800/events \
+curl -X POST -H "$AUTH" http://localhost:$PORT/events \
   -H 'Content-Type: application/json' \
   -d '{"event": ["event/increment"]}'
 ```
@@ -106,7 +124,7 @@ The JSON body is decoded into a Lua value and passed to the event system.
 Hit-tests at the given pixel coordinate and dispatches through input handling.
 
 ```bash
-curl -X POST http://localhost:8800/click \
+curl -X POST -H "$AUTH" http://localhost:$PORT/click \
   -H 'Content-Type: application/json' \
   -d '{"x": 400, "y": 300}'
 ```
@@ -118,7 +136,7 @@ Queues a `MouseEvent` with `button = LEFT` into the input event queue.
 ### `POST /shutdown` -- graceful shutdown
 
 ```bash
-curl -X POST http://localhost:8800/shutdown
+curl -X POST -H "$AUTH" http://localhost:$PORT/shutdown
 ```
 
 Response: `{"ok": true}`
@@ -128,7 +146,7 @@ Sets `shutdown_requested = true` on the dev server.
 ### `PUT /aspects` -- replace theme
 
 ```bash
-curl -X PUT http://localhost:8800/aspects \
+curl -X PUT -H "$AUTH" http://localhost:$PORT/aspects \
   -H 'Content-Type: application/json' \
   -d '{"button": {"bg": [76, 86, 106], "radius": 6}}'
 ```
