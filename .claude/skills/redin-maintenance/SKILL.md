@@ -42,8 +42,12 @@ Builds redin, then for each pair: starts dev server, runs tests, shuts down. Req
 ```bash
 ./build/redin --dev test/ui/<component>_app.fnl &
 bb test/ui/run.bb test/ui/test_<component>.bb
-curl -s -X POST http://localhost:8800/shutdown
+PORT=$(cat .redin-port); TOKEN=$(cat .redin-token)
+curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+     http://localhost:$PORT/shutdown
 ```
+
+Every non-OPTIONS request to the dev server needs `Authorization: Bearer <token>` (token is in `./.redin-token`, 0600, removed on shutdown). `bb test/ui/run.bb` reads the token automatically.
 
 ### Available test suites
 
