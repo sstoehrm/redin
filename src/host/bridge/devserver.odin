@@ -121,12 +121,15 @@ devserver_init :: proc(ds: ^Dev_Server, b: ^Bridge) {
 	ds.expected_host_v4   = fmt.aprintf("127.0.0.1:%d", bound_port)
 	ds.expected_host_name = fmt.aprintf("localhost:%d", bound_port)
 
+	// 0600 — owner read+write only. Previously .redin-port was 0644
+	// which leaked the bound port to anyone who could list the CWD.
+	// Testing helpers run as the same user, so 0600 doesn't regress
+	// them.
+	private_perm := os.Permissions{.Read_User, .Write_User}
 	port_str := fmt.tprintf("%d", bound_port)
-	if err := os.write_entire_file(PORT_FILE, port_str); err != nil {
+	if err := os.write_entire_file(PORT_FILE, transmute([]u8)port_str, private_perm); err != nil {
 		fmt.eprintfln("Warning: could not write %s: %v", PORT_FILE, err)
 	}
-	// 0600 — owner read+write only.
-	private_perm := os.Permissions{.Read_User, .Write_User}
 	if err := os.write_entire_file(TOKEN_FILE, transmute([]u8)ds.auth_token, private_perm); err != nil {
 		fmt.eprintfln("Warning: could not write %s: %v", TOKEN_FILE, err)
 	}
@@ -459,7 +462,9 @@ find_content_length :: proc(headers: string) -> int {
 	lower := strings.to_lower(headers, context.temp_allocator)
 	idx := strings.index(lower, "content-length:")
 	if idx < 0 do return 0
-	rest := strings.trim_left_space(headers[idx + len("content-length:"):])
+	// Trim from `lower` (same index) so lookup and extraction don't
+	// reference different case representations of the header block.
+	rest := strings.trim_left_space(lower[idx + len("content-length:"):])
 	end := strings.index_any(rest, "\r\n")
 	if end < 0 do end = len(rest)
 	val := strings.trim_space(rest[:end])
