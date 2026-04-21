@@ -31,7 +31,7 @@ A translation guide for developers who know re-frame. The programming model is t
 
 **State variants use `#`.** Theme keys like `:button#hover` and `:input#focus` use `#` as the separator between the base aspect and the state variant.
 
-**Events are inline on elements.** Instead of a separate binding table, event handlers are declared directly as element attributes: `:click`, `:change`, `:key`. The view returns `{:frame [...] :bind {}}` with an empty bind map.
+**Events are inline on elements.** Instead of a separate binding table, event handlers are declared directly as element attributes: `:click`, `:change`, `:key`. The view returns the frame tree directly.
 
 ## Translation recipe
 
@@ -79,11 +79,9 @@ A translation guide for developers who know re-frame. The programming model is t
 (global main_view
   (fn []
     (let [count (subscribe :sub/counter)]
-      {:frame
-       [:vbox {:padding [24 24 24 24]}
-         [:text {:aspect :heading} (tostring count)]
-         [:button {:aspect :button :click [:event/increment]} "+1"]]
-       :bind {}})))
+      [:vbox {:padding [24 24 24 24]}
+        [:text {:aspect :heading} (tostring count)]
+        [:button {:aspect :button :click [:event/increment]} "+1"]])))
 ```
 
 ### Inline events replace binding tables

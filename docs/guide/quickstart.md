@@ -49,11 +49,9 @@ This produces the `build/redin` binary: the Odin/Raylib host that embeds LuaJIT 
 (global main_view
   (fn []
     (let [count (subscribe :sub/counter)]
-      {:frame
-       [:vbox {:aspect :surface}
-         [:text {:aspect :heading} (tostring count)]
-         [:button {:aspect :button :click [:event/inc]} "+1"]]
-       :bind {}})))
+      [:vbox {:aspect :surface}
+        [:text {:aspect :heading} (tostring count)]
+        [:button {:aspect :button :click [:event/inc]} "+1"]])))
 ```
 
 ### What each piece does
@@ -66,7 +64,7 @@ This produces the `build/redin` binary: the Odin/Raylib host that embeds LuaJIT 
 | `dataflow.init` | Seed `app-db` with `{:counter 0}` |
 | `reg-handler` | Register `:event/inc`; handler receives `db` and returns updated `db` |
 | `reg-sub` | Register `:sub/counter`; recomputes only when `:counter` changes |
-| `main_view` | Global the runtime calls each frame; returns `{:frame ... :bind {}}` |
+| `main_view` | Global the runtime calls each frame; returns the frame tree directly |
 
 ### How events work
 
@@ -95,20 +93,26 @@ The window opens. Click the button -- the counter increments.
 ./build/redin --dev counter.fnl
 ```
 
-`--dev` enables the HTTP dev server on `localhost:8800`.
+`--dev` enables the HTTP dev server. It picks port 8800 by default (walks upward if busy) and writes the bound port to `./.redin-port` plus a per-run bearer token to `./.redin-token`.
 
 ```sh
+PORT=$(cat .redin-port)
+TOKEN=$(cat .redin-token)
+AUTH="Authorization: Bearer $TOKEN"
+
 # Inspect live state
-curl localhost:8800/state
+curl -H "$AUTH" localhost:$PORT/state
 
 # Inspect the current frame tree
-curl localhost:8800/frames
+curl -H "$AUTH" localhost:$PORT/frames
 
 # Dispatch an event from the terminal
-curl -X POST localhost:8800/events \
-  -H 'Content-Type: application/json' \
-  -d '{"event": ["event/inc"]}'
+curl -X POST -H "$AUTH" -H 'Content-Type: application/json' \
+  -d '["event/inc"]' \
+  localhost:$PORT/events
 ```
+
+See [dev-server.md](../reference/dev-server.md) for the full endpoint list and auth details.
 
 ## Next steps
 

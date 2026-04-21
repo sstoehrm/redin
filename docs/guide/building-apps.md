@@ -91,27 +91,25 @@ The framework re-records dependencies on every recomputation. No explicit wiring
 
 ## 5. Write the view
 
-A view function returns `{:frame [...] :bind {}}`. It calls `subscribe` to read derived state, then builds the frame tree as nested arrays. Events are declared directly on elements as attributes (`:click`, `:change`, `:key`).
+A view function returns the frame tree directly as nested arrays. It calls `subscribe` to read derived state, then builds the frame tree. Events are declared directly on elements as attributes (`:click`, `:change`, `:key`).
 
 ```fennel
 (global main_view
   (fn []
     (let [items (subscribe :items)
           input-val (subscribe :input-value)]
-      {:frame
-        [:vbox {}
-         [:stack {}
-          [:vbox {:aspect :surface :layout :center}
-           [:text {:aspect :heading :layout :center} "Todo List"]
-           [:input {:aspect :input :width 250 :height 42
-                    :value input-val
-                    :change [:todo/input] :key [:todo/add]}]
-           [:button {:width 250 :height 42 :aspect :button
-                     :click [:todo/add]} "Add"]
-           [:vbox {:overflow :scroll-y :aspect :muted}
-            (icollect [_ item (ipairs (or items []))]
-              [:text {:aspect :body} item.text])]]]]
-       :bind {}})))
+      [:vbox {}
+       [:stack {}
+        [:vbox {:aspect :surface :layout :center}
+         [:text {:aspect :heading :layout :center} "Todo List"]
+         [:input {:aspect :input :width 250 :height 42
+                  :value input-val
+                  :change [:todo/input] :key [:todo/add]}]
+         [:button {:width 250 :height 42 :aspect :button
+                   :click [:todo/add]} "Add"]
+         [:vbox {:overflow :scroll-y :aspect :muted}
+          (icollect [_ item (ipairs (or items []))]
+            [:text {:aspect :body} item.text])]]]])))
 ```
 
 `icollect` returns a list of frames that the framework flattens into the parent's children automatically. No wrapper element needed.
