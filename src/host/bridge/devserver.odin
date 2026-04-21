@@ -955,16 +955,23 @@ handle_put_aspects :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string)
 // --- Screenshot ---
 
 handle_screenshot :: proc(ch: ^Response_Channel) {
+	// Encode PNG in-memory (no temp file). Avoids the fixed-path
+	// TOCTOU where a local attacker could symlink-swap a predictable
+	// /tmp path between export and readback. Raylib returns a buffer
+	// we own via MemFree. respond_binary blocks until the response
+	// has been sent, so the buffer stays valid across the send and
+	// we free exactly once on return.
 	image := rl.LoadImageFromScreen()
 	defer rl.UnloadImage(image)
-	tmp_path: cstring = "/tmp/redin_screenshot.png"
-	rl.ExportImage(image, tmp_path)
-	data, read_err := os.read_entire_file_from_path("/tmp/redin_screenshot.png", context.allocator)
-	if read_err != nil {
+
+	size: i32 = 0
+	ptr := rl.ExportImageToMemory(image, ".png", &size)
+	if ptr == nil || size <= 0 {
 		respond_text(ch, 500, "Failed to capture screenshot")
 		return
 	}
-	defer delete(data)
+	defer rl.MemFree(ptr)
+
+	data := ([^]u8)(ptr)[:int(size)]
 	respond_binary(ch, "image/png", data)
-	os.remove("/tmp/redin_screenshot.png")
 }
