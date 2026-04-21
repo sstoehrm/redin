@@ -45,6 +45,7 @@ foreign luajit {
 	lua_tointeger :: proc(L: ^Lua_State, index: i32) -> i64 ---
 	lua_toboolean :: proc(L: ^Lua_State, index: i32) -> i32 ---
 	lua_tolstring :: proc(L: ^Lua_State, index: i32, len: ^uint) -> cstring ---
+	lua_topointer :: proc(L: ^Lua_State, index: i32) -> rawptr ---
 
 	lua_createtable :: proc(L: ^Lua_State, narr: i32, nrec: i32) ---
 	lua_settable    :: proc(L: ^Lua_State, index: i32) ---

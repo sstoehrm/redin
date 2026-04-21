@@ -68,7 +68,36 @@ json_key :: proc(b: ^strings.Builder, key: string) {
 // Lua value -> JSON
 // ---------------------------------------------------------------------------
 
+// Shared depth cap for encoder and decoder. 128 is well clear of any
+// legitimate data structure and far below the host's native stack
+// limit, so going deeper is either a cycle (encoder) or adversarial
+// input (decoder). Both sides bail with `null` / parse-failure rather
+// than recurse forever.
+MAX_JSON_DEPTH :: 128
+
+@(private = "file")
+Json_Encode_Ctx :: struct {
+	// Tables currently on the recursion path, by lua_topointer. A
+	// "path" set rather than a "seen" set — a DAG where the same
+	// sub-table appears under multiple keys should serialize each
+	// occurrence in full. Only cycles back into an ancestor are
+	// replaced with `null`.
+	path:  map[rawptr]bool,
+	depth: int,
+}
+
 lua_value_to_json :: proc(b: ^strings.Builder, L: ^Lua_State, index: i32) {
+	ctx: Json_Encode_Ctx
+	defer delete(ctx.path)
+	lua_value_to_json_inner(b, L, index, &ctx)
+}
+
+@(private = "file")
+lua_value_to_json_inner :: proc(b: ^strings.Builder, L: ^Lua_State, index: i32, ctx: ^Json_Encode_Ctx) {
+	if ctx.depth >= MAX_JSON_DEPTH {
+		json_null(b)
+		return
+	}
 	abs_idx := index < 0 ? lua_gettop(L) + index + 1 : index
 	t := lua_type(L, abs_idx)
 	switch t {
@@ -81,6 +110,19 @@ lua_value_to_json :: proc(b: ^strings.Builder, L: ^Lua_State, index: i32) {
 	case LUA_TSTRING:
 		json_string(b, string(lua_tostring_raw(L, abs_idx)))
 	case LUA_TTABLE:
+		ptr := lua_topointer(L, abs_idx)
+		if ptr in ctx.path {
+			// Cycle back to an ancestor — emit null and stop.
+			json_null(b)
+			return
+		}
+		ctx.path[ptr] = true
+		ctx.depth += 1
+		defer {
+			delete_key(&ctx.path, ptr)
+			ctx.depth -= 1
+		}
+
 		lua_rawgeti(L, abs_idx, 1)
 		is_array := !lua_isnil(L, -1)
 		lua_pop(L, 1)
@@ -91,7 +133,7 @@ lua_value_to_json :: proc(b: ^strings.Builder, L: ^Lua_State, index: i32) {
 			for i: i32 = 1; i <= n; i += 1 {
 				if i > 1 do json_comma(b)
 				lua_rawgeti(L, abs_idx, i)
-				lua_value_to_json(b, L, -1)
+				lua_value_to_json_inner(b, L, -1, ctx)
 				lua_pop(L, 1)
 			}
 			json_end_array(b)
@@ -104,7 +146,7 @@ lua_value_to_json :: proc(b: ^strings.Builder, L: ^Lua_State, index: i32) {
 					if !first do json_comma(b)
 					first = false
 					json_key(b, string(lua_tostring_raw(L, -2)))
-					lua_value_to_json(b, L, -1)
+					lua_value_to_json_inner(b, L, -1, ctx)
 				}
 				lua_pop(L, 1)
 			}
@@ -160,6 +202,12 @@ json_skip_ws :: proc(s: string, pos: ^int) {
 }
 
 json_decode_value :: proc(L: ^Lua_State, s: string, pos: ^int) -> bool {
+	return json_decode_value_at(L, s, pos, 0)
+}
+
+@(private = "file")
+json_decode_value_at :: proc(L: ^Lua_State, s: string, pos: ^int, depth: int) -> bool {
+	if depth > MAX_JSON_DEPTH do return false
 	json_skip_ws(s, pos)
 	if pos^ >= len(s) do return false
 	c := s[pos^]
@@ -167,9 +215,9 @@ json_decode_value :: proc(L: ^Lua_State, s: string, pos: ^int) -> bool {
 	case '"':
 		return json_decode_string(L, s, pos)
 	case '{':
-		return json_decode_object(L, s, pos)
+		return json_decode_object(L, s, pos, depth)
 	case '[':
-		return json_decode_array(L, s, pos)
+		return json_decode_array(L, s, pos, depth)
 	case 't':
 		return json_decode_literal(L, s, pos, "true")
 	case 'f':
@@ -274,7 +322,7 @@ json_decode_literal :: proc(L: ^Lua_State, s: string, pos: ^int, lit: string) ->
 }
 
 @(private = "file")
-json_decode_object :: proc(L: ^Lua_State, s: string, pos: ^int) -> bool {
+json_decode_object :: proc(L: ^Lua_State, s: string, pos: ^int, depth: int) -> bool {
 	if s[pos^] != '{' do return false
 	pos^ += 1
 	lua_newtable(L)
@@ -290,7 +338,7 @@ json_decode_object :: proc(L: ^Lua_State, s: string, pos: ^int) -> bool {
 		json_skip_ws(s, pos)
 		if pos^ >= len(s) || s[pos^] != ':' {lua_pop(L, 2);return false}
 		pos^ += 1
-		if !json_decode_value(L, s, pos) {lua_pop(L, 2);return false}
+		if !json_decode_value_at(L, s, pos, depth + 1) {lua_pop(L, 2);return false}
 		lua_settable(L, -3)
 		json_skip_ws(s, pos)
 		if pos^ >= len(s) {lua_pop(L, 1);return false}
@@ -304,7 +352,7 @@ json_decode_object :: proc(L: ^Lua_State, s: string, pos: ^int) -> bool {
 }
 
 @(private = "file")
-json_decode_array :: proc(L: ^Lua_State, s: string, pos: ^int) -> bool {
+json_decode_array :: proc(L: ^Lua_State, s: string, pos: ^int, depth: int) -> bool {
 	if s[pos^] != '[' do return false
 	pos^ += 1
 	lua_newtable(L)
@@ -315,7 +363,7 @@ json_decode_array :: proc(L: ^Lua_State, s: string, pos: ^int) -> bool {
 	}
 	idx: i32 = 1
 	for {
-		if !json_decode_value(L, s, pos) {lua_pop(L, 1);return false}
+		if !json_decode_value_at(L, s, pos, depth + 1) {lua_pop(L, 1);return false}
 		lua_rawseti(L, -2, idx)
 		idx += 1
 		json_skip_ws(s, pos)
