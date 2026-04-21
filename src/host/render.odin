@@ -674,8 +674,10 @@ node_preferred_height :: proc(
 		if available_width > 0 && len(n.content) > 0 && n.overflow != "scroll-x" {
 			f := font.get(font_name, font.style_from_weight(font.Font_Weight(font_weight)))
 			lines := text_pkg.compute_lines(n.content, f, font_size, 0, available_width)
-			defer delete(lines)
 			result = f32(len(lines)) * lh
+			text_pkg.cache_intrinsic(idx, available_width, result)
+			text_pkg.cache_lines(idx, available_width, lines)
+			return result
 		}
 		text_pkg.cache_intrinsic(idx, available_width, result)
 		return result
@@ -1084,13 +1086,27 @@ draw_text :: proc(idx: int, rect: rl.Rectangle, n: types.NodeText, theme: map[st
 	spacing: f32 = 0
 	lh := text_pkg.line_height(font_size, lh_ratio)
 
-	// Compute lines: wrap if not scroll-x
+	// Compute lines: wrap if not scroll-x. Reuse the cached wrap from
+	// layout when the width matches (typical NodeText path). Miss on
+	// scroll-x (cache isn't populated there) and on width mismatch
+	// (centering/anchoring), in which case we compute-and-discard
+	// rather than overwriting the cache — overwriting at a different
+	// width would thrash the layout-pass hit on the next frame.
 	max_width: f32 = 0
 	if n.overflow != "scroll-x" {
 		max_width = rect.width
 	}
-	lines := text_pkg.compute_lines(n.content, f, font_size, spacing, max_width)
-	defer delete(lines)
+	lines: []text_pkg.Text_Line
+	fresh: [dynamic]text_pkg.Text_Line
+	owns_lines := false
+	if cached, ok := text_pkg.lookup_lines(idx, max_width); ok {
+		lines = cached
+	} else {
+		fresh = text_pkg.compute_lines(n.content, f, font_size, spacing, max_width)
+		lines = fresh[:]
+		owns_lines = true
+	}
+	defer if owns_lines do delete(fresh)
 
 	scrollable_y := n.overflow == "scroll-y"
 	scrollable_x := n.overflow == "scroll-x"
