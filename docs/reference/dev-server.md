@@ -30,6 +30,12 @@ TOKEN=$(cat .redin-token)
 AUTH="Authorization: Bearer $TOKEN"
 ```
 
+### Runtime caveats
+
+**`--dev` trusts its filesystem.** The hot-reload watcher re-requires `src/runtime/*.fnl` whenever their mtimes advance. Anyone who can write to `src/runtime` gets code execution in the running process on the next tick. Don't run `--dev` from a world-writable directory, and don't leave `--dev` enabled in production.
+
+**The bearer token is a capability.** Any holder can dispatch events, which means any app-registered `:shell` or `:http` effect is one authenticated POST away from arbitrary shell execution or network access in the user's context. The token is 0600 and per-run, so this only matters if the token leaks — but plan accordingly when wiring `:shell` handlers.
+
 ---
 
 ## Read endpoints

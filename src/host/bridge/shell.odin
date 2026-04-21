@@ -170,43 +170,29 @@ execute_shell :: proc(req: Shell_Request) -> Shell_Response {
 	read_buf: [4096]u8
 	stdout_done, stderr_done: bool
 
+	// Blocking reads on child pipes. The previous version gated each
+	// read on os.pipe_has_data and fell through to os.read in both
+	// branches — same behaviour, extra syscall, and on macOS/BSD the
+	// has_data probe could false-negative and turn a quick command
+	// into a hang (the `else` branch still called os.read after the
+	// probe said "nothing there"). Direct blocking reads are simpler
+	// and work on all platforms: when the child exits and closes its
+	// pipe, os.read returns 0 / error and we mark that side done.
 	for !stdout_done || !stderr_done {
 		if !stdout_done {
-			has_data, _ := os.pipe_has_data(stdout_r)
-			if has_data {
-				n, err := os.read(stdout_r, read_buf[:])
-				if err == nil && n > 0 {
-					append(&stdout_buf, ..read_buf[:n])
-				} else {
-					stdout_done = true
-				}
+			n, err := os.read(stdout_r, read_buf[:])
+			if err != nil || n <= 0 {
+				stdout_done = true
 			} else {
-				// Check if pipe is closed (EOF)
-				n, err := os.read(stdout_r, read_buf[:])
-				if err != nil || n == 0 {
-					stdout_done = true
-				} else {
-					append(&stdout_buf, ..read_buf[:n])
-				}
+				append(&stdout_buf, ..read_buf[:n])
 			}
 		}
-
 		if !stderr_done {
-			has_data, _ := os.pipe_has_data(stderr_r)
-			if has_data {
-				n, err := os.read(stderr_r, read_buf[:])
-				if err == nil && n > 0 {
-					append(&stderr_buf, ..read_buf[:n])
-				} else {
-					stderr_done = true
-				}
+			n, err := os.read(stderr_r, read_buf[:])
+			if err != nil || n <= 0 {
+				stderr_done = true
 			} else {
-				n, err := os.read(stderr_r, read_buf[:])
-				if err != nil || n == 0 {
-					stderr_done = true
-				} else {
-					append(&stderr_buf, ..read_buf[:n])
-				}
+				append(&stderr_buf, ..read_buf[:n])
 			}
 		}
 	}
