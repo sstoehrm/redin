@@ -1114,6 +1114,28 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 	return types.NodeStack{}
 }
 
+// Reject any font-face path that could reach outside the project
+// directory. `rl.LoadFont` opens and parses the file immediately, so
+// an unvalidated path lets a theme source (including PUT /aspects)
+// pick any file on disk the redin user can read. Allowed shape:
+// relative path, no leading `/`, no `..` segments, no NUL bytes.
+// Resolution of the final path is still CWD-relative, matching the
+// documented `assets/Font.ttf` pattern in docs/reference/theme.md.
+@(private)
+validate_font_path :: proc(path: string) -> bool {
+	if len(path) == 0 do return false
+	if strings.contains_rune(path, 0) do return false
+	if path[0] == '/' do return false
+	// Segment-wise check so "foo..bar" (a legit filename that happens
+	// to contain two dots) doesn't trip the guard, but "../etc/passwd"
+	// does. Split on '/' only — Windows support would also need '\\'.
+	segments := strings.split(path, "/", context.temp_allocator)
+	for seg in segments {
+		if seg == ".." do return false
+	}
+	return true
+}
+
 load_font_faces :: proc(L: ^Lua_State, index: i32) {
 	lua_pushnil(L)
 	for lua_next(L, index) != 0 {
@@ -1131,6 +1153,11 @@ load_font_faces :: proc(L: ^Lua_State, index: i32) {
 				lua_getfield(L, variants_idx, sk.key)
 				if lua_isstring(L, -1) {
 					path := string(lua_tostring_raw(L, -1))
+					if !validate_font_path(path) {
+						fmt.eprintfln("Rejected font path (must be relative, no ..): %s", path)
+						lua_pop(L, 1)
+						continue
+					}
 					cpath := strings.clone_to_cstring(path, context.temp_allocator)
 					loaded := rl.LoadFont(cpath)
 					if loaded.texture.id > 0 {

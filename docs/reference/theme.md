@@ -56,6 +56,8 @@ Register custom fonts via a `:font-face` block in the theme. Each font name maps
 
 `:font-face` is not an aspect -- it's processed separately to load font files before the theme is applied. Font files are loaded via Raylib's `LoadFont`.
 
+Paths are validated before load: they must be relative (no leading `/`), contain no `..` segments, and no NUL bytes. Rejected paths are logged but don't abort the theme — the rest still applies. This matters because themes can come from `PUT /aspects` as well as Fennel code; the check keeps arbitrary filesystem paths out of the font loader regardless of source.
+
 ### Bundled fonts
 
 Three font families are bundled in the binary and available without `:font-face`:
