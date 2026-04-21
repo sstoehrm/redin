@@ -266,12 +266,34 @@ json_decode_string :: proc(L: ^Lua_State, s: string, pos: ^int) -> bool {
 			case 't':
 				strings.write_byte(&b, '\t')
 			case 'u':
-				if pos^ + 4 >= len(s) do return false
+				// Need four hex digits at s[pos^+1 .. pos^+5].
+				if pos^ + 5 > len(s) do return false
 				hex := s[pos^ + 1:pos^ + 5]
 				cp, ok := strconv.parse_uint(hex, 16)
 				if !ok do return false
 				pos^ += 4
-				buf, n := utf8.encode_rune(rune(cp))
+
+				// Surrogate pair handling per RFC 8259 §7. A high
+				// surrogate must be followed by `\uYYYY` where YYYY is
+				// a low surrogate; together they encode one codepoint
+				// outside the BMP. A lone low surrogate is invalid.
+				cp32 := u32(cp)
+				switch {
+				case cp32 >= 0xD800 && cp32 <= 0xDBFF:
+					// Need the trailing \uYYYY: 6 chars after current pos^.
+					if pos^ + 7 > len(s) do return false
+					if s[pos^ + 1] != '\\' || s[pos^ + 2] != 'u' do return false
+					lo, ok2 := strconv.parse_uint(s[pos^ + 3:pos^ + 7], 16)
+					if !ok2 do return false
+					lo32 := u32(lo)
+					if lo32 < 0xDC00 || lo32 > 0xDFFF do return false
+					cp32 = 0x10000 + ((cp32 - 0xD800) << 10) + (lo32 - 0xDC00)
+					pos^ += 6 // consume \uYYYY
+				case cp32 >= 0xDC00 && cp32 <= 0xDFFF:
+					// Lone low surrogate.
+					return false
+				}
+				buf, n := utf8.encode_rune(rune(cp32))
 				strings.write_bytes(&b, buf[:n])
 			case:
 				return false

@@ -533,7 +533,7 @@ process_request :: proc(ds: ^Dev_Server, req: ^Pending_Request) {
 			ds.shutdown_requested = true
 			respond_json_ok(ch)
 		} else if req.path == "/resize" {
-			handle_post_resize(ch, req.body)
+			handle_post_resize(ds, ch, req.body)
 		} else if req.path == "/maximize" {
 			rl.MaximizeWindow()
 			respond_json_ok(ch)
@@ -654,13 +654,21 @@ handle_get_state_path :: proc(ds: ^Dev_Server, ch: ^Response_Channel, dot_path: 
 		respond_json_error(ch, 500, `{"error":"lua error"}`)
 		return
 	}
+	// Cap segments and use rawget to skip any __index metamethods —
+	// an app that sets __index on a state table could otherwise be
+	// coaxed into executing Lua via crafted URL paths.
+	MAX_PATH_SEGMENTS :: 32
 	segments := strings.split(dot_path, ".")
 	defer delete(segments)
+	if len(segments) > MAX_PATH_SEGMENTS {
+		lua_pop(L, 1)
+		respond_json_error(ch, 400, `{"error":"path too deep"}`)
+		return
+	}
 	for seg in segments {
 		if lua_istable(L, -1) {
-			s := strings.clone_to_cstring(seg)
-			defer delete(s)
-			lua_getfield(L, -1, s)
+			lua_pushlstring(L, cstring(raw_data(seg)), uint(len(seg)))
+			lua_rawget(L, -2)
 			lua_remove(L, -2)
 		} else {
 			lua_pop(L, 1)
@@ -933,35 +941,35 @@ handle_get_window :: proc(ch: ^Response_Channel) {
 	respond_json(ch, strings.to_string(b))
 }
 
-handle_post_resize :: proc(ch: ^Response_Channel, body: string) {
-	// Parse body without leaving a value on the Lua stack — we only need width/height.
-	width, height := 0, 0
-	{
-		// Minimal hand-parse: { "width": N, "height": M }
-		b := body
-		find_int :: proc(b: string, key: string) -> int {
-			i := strings.index(b, key)
-			if i < 0 do return 0
-			rest := b[i + len(key):]
-			colon := strings.index_byte(rest, ':')
-			if colon < 0 do return 0
-			rest = strings.trim_left_space(rest[colon + 1:])
-			n := 0
-			for j := 0; j < len(rest); j += 1 {
-				c := rest[j]
-				if c >= '0' && c <= '9' {
-					n = n * 10 + int(c - '0')
-				} else if n > 0 {
-					break
-				} else if c != ' ' && c != '\t' {
-					break
-				}
-			}
-			return n
-		}
-		width = find_int(b, "\"width\"")
-		height = find_int(b, "\"height\"")
+handle_post_resize :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string) {
+	// Proper JSON decode. The previous `strings.index(body, "\"width\"")`
+	// approach parsed `{"widthless":999,"width":150}` as width=999 —
+	// still bounded by the 100..8192 clamp, but fragile enough that a
+	// future caller could be surprised.
+	L := ds.bridge.L
+	pos := 0
+	if !json_decode_value(L, body, &pos) {
+		respond_json_error(ch, 400, `{"error":"invalid JSON"}`)
+		return
 	}
+	defer lua_pop(L, 1)
+	if !lua_istable(L, -1) {
+		respond_json_error(ch, 400, `{"error":"body must be an object"}`)
+		return
+	}
+
+	// lua_rawget reads its key from top-of-stack; after push the table
+	// shifts to -2, so take the absolute index of the table first.
+	table_idx := lua_gettop(L)
+	read_int :: proc(L: ^Lua_State, table_idx: i32, key: string) -> int {
+		lua_pushlstring(L, cstring(raw_data(key)), uint(len(key)))
+		lua_rawget(L, table_idx)
+		defer lua_pop(L, 1)
+		return int(lua_tonumber(L, -1))
+	}
+
+	width := read_int(L, table_idx, "width")
+	height := read_int(L, table_idx, "height")
 	if width < 100 || height < 100 || width > 8192 || height > 8192 {
 		respond_json_error(ch, 400, `{"error":"width and height must be in [100, 8192]"}`)
 		return
