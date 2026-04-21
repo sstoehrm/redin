@@ -168,7 +168,14 @@ canvas.register("my-provider", my_provider)
      :dispatch-later {:ms 1000 :dispatch [:event/timeout]}}))
 ```
 
-## Dev server (--dev mode, port 8800)
+## Dev server (--dev mode, default port 8800)
+
+Authenticated: every non-OPTIONS request needs `Authorization: Bearer <token>`, where the token is written to `./.redin-token` on startup (0600, deleted on shutdown). The `Host` header must also be `localhost:<port>` or `127.0.0.1:<port>`. Bound port is in `./.redin-port`.
+
+```bash
+PORT=$(cat .redin-port); TOKEN=$(cat .redin-token)
+curl -H "Authorization: Bearer $TOKEN" http://localhost:$PORT/state
+```
 
 | Method | Path | Description |
 |--------|------|-------------|

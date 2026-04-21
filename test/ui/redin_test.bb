@@ -14,6 +14,12 @@
   (let [f (clojure.java.io/file ".redin-port")]
     (when (.isFile f) (some-> (slurp f) str/trim parse-long))))
 
+(defn read-token-file
+  "Read the dev server auth token from ./.redin-token if it exists."
+  []
+  (let [f (clojure.java.io/file ".redin-token")]
+    (when (.isFile f) (some-> (slurp f) str/trim))))
+
 ;; ---------------------------------------------------------------------------
 ;; Connection state
 ;; ---------------------------------------------------------------------------
@@ -23,18 +29,25 @@
 (defn- base-url []
   (or (:base-url @conn) "http://localhost:8800"))
 
+(defn- auth-headers []
+  (if-let [t (:token @conn)]
+    {"Authorization" (str "Bearer " t)}
+    {}))
+
 ;; ---------------------------------------------------------------------------
 ;; Connection management
 ;; ---------------------------------------------------------------------------
 
 (defn connect!
   "Open HTTP connection to the dev server.
-   Port defaults to ./.redin-port if present, else 8800."
+   Port defaults to ./.redin-port if present, else 8800.
+   Token defaults to ./.redin-token if present."
   ([] (connect! {}))
-  ([{:keys [host port] :or {host "localhost"}}]
+  ([{:keys [host port token] :or {host "localhost"}}]
    (let [port (or port (read-port-file) 8800)
+         token (or token (read-token-file))
          base (str "http://" host ":" port)]
-     (reset! conn {:base-url base})
+     (reset! conn {:base-url base :token token})
      @conn)))
 
 (defn disconnect!
@@ -48,20 +61,23 @@
 
 (defn- get-json [path]
   (let [resp (http/get (str (base-url) path)
-                       {:headers {"Accept" "application/json"}})]
+                       {:headers (merge {"Accept" "application/json"}
+                                        (auth-headers))})]
     (json/parse-string (:body resp) true)))
 
 (defn- post-json [path body]
   (let [resp (http/post (str (base-url) path)
-                        {:headers {"Content-Type" "application/json"
-                                   "Accept" "application/json"}
+                        {:headers (merge {"Content-Type" "application/json"
+                                          "Accept" "application/json"}
+                                         (auth-headers))
                          :body (json/generate-string body)})]
     (json/parse-string (:body resp) true)))
 
 (defn- put-json [path body]
   (let [resp (http/put (str (base-url) path)
-                       {:headers {"Content-Type" "application/json"
-                                  "Accept" "application/json"}
+                       {:headers (merge {"Content-Type" "application/json"
+                                         "Accept" "application/json"}
+                                        (auth-headers))
                         :body (json/generate-string body)})]
     (json/parse-string (:body resp) true)))
 
@@ -340,7 +356,8 @@
   "Save a screenshot to the given path."
   ([] (screenshot nil))
   ([path]
-   (let [resp (http/get (str (base-url) "/screenshot") {:as :bytes})]
+   (let [resp (http/get (str (base-url) "/screenshot")
+                        {:as :bytes :headers (auth-headers)})]
      (when path
        (with-open [out (java.io.FileOutputStream. path)]
          (.write out ^bytes (:body resp))))

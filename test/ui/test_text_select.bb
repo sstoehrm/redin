@@ -8,8 +8,10 @@
 ;; ---------------------------------------------------------------------------
 
 (defn get-selection []
-  (let [resp (http/get (str (base-url) "/selection")
-                       {:headers {"Accept" "application/json"}
+  (let [token (read-token-file)
+        resp (http/get (str (base-url) "/selection")
+                       {:headers (merge {"Accept" "application/json"}
+                                        (when token {"Authorization" (str "Bearer " token)}))
                         :throw false})]
     (when (= 200 (:status resp))
       (json/parse-string (:body resp) true))))

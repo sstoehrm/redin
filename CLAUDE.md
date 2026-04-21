@@ -17,7 +17,7 @@ These docs are the source of truth. When implementing, follow them exactly.
 
 - **Host/renderer:** Odin + Raylib
 - **Scripting:** LuaJIT (Lua 5.1 API) with Fennel compiled to Lua 5.1 target
-- **AI interface:** localhost HTTP dev server (`--dev` mode). Default port 8800; if busy, walks upward to the next free port. Actual port is written to `./.redin-port` and cleaned up on shutdown. Optional `--profile` flag adds a 5-phase frame-timing ring buffer exposed at `/profile` and an F3-togglable on-screen overlay.
+- **AI interface:** localhost HTTP dev server (`--dev` mode). Default port 8800; if busy, walks upward to the next free port. Bound port is written to `./.redin-port`; a per-run random auth token is written to `./.redin-token` (mode 0600). Both files are removed on shutdown. Every non-`OPTIONS` request must include `Authorization: Bearer <contents of .redin-token>`; the server also rejects requests whose `Host` header isn't `localhost:<port>` or `127.0.0.1:<port>` (DNS-rebinding defence). Optional `--profile` flag adds a 5-phase frame-timing ring buffer exposed at `/profile` and an F3-togglable on-screen overlay.
 
 ## Building
 
@@ -85,7 +85,7 @@ src/runtime/        Fennel runtime (loaded by bridge at startup)
 
 ## Dev server HTTP API
 
-Available when running with `--dev`. Listens on port 8800 by default; walks upward (8801, 8802, ...) if busy, and writes the bound port to `./.redin-port`. Used by UI tests and for interactive debugging.
+Available when running with `--dev`. Listens on port 8800 by default; walks upward (8801, 8802, ...) if busy, and writes the bound port to `./.redin-port`. A per-run random auth token is written to `./.redin-token` (0600). Every non-`OPTIONS` request must carry `Authorization: Bearer <token>`, and the `Host` header must be `localhost:<port>` / `127.0.0.1:<port>`.
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -100,7 +100,12 @@ Available when running with `--dev`. Listens on port 8800 by default; walks upwa
 | `POST` | `/shutdown` | Request graceful shutdown |
 | `PUT` | `/aspects` | Replace the theme map (JSON body) |
 
-Example: `curl http://localhost:$(cat .redin-port)/state/counter`
+Example:
+
+```bash
+curl -H "Authorization: Bearer $(cat .redin-token)" \
+     http://localhost:$(cat .redin-port)/state/counter
+```
 
 ## Key conventions
 

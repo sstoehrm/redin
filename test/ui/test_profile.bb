@@ -4,8 +4,10 @@
 
 (defn get-profile []
   (let [port (slurp ".redin-port")
+        token (read-token-file)
         resp (http/get (str "http://localhost:" (clojure.string/trim port) "/profile")
-                       {:throw false})]
+                       {:throw false
+                        :headers (when token {"Authorization" (str "Bearer " token)})})]
     {:status (:status resp)
      :body   (when (= 200 (:status resp)) (json/parse-string (:body resp) true))}))
 

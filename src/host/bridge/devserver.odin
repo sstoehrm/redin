@@ -1,6 +1,8 @@
 package bridge
 
 import "core:container/queue"
+import "core:crypto"
+import "core:encoding/hex"
 import "core:fmt"
 import "core:net"
 import "core:os"
@@ -39,6 +41,9 @@ Dev_Server :: struct {
 	bridge:             ^Bridge,
 	tcp_sock:           net.TCP_Socket,
 	port:               int,
+	auth_token:         string, // 64-char hex, required as Bearer on every non-OPTIONS request
+	expected_host_v4:   string, // "127.0.0.1:<port>"
+	expected_host_name: string, // "localhost:<port>"
 	server_thread:      ^thread.Thread,
 	incoming:           Sync_Queue,
 	event_queue:        [dynamic]types.InputEvent,
@@ -46,9 +51,14 @@ Dev_Server :: struct {
 	shutdown_requested: bool,
 }
 
-PORT_FILE :: ".redin-port"
-PORT_BASE :: 8800
+PORT_FILE  :: ".redin-port"
+TOKEN_FILE :: ".redin-token"
+PORT_BASE  :: 8800
 PORT_RANGE :: 100
+
+// Number of bytes of entropy for the auth token. 32 bytes (256 bits)
+// hex-encoded yields a 64-char token.
+AUTH_TOKEN_BYTES :: 32
 
 // --- Sync queue ---
 
@@ -97,13 +107,31 @@ devserver_init :: proc(ds: ^Dev_Server, b: ^Bridge) {
 	ds.tcp_sock = sock
 	ds.port = bound_port
 
+	// Generate a per-run auth token. Written to .redin-token with mode
+	// 0600 so only the running user can read it. Required as a Bearer
+	// header on every non-OPTIONS request — see should_authorize().
+	{
+		raw: [AUTH_TOKEN_BYTES]u8
+		crypto.rand_bytes(raw[:])
+		enc, _ := hex.encode(raw[:])
+		ds.auth_token = string(enc)
+	}
+
+	ds.expected_host_v4   = fmt.aprintf("127.0.0.1:%d", bound_port)
+	ds.expected_host_name = fmt.aprintf("localhost:%d", bound_port)
+
 	port_str := fmt.tprintf("%d", bound_port)
 	if err := os.write_entire_file(PORT_FILE, port_str); err != nil {
 		fmt.eprintfln("Warning: could not write %s: %v", PORT_FILE, err)
 	}
+	// 0600 — owner read+write only.
+	private_perm := os.Permissions{.Read_User, .Write_User}
+	if err := os.write_entire_file(TOKEN_FILE, transmute([]u8)ds.auth_token, private_perm); err != nil {
+		fmt.eprintfln("Warning: could not write %s: %v", TOKEN_FILE, err)
+	}
 
 	ds.server_thread = thread.create_and_start_with_poly_data(ds, server_thread_proc, context)
-	fmt.printfln("Dev server listening on http://localhost:%d", bound_port)
+	fmt.printfln("Dev server listening on http://localhost:%d (auth token in %s)", bound_port, TOKEN_FILE)
 }
 
 devserver_destroy :: proc(ds: ^Dev_Server) {
@@ -119,7 +147,11 @@ devserver_destroy :: proc(ds: ^Dev_Server) {
 		}
 		net.close(ds.tcp_sock)
 		os.remove(PORT_FILE)
+		os.remove(TOKEN_FILE)
 	}
+	if len(ds.auth_token) > 0 do delete(ds.auth_token)
+	if len(ds.expected_host_v4) > 0 do delete(ds.expected_host_v4)
+	if len(ds.expected_host_name) > 0 do delete(ds.expected_host_name)
 	queue.destroy(&ds.incoming.q)
 	delete(ds.event_queue)
 }
@@ -189,7 +221,7 @@ server_thread_proc :: proc(ds: ^Dev_Server) {
 		}
 
 		if too_large {
-			resp := "HTTP/1.1 413 Payload Too Large\r\n" + CORS_HEADERS + "\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+			resp := "HTTP/1.1 413 Payload Too Large\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
 			net.send_tcp(client, transmute([]u8)resp)
 			net.close(client)
 			continue
@@ -224,19 +256,47 @@ server_thread_proc :: proc(ds: ^Dev_Server) {
 			path = rest[:sp2] if sp2 >= 0 else rest
 		}
 
-		// Extract body (after double CRLF)
+		// Split headers / body. Headers are everything up to the first
+		// "\r\n\r\n" — the request line is included, which is fine:
+		// header lookup works with any leading line, and the second
+		// line onward are real headers.
+		headers := req_str
 		body := ""
 		if header_end := strings.index(req_str, "\r\n\r\n"); header_end >= 0 {
+			headers = req_str[:header_end]
 			body_start := header_end + 4
 			if body_start < total {
 				body = req_str[body_start:]
 			}
 		}
 
-		// Handle OPTIONS directly
+		// DNS-rebinding defence: require Host: localhost:<port> or
+		// 127.0.0.1:<port>. A malicious site resolving an attacker
+		// hostname to 127.0.0.1 would send a different Host header,
+		// so the request is rejected before the auth check runs.
+		host_ok := check_host_header(headers, ds.expected_host_v4, ds.expected_host_name)
+		if !host_ok {
+			deny := "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+			net.send_tcp(client, transmute([]u8)deny)
+			net.close(client)
+			continue
+		}
+
+		// OPTIONS: reject — we don't serve CORS preflight. With auth
+		// required and no Access-Control-Allow-Origin emitted, browsers
+		// can't make cross-origin calls regardless, so OPTIONS has no
+		// legitimate use here.
 		if method == "OPTIONS" {
-			options_resp := "HTTP/1.1 204 No Content\r\n" + CORS_HEADERS + "\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-			net.send_tcp(client, transmute([]u8)options_resp)
+			deny := "HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+			net.send_tcp(client, transmute([]u8)deny)
+			net.close(client)
+			continue
+		}
+
+		// Require a matching Bearer token on every non-OPTIONS request.
+		if !check_bearer_token(headers, ds.auth_token) {
+			deny := "HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Bearer\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+			net.send_tcp(client, transmute([]u8)deny)
 			net.close(client)
 			continue
 		}
@@ -261,8 +321,6 @@ server_thread_proc :: proc(ds: ^Dev_Server) {
 		// Send header line by line (no allocator needed)
 		send_str(client, "HTTP/1.1 ")
 		send_str(client, status_line)
-		send_str(client, "\r\n")
-		send_str(client, CORS_HEADERS)
 		send_str(client, "\r\nContent-Type: ")
 		send_str(client, ct)
 		send_str(client, "\r\nContent-Length: ")
@@ -305,7 +363,57 @@ int_to_str :: proc(buf: []u8, val: int) -> string {
 	return string(buf[i:])
 }
 
-CORS_HEADERS :: "Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, PUT, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type"
+// Case-insensitive lookup for a header value. Returns the trimmed
+// value, or "" if the header is absent.
+find_header_value :: proc(headers: string, name_lower: string) -> string {
+	lower := strings.to_lower(headers, context.temp_allocator)
+	needle := strings.concatenate({name_lower, ":"}, context.temp_allocator)
+	idx := strings.index(lower, needle)
+	if idx < 0 do return ""
+	// Require the header to start at a line boundary (or the very
+	// start of the buffer) so a body substring can't be mistaken for
+	// a header.
+	if idx > 0 && lower[idx - 1] != '\n' do return ""
+	rest := headers[idx + len(needle):]
+	end := strings.index_any(rest, "\r\n")
+	if end < 0 do end = len(rest)
+	return strings.trim_space(rest[:end])
+}
+
+// Verify the request's Host header matches one of the expected bound
+// values. Blocks DNS-rebinding attacks where a remote attacker has
+// their hostname resolve to 127.0.0.1.
+check_host_header :: proc(headers: string, expected_v4: string, expected_name: string) -> bool {
+	host := find_header_value(headers, "host")
+	if len(host) == 0 do return false
+	return host == expected_v4 || host == expected_name
+}
+
+// Constant-time compare of the Authorization bearer token against
+// the per-run secret. Returns true on exact match.
+check_bearer_token :: proc(headers: string, expected: string) -> bool {
+	if len(expected) == 0 do return false
+	auth := find_header_value(headers, "authorization")
+	prefix := "Bearer "
+	if !strings.has_prefix(auth, prefix) {
+		// Tolerate lowercase prefix (some clients).
+		if !strings.has_prefix(auth, "bearer ") do return false
+	}
+	got := auth[len(prefix):]
+	return constant_time_eq(got, expected)
+}
+
+// Length-independent equality check to avoid leaking token length via
+// timing. For 64-char hex this is overkill, but trivial to get right.
+@(private)
+constant_time_eq :: proc(a: string, b: string) -> bool {
+	if len(a) != len(b) do return false
+	diff: u8 = 0
+	for i in 0 ..< len(a) {
+		diff |= a[i] ~ b[i]
+	}
+	return diff == 0
+}
 
 find_content_length :: proc(headers: string) -> int {
 	lower := strings.to_lower(headers, context.temp_allocator)
@@ -331,6 +439,7 @@ status_text :: proc(code: int) -> string {
 	case 200: return "200 OK"
 	case 204: return "204 No Content"
 	case 400: return "400 Bad Request"
+	case 401: return "401 Unauthorized"
 	case 403: return "403 Forbidden"
 	case 404: return "404 Not Found"
 	case 405: return "405 Method Not Allowed"
