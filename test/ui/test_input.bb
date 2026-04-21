@@ -102,14 +102,65 @@
   (dispatch ["event/set-input" "direct value"])
   (wait-for (state= "input-value" "direct value") {:timeout 2000}))
 
+;; -- Multi-line input --
+;;
+;; The `:multiline-input` has :change but no :key, so Enter inserts a
+;; literal \n in the buffer (host/input/input.odin:293) and the
+;; resulting value arrives via the :change handler. These tests
+;; exercise that path via the dispatch API — no real typing is
+;; possible from the dev-server HTTP surface today.
+
+(deftest multiline-change-preserves-newlines
+  (dispatch ["event/reset"])
+  (wait-ms 200)
+  (dispatch ["event/multiline-change" {:value "line1\nline2"}])
+  (wait-for (state= "multiline-value" "line1\nline2") {:timeout 2000}))
+
+(deftest multiline-change-three-lines
+  (dispatch ["event/reset"])
+  (wait-ms 200)
+  (dispatch ["event/multiline-change" {:value "one\ntwo\nthree"}])
+  (wait-for (state= "multiline-value" "one\ntwo\nthree") {:timeout 2000}))
+
+(deftest multiline-change-renders-in-frame
+  (dispatch ["event/reset"])
+  (wait-ms 200)
+  (dispatch ["event/multiline-change" {:value "alpha\nbeta"}])
+  (wait-ms 200)
+  (let [el (find-element {:tag :input :id :multiline-input})
+        attrs (second el)]
+    (assert (= "alpha\nbeta" (:value attrs))
+            (str "Frame value should carry the newline, got: "
+                 (pr-str (:value attrs))))))
+
+(deftest multiline-change-empty-value
+  (dispatch ["event/reset"])
+  (wait-ms 200)
+  (dispatch ["event/multiline-change" {:value "something\nwith\nnewlines"}])
+  (wait-ms 200)
+  (dispatch ["event/multiline-change" {:value ""}])
+  (wait-for (state= "multiline-value" "") {:timeout 2000}))
+
+(deftest multiline-distinct-from-single-line
+  ;; Writes to one input must not leak into the other.
+  (dispatch ["event/reset"])
+  (wait-ms 200)
+  (dispatch ["event/input-change" {:value "single"}])
+  (dispatch ["event/multiline-change" {:value "multi\nline"}])
+  (wait-ms 200)
+  (assert-state "input-value" #(= % "single"))
+  (assert-state "multiline-value" #(= % "multi\nline")))
+
 ;; -- Reset --
 
 (deftest reset-clears-all
   (dispatch ["event/input-change" {:value "leftover"}])
+  (dispatch ["event/multiline-change" {:value "ml\nleftover"}])
   (wait-ms 100)
   (dispatch ["event/input-key" {:key "enter"}])
   (wait-ms 200)
   (dispatch ["event/reset"])
   (wait-for (state= "input-value" "") {:timeout 2000})
+  (assert-state "multiline-value" #(= % "") "Reset should clear multi-line input")
   (assert-state "submitted" #(= (count %) 0) "Reset should clear submitted list")
   (assert-state "last-key" nil? "Reset should clear last-key"))

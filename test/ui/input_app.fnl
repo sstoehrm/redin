@@ -13,6 +13,7 @@
 
 (dataflow.init
   {:input-value ""
+   :multiline-value ""
    :submitted []
    :last-key nil})
 
@@ -44,11 +45,23 @@
   (fn [db event]
     (assoc db :input-value (or (. event 2) ""))))
 
+;; Multi-line input: no :key handler, so Enter inserts \n in the buffer
+;; (host/input/input.odin:293) and the value comes back via :change.
+(reg-handler :event/multiline-change
+  (fn [db event]
+    (let [ctx (. event 2)]
+      (assoc db :multiline-value (or ctx.value "")))))
+
 (reg-handler :event/reset
   (fn [db event]
-    (assoc (assoc (assoc db :input-value "") :submitted []) :last-key nil)))
+    (-> db
+        (assoc :input-value "")
+        (assoc :multiline-value "")
+        (assoc :submitted [])
+        (assoc :last-key nil))))
 
 (reg-sub :input-value (fn [db] (get db :input-value "")))
+(reg-sub :multiline-value (fn [db] (get db :multiline-value "")))
 (reg-sub :submitted (fn [db] (get db :submitted [])))
 (reg-sub :last-key (fn [db] (get db :last-key)))
 (reg-sub :submitted-count (fn [db] (length (get db :submitted []))))
@@ -56,6 +69,7 @@
 (global main_view
   (fn []
     (let [input-val (subscribe :input-value)
+          multiline-val (subscribe :multiline-value)
           items (subscribe :submitted)
           count (subscribe :submitted-count)
           last-key (subscribe :last-key)]
@@ -68,6 +82,11 @@
        [:text {:id :current-value :aspect :body} (.. "value:" input-val)]
        [:text {:id :submitted-count :aspect :body} (.. "count:" (tostring count))]
        [:text {:id :last-key :aspect :body} (.. "key:" (or last-key ""))]
+       [:input {:id :multiline-input :aspect :input :width 250 :height 80
+                :value multiline-val
+                :placeholder "Multi-line (Enter for new line)..."
+                :change [:event/multiline-change]}]
+       [:text {:id :multiline-current :aspect :body} (.. "ml:" multiline-val)]
        [:vbox {:id :submitted-list}
         (icollect [i item (ipairs (or items []))]
           [:text {:id (.. :item- (tostring i)) :aspect :body} item])]])))
