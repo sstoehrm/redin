@@ -888,6 +888,7 @@ draw_input :: proc(
 	font_name := "sans"
 	font_weight: u8 = 0
 	lh_ratio: f32 = 0
+	text_align := types.Text_Align.Auto
 
 	if len(n.aspect) > 0 {
 		if t, ok := theme[n.aspect]; ok {
@@ -902,6 +903,7 @@ draw_input :: proc(
 			if len(t.font) > 0 do font_name = t.font
 			font_weight = t.weight
 			lh_ratio = t.line_height
+			text_align = t.text_align
 		}
 		if is_focused {
 			focus_key := strings.concatenate({n.aspect, "#focus"}, context.temp_allocator)
@@ -961,15 +963,24 @@ draw_input :: proc(
 	// Scissor clip to content area
 	rl.BeginScissorMode(i32(content_x), i32(content_y), i32(content_w), i32(content_h))
 
-	// Vertical alignment: centre single-line content inside the
-	// content area (common case — a chat input in a tall box looks
-	// off top-aligned). Multi-line (wrapped or explicit \n) top-
-	// aligns so editing and scrolling behave like any code/text
-	// editor.
+	// Vertical alignment, resolved from the theme's :text-align.
+	// Auto centres single-line content and top-aligns multi-line
+	// (common case — chat-style single inputs look off top-aligned,
+	// but multi-line editors want top-align so the insertion point
+	// stays put). Explicit :top / :center / :bottom override.
 	total_h := f32(len(lines)) * lh
 	y_offset: f32 = 0
-	if len(lines) <= 1 && total_h < content_h {
-		y_offset = (content_h - total_h) / 2
+	slack := content_h - total_h
+	if slack > 0 {
+		align := text_align
+		if align == .Auto {
+			align = .Top if len(lines) > 1 else .Center
+		}
+		switch align {
+		case .Auto, .Top: // Auto was resolved above; Top leaves y_offset at 0.
+		case .Center:     y_offset = slack / 2
+		case .Bottom:     y_offset = slack
+		}
 	}
 
 	// Draw selection highlight (behind text)

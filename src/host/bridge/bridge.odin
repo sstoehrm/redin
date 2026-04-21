@@ -1216,6 +1216,17 @@ lua_to_theme :: proc(L: ^Lua_State, index: i32) -> map[string]types.Theme {
 			}
 			lua_pop(L, 1)
 
+			lua_getfield(L, props_idx, "text-align")
+			if lua_isstring(L, -1) {
+				v := string(lua_tostring_raw(L, -1))
+				switch v {
+				case "top":    t.text_align = .Top
+				case "center": t.text_align = .Center
+				case "bottom": t.text_align = .Bottom
+				}
+			}
+			lua_pop(L, 1)
+
 			theme[key] = t
 		}
 		lua_pop(L, 1)
