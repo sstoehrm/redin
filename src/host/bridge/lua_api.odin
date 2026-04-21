@@ -52,6 +52,7 @@ foreign luajit {
 	lua_gettable    :: proc(L: ^Lua_State, index: i32) ---
 	lua_setfield    :: proc(L: ^Lua_State, index: i32, k: cstring) ---
 	lua_getfield    :: proc(L: ^Lua_State, index: i32, k: cstring) ---
+	lua_rawget      :: proc(L: ^Lua_State, index: i32) ---
 	lua_rawgeti     :: proc(L: ^Lua_State, index: i32, n: i32) ---
 	lua_rawseti     :: proc(L: ^Lua_State, index: i32, n: i32) ---
 	lua_next        :: proc(L: ^Lua_State, index: i32) -> i32 ---
