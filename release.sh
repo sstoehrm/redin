@@ -7,7 +7,7 @@ NAME="redin-${VERSION}-${PLATFORM}"
 DIST="dist/${NAME}"
 
 echo "Building redin ${VERSION}..."
-odin build src/host -out:build/redin
+odin build src/host -collection:lib=lib -out:build/redin
 echo "  Binary built: build/redin"
 
 echo "Packaging ${NAME}.tar.gz..."
