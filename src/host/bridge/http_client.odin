@@ -5,8 +5,8 @@ import "core:fmt"
 import "core:strings"
 import "core:sync"
 import "core:thread"
-import http "../../../lib/odin-http"
-import http_client "../../../lib/odin-http/client"
+import http "lib:odin-http"
+import http_client "lib:odin-http/client"
 
 Http_Request :: struct {
 	id:      string,
