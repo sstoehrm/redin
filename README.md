@@ -41,7 +41,7 @@ The CLI downloads a pinned redin binary into `.redin/` — no build tools needed
 sudo apt-get install -y luajit libluajit-5.1-dev libssl-dev
 
 # Build
-odin build src/host -collection:lib=lib -out:build/redin
+odin build src/host -collection:lib=lib -collection:luajit=vendor/luajit -out:build/redin
 
 # Run
 ./build/redin --dev examples/kitchen-sink.fnl
@@ -61,7 +61,7 @@ odin build src/host -collection:lib=lib -out:build/redin
 luajit test/lua/runner.lua test/lua/test_*.fnl
 
 # Build check
-odin build src/host -collection:lib=lib -out:build/redin
+odin build src/host -collection:lib=lib -collection:luajit=vendor/luajit -out:build/redin
 ```
 
 ## Project structure

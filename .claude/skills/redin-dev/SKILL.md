@@ -209,7 +209,7 @@ Uses `redin-test` framework: `get-frame`, `get-state`, `dispatch`, `find-element
 
 ### Build check
 ```bash
-odin build src/host -collection:lib=lib -out:build/redin
+odin build src/host -collection:lib=lib -collection:luajit=vendor/luajit -out:build/redin
 ```
 
 ## Adding a new node type (framework development)

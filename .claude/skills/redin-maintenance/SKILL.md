@@ -10,7 +10,7 @@ Use this skill to verify changes to the redin framework before committing.
 ## Build
 
 ```bash
-odin build src/host -collection:lib=lib -out:build/redin
+odin build src/host -collection:lib=lib -collection:luajit=vendor/luajit -out:build/redin
 ```
 
 Requires: `libssl-dev`, `libraylib-dev`, and the `lib/odin-http` git submodule (`git submodule update --init`).
@@ -75,7 +75,7 @@ To run all integration tests with memory tracking:
 
 After changes to the framework, verify in this order:
 
-1. **Build** — `odin build src/host -collection:lib=lib -out:build/redin`
+1. **Build** — `odin build src/host -collection:lib=lib -collection:luajit=vendor/luajit -out:build/redin`
 2. **Runtime tests** — `luajit test/lua/runner.lua test/lua/test_*.fnl`
 3. **Integration tests** — `bash test/ui/run-all.sh`
 4. **Visual check** — for rendering changes, take a screenshot via `GET /screenshot` on the dev server and inspect

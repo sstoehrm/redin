@@ -44,10 +44,10 @@ jobs:
         run: |
           luajit test/lua/runner.lua test/lua/test_*.fnl
           mkdir -p build
-          odin build src/host -collection:lib=lib -out:build/redin
+          odin build src/host -collection:lib=lib -collection:luajit=vendor/luajit -out:build/redin
 
       - name: Build release binary
-        run: odin build src/host -collection:lib=lib -out:build/redin -o:speed
+        run: odin build src/host -collection:lib=lib -collection:luajit=vendor/luajit -out:build/redin -o:speed
 
       - name: AOT compile Fennel runtime
         run: |
@@ -62,8 +62,12 @@ jobs:
           VERSION: ${{ steps.version.outputs.tag }}
         run: |
           cp build/redin dist/
+          mkdir -p dist/lib/odin-http
+          rsync -a --exclude=openssl/includes --exclude=docs --exclude=examples --exclude=comparisons --exclude=old_nbio lib/odin-http/ dist/lib/odin-http/
           mkdir -p dist/vendor/fennel
           cp vendor/fennel/fennel.lua dist/vendor/fennel/
+          mkdir -p dist/vendor/luajit/lib
+          cp vendor/luajit/lib/libluajit-5.1.a dist/vendor/luajit/lib/
           mkdir -p dist/docs/guide dist/docs/reference
           cp docs/core-api.md docs/app-api.md dist/docs/
           cp docs/guide/*.md dist/docs/guide/ 2>/dev/null || true
