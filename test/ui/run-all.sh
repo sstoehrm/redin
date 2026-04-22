@@ -54,9 +54,17 @@ for test_file in "$SCRIPT_DIR"/test_*.bb; do
 
   echo "=== $name ==="
 
+  # Optional sidecar: <app>_app.flags — whitespace-split extra host flags.
+  flags_file="$SCRIPT_DIR/${app_name}_app.flags"
+  extra_flags=()
+  if [ -f "$flags_file" ]; then
+    # shellcheck disable=SC2207
+    extra_flags=( $(cat "$flags_file") )
+  fi
+
   # Start dev server in background
   rm -f "$PORT_FILE"
-  "$BINARY" --dev "$app_file" &
+  "$BINARY" --dev "${extra_flags[@]}" "$app_file" &
   SERVER_PID=$!
 
   if ! wait_for_server; then
