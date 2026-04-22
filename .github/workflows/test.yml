@@ -36,4 +36,4 @@ jobs:
       - name: Build host
         run: |
           mkdir -p build
-          odin build src/host -collection:lib=lib -out:build/redin
+          odin build src/host -collection:lib=lib -collection:luajit=vendor/luajit -out:build/redin

@@ -22,7 +22,7 @@ These docs are the source of truth. When implementing, follow them exactly.
 ## Building
 
 ```bash
-odin build src/host -collection:lib=lib -out:build/redin
+odin build src/host -collection:lib=lib -collection:luajit=vendor/luajit -out:build/redin
 ```
 
 ## Running
@@ -43,7 +43,7 @@ luajit test/lua/runner.lua test/lua/test_*.fnl
 bb test/ui/run.bb test/ui/test_<name>.bb
 
 # Build check
-odin build src/host -collection:lib=lib -out:build/redin
+odin build src/host -collection:lib=lib -collection:luajit=vendor/luajit -out:build/redin
 ```
 
 ### UI test convention

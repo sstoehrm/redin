@@ -7,12 +7,12 @@ NAME="redin-${VERSION}-${PLATFORM}"
 DIST="dist/${NAME}"
 
 echo "Building redin ${VERSION}..."
-odin build src/host -collection:lib=lib -out:build/redin
+odin build src/host -collection:lib=lib -collection:luajit=vendor/luajit -out:build/redin
 echo "  Binary built: build/redin"
 
 echo "Packaging ${NAME}.tar.gz..."
 rm -rf dist
-mkdir -p "${DIST}/docs/guide" "${DIST}/docs/reference" "${DIST}/src/runtime" "${DIST}/vendor" "${DIST}/.claude/skills/redin-dev"
+mkdir -p "${DIST}/docs/guide" "${DIST}/docs/reference" "${DIST}/src/runtime" "${DIST}/vendor" "${DIST}/lib" "${DIST}/.claude/skills/redin-dev"
 
 # Binary
 cp build/redin "${DIST}/redin"
@@ -23,6 +23,16 @@ cp src/runtime/*.fnl "${DIST}/src/runtime/"
 # Vendor (fennel + luajit)
 cp -r vendor/fennel "${DIST}/vendor/fennel"
 cp -r vendor/luajit "${DIST}/vendor/luajit"
+
+# Lib (odin-http submodule, for upgrade-to-native builds).
+# Exclude Windows-only static libs and non-source dirs to keep the tarball small.
+rsync -a \
+  --exclude='openssl/includes' \
+  --exclude='docs' \
+  --exclude='examples' \
+  --exclude='comparisons' \
+  --exclude='old_nbio' \
+  lib/odin-http/ "${DIST}/lib/odin-http/"
 
 # Docs — API docs
 cp docs/core-api.md "${DIST}/docs/"

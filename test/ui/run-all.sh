@@ -18,7 +18,7 @@ TOTAL_FAILED=0
 
 # Build
 echo "=== Building redin ==="
-odin build "$ROOT_DIR/src/host" -collection:lib="$ROOT_DIR/lib" -out:"$BINARY"
+odin build "$ROOT_DIR/src/host" -collection:lib="$ROOT_DIR/lib" -collection:luajit="$ROOT_DIR/vendor/luajit" -out:"$BINARY"
 echo ""
 
 wait_for_server() {

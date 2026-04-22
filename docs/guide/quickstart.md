@@ -11,7 +11,7 @@ Get from zero to a running counter app in 5 minutes.
 ## Build the host
 
 ```sh
-odin build src/host -collection:lib=lib -out:build/redin
+odin build src/host -collection:lib=lib -collection:luajit=vendor/luajit -out:build/redin
 ```
 
 This produces the `build/redin` binary: the Odin/Raylib host that embeds LuaJIT and runs your Fennel scripts.

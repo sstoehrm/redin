@@ -1,6 +1,6 @@
 package bridge
 
-foreign import luajit "../../../vendor/luajit/lib/libluajit-5.1.a"
+foreign import luajit "luajit:lib/libluajit-5.1.a"
 
 Lua_State :: distinct rawptr
 Lua_CFunction :: #type proc "c" (L: ^Lua_State) -> i32
