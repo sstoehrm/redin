@@ -3,8 +3,35 @@
 # Each test_<name>.bb is paired with <name>_app.fnl.
 # The script builds redin, then for each pair starts the dev server,
 # waits for it to be ready, runs the test, and shuts it down.
+#
+# Flags:
+#   --headless   Run each app under xvfb-run so no real display is required.
+#                Useful for CI and SSH sessions. Requires `xvfb-run` on PATH.
 
 set -euo pipefail
+
+HEADLESS=0
+for arg in "$@"; do
+  case "$arg" in
+    --headless) HEADLESS=1 ;;
+    -h|--help)
+      sed -n '2,10p' "$0"
+      exit 0
+      ;;
+    *) echo "Unknown flag: $arg" >&2; exit 2 ;;
+  esac
+done
+
+LAUNCHER=()
+if [ "$HEADLESS" -eq 1 ]; then
+  if ! command -v xvfb-run >/dev/null 2>&1; then
+    echo "ERROR: --headless requires xvfb-run (apt-get install xvfb)" >&2
+    exit 2
+  fi
+  # -a: auto-assign a free display; -s: quiet, 24-bit RGB, 1280x800 (covers
+  # tests that resize up to 1280 wide).
+  LAUNCHER=(xvfb-run -a -s "-screen 0 1280x800x24")
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -64,7 +91,7 @@ for test_file in "$SCRIPT_DIR"/test_*.bb; do
 
   # Start dev server in background
   rm -f "$PORT_FILE"
-  "$BINARY" --dev "${extra_flags[@]}" "$app_file" &
+  "${LAUNCHER[@]}" "$BINARY" --dev "${extra_flags[@]}" "$app_file" &
   SERVER_PID=$!
 
   if ! wait_for_server; then
