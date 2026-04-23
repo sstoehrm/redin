@@ -12,13 +12,16 @@ echo "  Binary built: build/redin"
 
 echo "Packaging ${NAME}.tar.gz..."
 rm -rf dist
-mkdir -p "${DIST}/docs/guide" "${DIST}/docs/reference" "${DIST}/src/runtime" "${DIST}/vendor" "${DIST}/lib" "${DIST}/.claude/skills/redin-dev"
+mkdir -p "${DIST}/docs/guide" "${DIST}/docs/reference" "${DIST}/runtime" "${DIST}/vendor" "${DIST}/lib" "${DIST}/.claude/skills/redin-dev"
 
 # Binary
 cp build/redin "${DIST}/redin"
 
-# Runtime
-cp src/runtime/*.fnl "${DIST}/src/runtime/"
+# Runtime — AOT-compile Fennel to Lua 5.1 (matches release.yml).
+for f in src/runtime/*.fnl; do
+  name="$(basename "$f" .fnl)"
+  luajit vendor/fennel/fennel.lua --compile "$f" > "${DIST}/runtime/${name}.lua"
+done
 
 # Vendor (fennel + luajit)
 cp -r vendor/fennel "${DIST}/vendor/fennel"
