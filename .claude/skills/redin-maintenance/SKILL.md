@@ -32,10 +32,13 @@ Each component has a paired app + test:
 ### Run all
 
 ```bash
-bash test/ui/run-all.sh
+bash test/ui/run-all.sh              # windowed (needs a real display)
+bash test/ui/run-all.sh --headless   # under xvfb (CI, SSH, no display)
 ```
 
-Builds redin, then for each pair: starts dev server, runs tests, shuts down. Requires `bb` (Babashka).
+Builds redin, then for each pair: starts dev server, runs tests, shuts down. Requires `bb` (Babashka); `--headless` additionally requires `xvfb-run` (`apt-get install xvfb`).
+
+**Is headless equivalent to windowed?** For the current suite, yes. Our tests drive inputs via the dev server and assert on frame tree / state / event flow — all computed in Odin regardless of GPU. Under xvfb, OpenGL falls back to Mesa's software rasterizer (llvmpipe); pixel output differs slightly (font antialiasing, subpixel) but nothing we currently assert on cares. **Caveat**: any future pixel-diff / screenshot tests should be run under both modes and validated separately.
 
 ### Run one
 

@@ -203,6 +203,10 @@ Pattern: `(local t {}) (fn t.test-name [] (assert ...)) t`
 ```bash
 ./build/redin --dev test/ui/<component>_app.fnl &
 bb test/ui/run.bb test/ui/test_<component>.bb
+
+# Or run the whole suite:
+bash test/ui/run-all.sh             # windowed
+bash test/ui/run-all.sh --headless  # xvfb-run, for CI / no display (requires xvfb)
 ```
 
 Uses `redin-test` framework: `get-frame`, `get-state`, `dispatch`, `find-element`, `assert-state`, `wait-for`.
