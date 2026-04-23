@@ -142,3 +142,16 @@ gh run watch <run-id>
 ```
 
 The workflow's `release` job runs only when `version` is non-empty, so an empty dispatch just builds a dev artifact without publishing. The local `./release.sh` script builds a tarball manually for testing but is not the canonical release path.
+
+## Pre-publish native-build smoke check
+
+The release workflow runs `scripts/smoke-native.sh <tarball>` after packaging and before publishing. It extracts the tarball into a temp project, replays what `redin-cli upgrade-to-native` would do (copy src/host + lib/ + vendor/luajit/ into `native/`), runs `./native/build.sh`, launches the resulting binary under `--dev`, and asserts `/frames` contains a sentinel string from `main.fnl`. The sentinel check is what catches broken runtime lookup — just polling `/state` returns 200 even when Fennel fails to load.
+
+Run it locally before a release:
+
+```bash
+./release.sh v0.1.X-test
+bash scripts/smoke-native.sh dist/redin-v0.1.X-test-linux-amd64.tar.gz
+```
+
+Note: keep the `build.sh` template in the smoke script aligned with redin-cli's `build-sh` constant in `redin-cli/redin-cli`. Whenever one changes, update the other in the same PR.
