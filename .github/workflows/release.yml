@@ -33,7 +33,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y luajit libssl-dev \
             libgl1-mesa-dev libx11-dev libxrandr-dev libxi-dev \
-            libxcursor-dev libxinerama-dev
+            libxcursor-dev libxinerama-dev \
+            xvfb
 
       - name: Install Odin
         uses: laytan/setup-odin@v2
@@ -76,6 +77,14 @@ jobs:
           cp .claude/skills/redin-dev/SKILL.md dist/skills/redin-dev/
           [ -f LICENSE ] && cp LICENSE dist/ || true
           tar czf "redin-${VERSION}-linux-amd64.tar.gz" -C dist .
+
+      - name: Smoke check (native build from tarball)
+        # Simulates redin-cli's upgrade-to-native against the freshly built
+        # tarball and asserts the resulting native binary loads the Fennel
+        # runtime. Blocks publish if the tarball is broken downstream.
+        env:
+          VERSION: ${{ steps.version.outputs.tag }}
+        run: bash scripts/smoke-native.sh "redin-${VERSION}-linux-amd64.tar.gz"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

@@ -1909,9 +1909,20 @@ string_to_key :: proc(name: string) -> rl.KeyboardKey {
 }
 
 setup_lua_paths :: proc(L: ^Lua_State) {
+	// Search paths, in priority order:
+	//   <exe>/...          — pinned release (binary sits next to vendor/+runtime/)
+	//   <exe>/../.redin/... — redin-cli's upgrade-to-native layout (build/redin's
+	//                         sibling is .redin/, which has vendor/ + runtime/)
+	//   vendor/fennel/...  — cwd-relative (running from the redin repo in dev)
 	code := `
 		local d = _redin_exe_dir
-		package.path = d .. "/vendor/fennel/?.lua;" .. d .. "/runtime/?.lua;vendor/fennel/?.lua;" .. package.path
+		package.path =
+		  d .. "/vendor/fennel/?.lua;" ..
+		  d .. "/runtime/?.lua;" ..
+		  d .. "/../.redin/vendor/fennel/?.lua;" ..
+		  d .. "/../.redin/runtime/?.lua;" ..
+		  "vendor/fennel/?.lua;" ..
+		  package.path
 	`
 	luaL_dostring(L, cstring(raw_data(code)))
 }
@@ -1921,11 +1932,16 @@ load_fennel :: proc(L: ^Lua_State) {
 		local d = _redin_exe_dir
 		package.loaded["fennel"] = {}
 		local ok = pcall(dofile, d .. "/vendor/fennel/fennel.lua")
+		if not ok then ok = pcall(dofile, d .. "/../.redin/vendor/fennel/fennel.lua") end
 		if not ok then pcall(dofile, "vendor/fennel/fennel.lua") end
 		package.loaded["fennel"] = nil
 		local fennel = require("fennel")
 		table.insert(package.loaders, fennel.searcher)
-		fennel.path = d .. "/runtime/?.fnl;src/runtime/?.fnl;" .. fennel.path
+		fennel.path =
+		  d .. "/runtime/?.fnl;" ..
+		  d .. "/../.redin/runtime/?.fnl;" ..
+		  "src/runtime/?.fnl;" ..
+		  fennel.path
 	`
 	if luaL_dostring(L, cstring(raw_data(code))) != 0 {
 		msg := lua_tostring_raw(L, -1)
