@@ -40,12 +40,14 @@ foreign luajit {
 	lua_pushstring    :: proc(L: ^Lua_State, s: cstring) ---
 	lua_pushboolean   :: proc(L: ^Lua_State, b: i32) ---
 	lua_pushcclosure  :: proc(L: ^Lua_State, f: Lua_CFunction, n: i32) ---
+	lua_pushlightuserdata :: proc(L: ^Lua_State, p: rawptr) ---
 
-	lua_tonumber  :: proc(L: ^Lua_State, index: i32) -> f64 ---
-	lua_tointeger :: proc(L: ^Lua_State, index: i32) -> i64 ---
-	lua_toboolean :: proc(L: ^Lua_State, index: i32) -> i32 ---
-	lua_tolstring :: proc(L: ^Lua_State, index: i32, len: ^uint) -> cstring ---
-	lua_topointer :: proc(L: ^Lua_State, index: i32) -> rawptr ---
+	lua_tonumber   :: proc(L: ^Lua_State, index: i32) -> f64 ---
+	lua_tointeger  :: proc(L: ^Lua_State, index: i32) -> i64 ---
+	lua_toboolean  :: proc(L: ^Lua_State, index: i32) -> i32 ---
+	lua_tolstring  :: proc(L: ^Lua_State, index: i32, len: ^uint) -> cstring ---
+	lua_topointer  :: proc(L: ^Lua_State, index: i32) -> rawptr ---
+	lua_touserdata :: proc(L: ^Lua_State, index: i32) -> rawptr ---
 
 	lua_createtable :: proc(L: ^Lua_State, narr: i32, nrec: i32) ---
 	lua_settable    :: proc(L: ^Lua_State, index: i32) ---
@@ -102,6 +104,13 @@ lua_isstring :: #force_inline proc "contextless" (L: ^Lua_State, index: i32) -> 
 
 lua_isnumber :: #force_inline proc "contextless" (L: ^Lua_State, index: i32) -> bool {
 	return lua_type(L, index) == LUA_TNUMBER
+}
+
+// Lua 5.1 / LuaJIT: upvalue indices are encoded as offsets from
+// LUA_GLOBALSINDEX. Used by closure-based cfuncs to access values
+// captured at lua_pushcclosure time.
+lua_upvalueindex :: #force_inline proc "contextless" (i: i32) -> i32 {
+	return LUA_GLOBALSINDEX - i
 }
 
 luaL_dofile :: proc(L: ^Lua_State, filename: cstring) -> i32 {

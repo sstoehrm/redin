@@ -48,19 +48,19 @@ init :: proc(b: ^Bridge, dev_mode: bool) {
 
 	// Create redin global table with host functions
 	lua_newtable(b.L)
-	register_cfunc(b.L, "push", redin_push)
-	register_cfunc(b.L, "set_theme", redin_set_theme)
-	register_cfunc(b.L, "log", redin_log)
-	register_cfunc(b.L, "now", redin_now)
-	register_cfunc(b.L, "measure_text", redin_measure_text)
-	register_cfunc(b.L, "http", redin_http)
-	register_cfunc(b.L, "json_encode", redin_json_encode)
-	register_cfunc(b.L, "json_decode", redin_json_decode)
-	register_cfunc(b.L, "canvas_register", redin_canvas_register)
-	register_cfunc(b.L, "canvas_unregister", redin_canvas_unregister)
-	register_cfunc(b.L, "key_down", redin_key_down)
-	register_cfunc(b.L, "key_pressed", redin_key_pressed)
-	register_cfunc(b.L, "shell", redin_shell)
+	register_cfunc_init(b.L, "push", redin_push)
+	register_cfunc_init(b.L, "set_theme", redin_set_theme)
+	register_cfunc_init(b.L, "log", redin_log)
+	register_cfunc_init(b.L, "now", redin_now)
+	register_cfunc_init(b.L, "measure_text", redin_measure_text)
+	register_cfunc_init(b.L, "http", redin_http)
+	register_cfunc_init(b.L, "json_encode", redin_json_encode)
+	register_cfunc_init(b.L, "json_decode", redin_json_decode)
+	register_cfunc_init(b.L, "canvas_register", redin_canvas_register)
+	register_cfunc_init(b.L, "canvas_unregister", redin_canvas_unregister)
+	register_cfunc_init(b.L, "key_down", redin_key_down)
+	register_cfunc_init(b.L, "key_pressed", redin_key_pressed)
+	register_cfunc_init(b.L, "shell", redin_shell)
 	lua_setglobal(b.L, "redin")
 
 	// Also expose flat globals for the effect system
@@ -68,6 +68,11 @@ init :: proc(b: ^Bridge, dev_mode: bool) {
 	lua_setglobal(b.L, "redin_http")
 	lua_pushcfunction(b.L, redin_shell)
 	lua_setglobal(b.L, "redin_shell")
+
+	// Apply any user cfunc registrations made before bridge.init (the
+	// natural pattern: app.odin calls bridge.register_cfunc before
+	// redin.run, which is when bridge.init runs).
+	flush_pending_cfuncs()
 
 	load_fennel(b.L)
 	load_runtime(b.L)
@@ -1645,7 +1650,13 @@ parse_fraction :: proc(s: string) -> types.ViewportValue {
 // Helpers
 // ---------------------------------------------------------------------------
 
-register_cfunc :: proc(L: ^Lua_State, name: cstring, f: Lua_CFunction) {
+// Init-only helper: assumes the redin table is at stack -2 and adds a
+// cfield to it. The public, post-init API for adding cfuncs to the redin
+// table lives in api.odin (`register_cfunc` / `register_cfunc_raw`); that
+// version locates the redin table via lua_getglobal so it works after init
+// returns.
+@(private)
+register_cfunc_init :: proc(L: ^Lua_State, name: cstring, f: Lua_CFunction) {
 	lua_pushcfunction(L, f)
 	lua_setfield(L, -2, name)
 }
