@@ -22,7 +22,7 @@ These docs are the source of truth. When implementing, follow them exactly.
 ## Building
 
 ```bash
-odin build src/host -collection:lib=lib -collection:luajit=vendor/luajit -out:build/redin
+odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit -out:build/redin
 ```
 
 ## Running
@@ -43,7 +43,7 @@ luajit test/lua/runner.lua test/lua/test_*.fnl
 bb test/ui/run.bb test/ui/test_<name>.bb
 
 # Build check
-odin build src/host -collection:lib=lib -collection:luajit=vendor/luajit -out:build/redin
+odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit -out:build/redin
 ```
 
 ### UI test convention
@@ -57,8 +57,10 @@ Existing UI tests: `test_smoke` (basic dispatch/state), `test_input` (input chan
 ## Architecture
 
 ```
-src/host/           Odin host
-  main.odin         Entry point, main loop
+src/cmd/redin/      Thin CLI entry (package main)
+  main.odin         Arg parsing, --track-mem setup, calls redin.run
+src/redin/          Importable framework package (package redin)
+  runtime.odin      Public API: set_window/set_size/set_title, on_* hooks, run, request_shutdown
   render.odin       Raylib renderer (node_rects for hit testing)
   bridge/           Lua/Fennel bridge package
     bridge.odin     Bridge struct, init/destroy, host callbacks, Lua<->Odin conversion
