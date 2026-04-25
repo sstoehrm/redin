@@ -60,7 +60,7 @@ git submodule update --init --recursive
 echo ""
 echo "Building redin..."
 mkdir -p build
-odin build src/host -collection:lib=lib -collection:luajit=vendor/luajit -out:build/redin
+odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit -out:build/redin
 
 echo ""
 echo "=== Setup complete ==="

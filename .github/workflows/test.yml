@@ -31,9 +31,9 @@ jobs:
         run: luajit test/lua/runner.lua test/lua/test_*.fnl
 
       - name: Run Odin tests
-        run: odin test src/host/parser
+        run: odin test src/redin/parser
 
-      - name: Build host
+      - name: Build redin
         run: |
           mkdir -p build
-          odin build src/host -collection:lib=lib -collection:luajit=vendor/luajit -out:build/redin
+          odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit -out:build/redin

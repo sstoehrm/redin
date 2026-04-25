@@ -41,7 +41,7 @@ The CLI downloads a pinned redin binary into `.redin/` — no build tools needed
 sudo apt-get install -y luajit libluajit-5.1-dev libssl-dev
 
 # Build
-odin build src/host -collection:lib=lib -collection:luajit=vendor/luajit -out:build/redin
+odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit -out:build/redin
 
 # Run
 ./build/redin --dev examples/kitchen-sink.fnl
@@ -61,14 +61,16 @@ odin build src/host -collection:lib=lib -collection:luajit=vendor/luajit -out:bu
 luajit test/lua/runner.lua test/lua/test_*.fnl
 
 # Build check
-odin build src/host -collection:lib=lib -collection:luajit=vendor/luajit -out:build/redin
+odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit -out:build/redin
 ```
 
 ## Project structure
 
 ```
-src/host/                Odin host application
-  main.odin              Entry point and main loop
+src/cmd/redin/           Thin CLI entry (package main)
+  main.odin              Arg parsing, calls redin.run
+src/redin/               Importable framework (package redin)
+  runtime.odin           Public API + main loop
   render.odin            Raylib renderer
   bridge/                Lua/Fennel bridge
   canvas/                Canvas provider system

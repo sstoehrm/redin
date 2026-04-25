@@ -1,6 +1,6 @@
-# Binaries
-redin
-redin-debug
+# Binaries (root-anchored so src/cmd/redin/ isn't shadowed)
+/redin
+/redin-debug
 
 # Test binaries
 test/*/server_test

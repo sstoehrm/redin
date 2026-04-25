@@ -30,36 +30,48 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
 PROJECT="$WORK/app"
-mkdir -p "$PROJECT/.redin" "$PROJECT/native"
+mkdir -p "$PROJECT/.redin"
 
 echo "=== 1/5 extracting release tarball into .redin/ ==="
 tar xzf "$TARBALL" -C "$PROJECT/.redin" --strip-components=1
 
-# --- Simulate redin-cli upgrade-to-native --------------------------------
-# The real CLI fetches src/host/ from a published source tarball. Pre-
-# publish we use the current checkout instead — that's actually stronger,
-# since it tests exactly the commit being released.
-echo "=== 2/5 replaying upgrade-to-native (src/host, lib, vendor/luajit) ==="
-cp -r "$REPO_ROOT/src/host/." "$PROJECT/native/"
-cp -r "$PROJECT/.redin/lib"    "$PROJECT/native/lib"
-mkdir -p "$PROJECT/native/vendor/luajit"
-cp -r "$PROJECT/.redin/vendor/luajit/lib" "$PROJECT/native/vendor/luajit/"
+# --- Simulate redin-cli new-fnl --native (RFC #79) -----------------------
+# The CLI will fetch redin source from a published source tarball into
+# .redin/src/redin/. Pre-publish we copy from the current checkout — that's
+# actually stronger, since it tests exactly the commit being released.
+echo "=== 2/5 staging .redin/src/redin/ + project app.odin + build.sh ==="
+mkdir -p "$PROJECT/.redin/src/redin"
+cp -r "$REPO_ROOT/src/redin/." "$PROJECT/.redin/src/redin/"
 
-# build.sh template — keep in sync with redin-cli's (redin-cli:build-sh).
-cat > "$PROJECT/native/build.sh" <<'BUILD_SH'
+# Minimal user-owned app.odin. Mirrors what redin-cli new-fnl --native
+# scaffolds (RFC #79 PR 3).
+cat > "$PROJECT/app.odin" <<'APP_ODIN'
+package main
+
+import redin "./.redin/src/redin"
+
+main :: proc() {
+	cfg: redin.Config
+	cfg.dev = true
+	cfg.app = "main.fnl"
+	redin.run(cfg)
+}
+APP_ODIN
+
+# Project-root build.sh template — also mirrors PR 3's scaffold.
+cat > "$PROJECT/build.sh" <<'BUILD_SH'
 #!/usr/bin/env bash
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-mkdir -p "$PROJECT_DIR/build"
+mkdir -p "$SCRIPT_DIR/build"
 odin build "$SCRIPT_DIR" \
-  -collection:lib="$SCRIPT_DIR/lib" \
-  -collection:luajit="$SCRIPT_DIR/vendor/luajit" \
-  -out:"$PROJECT_DIR/build/redin"
+  -collection:lib="$SCRIPT_DIR/.redin/lib" \
+  -collection:luajit="$SCRIPT_DIR/.redin/vendor/luajit" \
+  -out:"$SCRIPT_DIR/build/redin"
 BUILD_SH
-chmod +x "$PROJECT/native/build.sh"
+chmod +x "$PROJECT/build.sh"
 
-echo "=== 3/5 ./native/build.sh ==="
-(cd "$PROJECT/native" && ./build.sh)
+echo "=== 3/5 ./build.sh (project root) ==="
+(cd "$PROJECT" && ./build.sh)
 
 cat > "$PROJECT/main.fnl" <<'FNL'
 ;; The smoke check asserts /frames contains this sentinel, which only
