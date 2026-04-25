@@ -10,8 +10,10 @@ Use this skill to verify changes to the redin framework before committing.
 ## Build
 
 ```bash
-odin build src/host -collection:lib=lib -collection:luajit=vendor/luajit -out:build/redin
+odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit -out:build/redin
 ```
+
+`src/cmd/redin/` is the thin CLI entry point (`package main`, arg parsing + memory tracking + `redin.run` call). The framework itself lives in `src/redin/` (`package redin`).
 
 Requires: `libssl-dev`, `libraylib-dev`, and the `lib/odin-http` git submodule (`git submodule update --init`).
 
@@ -78,7 +80,7 @@ To run all integration tests with memory tracking:
 
 After changes to the framework, verify in this order:
 
-1. **Build** — `odin build src/host -collection:lib=lib -collection:luajit=vendor/luajit -out:build/redin`
+1. **Build** — `odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit -out:build/redin`
 2. **Runtime tests** — `luajit test/lua/runner.lua test/lua/test_*.fnl`
 3. **Integration tests** — `bash test/ui/run-all.sh`
 4. **Visual check** — for rendering changes, take a screenshot via `GET /screenshot` on the dev server and inspect
@@ -115,11 +117,14 @@ If a contract was described incorrectly (not just incompletely), fix the doc eve
 | Change area | Build | Runtime tests | UI tests | Memory check |
 |---|---|---|---|---|
 | `src/runtime/` (Fennel) | - | Yes | Yes | - |
-| `src/host/render.odin` | Yes | - | Yes (visual) | - |
-| `src/host/bridge/` | Yes | - | Yes | Yes |
-| `src/host/input/` | Yes | - | Yes | - |
-| `src/host/types/` | Yes | - | Yes | - |
-| `src/host/text/` | Yes | - | Yes (multiline) | - |
+| `src/redin/runtime.odin` (public API, run loop) | Yes | - | Yes | - |
+| `src/redin/render.odin` | Yes | - | Yes (visual) | - |
+| `src/redin/bridge/` | Yes | - | Yes | Yes |
+| `src/redin/input/` | Yes | - | Yes | - |
+| `src/redin/types/` | Yes | - | Yes | - |
+| `src/redin/text/` | Yes | - | Yes (multiline) | - |
+| `src/redin/canvas/` | Yes | - | Yes (canvas) | - |
+| `src/cmd/redin/` (CLI flags, --track-mem) | Yes | - | - | Yes |
 
 ## Cutting a release
 
@@ -145,7 +150,13 @@ The workflow's `release` job runs only when `version` is non-empty, so an empty 
 
 ## Pre-publish native-build smoke check
 
-The release workflow runs `scripts/smoke-native.sh <tarball>` after packaging and before publishing. It extracts the tarball into a temp project, replays what `redin-cli upgrade-to-native` would do (copy src/host + lib/ + vendor/luajit/ into `native/`), runs `./native/build.sh`, launches the resulting binary under `--dev`, and asserts `/frames` contains a sentinel string from `main.fnl`. The sentinel check is what catches broken runtime lookup — just polling `/state` returns 200 even when Fennel fails to load.
+The release workflow runs `scripts/smoke-native.sh <tarball>` after packaging and before publishing. It exercises the new RFC #79 native flow against the freshly-built tarball:
+
+1. Extract the binary tarball into `<tmp>/.redin/`.
+2. Copy the local checkout's `src/redin/.` into `<tmp>/.redin/src/redin/` (simulates redin-cli's `fetch-source`).
+3. Drop a project-root `app.odin` (with `import redin "./.redin/src/redin"`) and `build.sh`.
+4. Run `./build.sh` from project root (uses `-collection:lib=.redin/lib -collection:luajit=.redin/vendor/luajit`).
+5. Launch the resulting binary under `--dev`, assert `/frames` contains a sentinel string from `main.fnl`. The sentinel check is what catches broken runtime lookup — just polling `/state` returns 200 even when Fennel fails to load.
 
 Run it locally before a release:
 
@@ -154,4 +165,4 @@ Run it locally before a release:
 bash scripts/smoke-native.sh dist/redin-v0.1.X-test-linux-amd64.tar.gz
 ```
 
-Note: keep the `build.sh` template in the smoke script aligned with redin-cli's `build-sh` constant in `redin-cli/redin-cli`. Whenever one changes, update the other in the same PR.
+Note: keep the `app.odin` and `build.sh` templates inline in the smoke script aligned with redin-cli's `app-odin-fnl` and `build-sh-native` constants in `redin-cli/redin-cli`. Whenever one changes, update the other in the same PR (or in a coordinated pair of PRs).

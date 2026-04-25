@@ -10,8 +10,11 @@ Use this skill when building redin apps (Fennel or Lua) or extending the framewo
 ## Architecture
 
 ```
-src/host/           Odin host (renderer, bridge, input)
-  main.odin         Entry point, main loop
+src/cmd/redin/      Thin CLI entry (package main)
+  main.odin         Arg parsing, --track-mem setup, calls redin.run
+src/redin/          Importable framework (package redin)
+  runtime.odin      Public API: set_window/set_size/set_title, on_init/
+                    on_input/on_frame/on_shutdown hooks, run, request_shutdown
   render.odin       Raylib renderer, layout (draw_box, draw_text, viewport)
   bridge/           Lua/Fennel bridge
     bridge.odin     Host callbacks, Lua<->Odin conversion, canvas draw execution
@@ -213,22 +216,22 @@ Uses `redin-test` framework: `get-frame`, `get-state`, `dispatch`, `find-element
 
 ### Build check
 ```bash
-odin build src/host -collection:lib=lib -collection:luajit=vendor/luajit -out:build/redin
+odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit -out:build/redin
 ```
 
 ## Adding a new node type (framework development)
 
-1. `src/host/types/view_tree.odin` — add struct + union variant
-2. `src/host/bridge/bridge.odin` — add parsing case in `lua_read_node`
-3. `src/host/render.odin` — add rendering case in `render_node`
-4. `src/host/render.odin` — add `node_preferred_width` / `node_preferred_height` cases
+1. `src/redin/types/view_tree.odin` — add struct + union variant
+2. `src/redin/bridge/bridge.odin` — add parsing case in `lua_read_node`
+3. `src/redin/render.odin` — add rendering case in `render_node`
+4. `src/redin/render.odin` — add `node_preferred_width` / `node_preferred_height` cases
 5. `src/runtime/theme.fnl` — add to consumption table if it uses aspects
 6. `test/ui/<component>_app.fnl` + `test/ui/test_<component>.bb` — UI test
 
 ## Adding a host function (framework development)
 
-1. `src/host/bridge/bridge.odin` — write `proc "c" (L: ^Lua_State) -> i32` callback with `context = g_context`
-2. `src/host/bridge/bridge.odin` — register with `register_cfunc(b.L, "name", callback)` in `init` proc
+1. `src/redin/bridge/bridge.odin` — write `proc "c" (L: ^Lua_State) -> i32` callback with `context = g_context`
+2. `src/redin/bridge/bridge.odin` — register with `register_cfunc(b.L, "name", callback)` in `init` proc
 3. Call from Fennel: `(redin.name ...)` or from Lua: `redin.name(...)`
 
 ## redin-cli
@@ -237,14 +240,15 @@ Project manager for redin. Install: `curl -sL https://raw.githubusercontent.com/
 
 | Command | Description |
 |---|---|
-| `redin-cli new-fnl <name>` | Scaffold Fennel project (main.fnl, flsproject.fnl, .redin/, .claude/skills/) |
-| `redin-cli new-lua <name>` | Scaffold Lua project (main.lua, .luarc.json, .redin/, .claude/skills/) |
-| `redin-cli upgrade-to-native` | Copy Odin host source into native/ for custom canvas providers |
-| `redin-cli update [version]` | Update redin binary + runtime in .redin/ |
+| `redin-cli new-fnl [--native] <name>` | Scaffold Fennel project (main.fnl, flsproject.fnl, .redin/, .claude/skills/). With `--native`, also drops `app.odin` + `build.sh` at project root for native Odin development. |
+| `redin-cli new-lua [--native] <name>` | Scaffold Lua project. `--native` same as above. |
+| `redin-cli update [version]` | Update redin binary + runtime in .redin/. Also refreshes .claude/skills/. |
 | `redin-cli latest` | Print latest available version |
 | `redin-cli help` | Show all commands, project structure, dev server endpoints |
 
-### Project structure (after new-fnl/new-lua)
+`upgrade-to-native` is a deprecated alias for `new-fnl --native .` (or `new-lua --native .`); will be removed in a future release.
+
+### Project structure (after new-fnl/new-lua, no `--native`)
 
 ```
 my-app/
@@ -256,17 +260,55 @@ my-app/
   .gitignore       # ignores .redin/
 ```
 
-### Native upgrade (after upgrade-to-native)
+### Project structure (after new-fnl --native / new-lua --native)
+
+The `--native` flag adds two user-owned files at project root and pulls
+the redin source into `.redin/src/redin/` so `app.odin` can import it.
 
 ```
 my-app/
-  native/          # full Odin host source + providers.odin
-    build.sh       # odin build native/ -out:build/redin
-    providers.odin # user's custom canvas providers (package host)
-    main.odin      # copied from .redin/, init_providers() injected
-    ...            # rest of host source
+  app.odin         # USER-OWNED: package main, calls redin.run(cfg)
+  build.sh         # USER-OWNED: odin build . -collection:lib=.redin/lib ...
   build/           # native build output (gitignored)
+  .redin/          # binary + runtime + source + docs (gitignored)
+    src/redin/     # framework source — overwritten by `redin-cli update`
+    lib/           # odin-http
+    vendor/luajit/ # libluajit-5.1.a
+    redin          # prebuilt binary fallback
+  .claude/skills/
   redinw           # updated: prefers build/redin over .redin/redin
+  main.fnl         # app code
+```
+
+The user owns `app.odin`. The framework lives in `.redin/` and is
+overwritten by `redin-cli update` with no merge conflicts. Customize
+the window, register canvas providers / Lua cfuncs / per-frame hooks
+in `app.odin` before the call to `redin.run`:
+
+```odin
+package main
+
+import "core:os"
+import redin "./.redin/src/redin"
+import "./.redin/src/redin/canvas"
+
+main :: proc() {
+    redin.set_window(1920, 1080, "my game", {.WINDOW_RESIZABLE})
+
+    canvas.register("my-bg", my_bg_provider)
+    redin.on_frame(per_frame_tick)
+
+    cfg: redin.Config
+    cfg.app = "main.fnl"
+    for arg in os.args[1:] {
+        switch arg {
+        case "--dev":     cfg.dev = true
+        case "--profile": cfg.profile = true
+        case:             cfg.app = arg
+        }
+    }
+    redin.run(cfg)
+}
 ```
 
 ### Running
@@ -275,6 +317,7 @@ my-app/
 ./redinw --dev main.fnl          # dev server + hot reload
 ./redinw main.fnl                # normal mode
 ./redinw --track-mem main.fnl    # memory leak tracking
+./build.sh                        # (--native only) rebuild after editing app.odin
 ```
 
 ## Key conventions
