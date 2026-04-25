@@ -98,6 +98,7 @@ The public docs and the in-tree skills are part of the contract and ship to down
 | `docs/reference/elements.md` | Per-element attribute reference | New element, new/renamed attribute |
 | `docs/reference/theme.md` | Theme struct + consumption matrix | New theme property, new consumer |
 | `docs/reference/effects.md`, `canvas.md`, `dev-server.md` | Topic reference | When that topic changes |
+| `docs/reference/native-bridge.md` | Public bridge API for `--native` projects: `register_cfunc`, `register_cfunc_raw`, `host_context`, `push`, `dispatch`, `dispatch_tos` | Any change to the public bridge surface in `src/redin/bridge/api.odin` |
 | `docs/guide/*.md` | Quickstart, cheatsheet, lua-guide, building-apps | When a guide example would mislead a reader |
 | `.claude/skills/redin-dev/SKILL.md` | Architecture overview, node types, frame format, canvas API, theme, testing | Node types, frame format, canvas/theme API, top-level workflows |
 | `.claude/skills/redin-maintenance/SKILL.md` | Verification + release workflow (this file) | New test suite, new verification step, changed release process |
