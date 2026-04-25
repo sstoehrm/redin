@@ -227,7 +227,7 @@ end
 Build the host binary once:
 
 ```sh
-odin build src/host -collection:lib=lib -collection:luajit=vendor/luajit -out:build/redin
+odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit -out:build/redin
 ```
 
 Then run your Lua app:

@@ -81,7 +81,7 @@ If a requested font or style isn't found, the system falls back:
 
 ## Theme struct
 
-The host-side `Theme` struct (in `src/host/types/theme.odin`) defines the properties available per aspect:
+The host-side `Theme` struct (in `src/redin/types/theme.odin`) defines the properties available per aspect:
 
 | Property | Type | Notes |
 | -------- | ---- | ----- |

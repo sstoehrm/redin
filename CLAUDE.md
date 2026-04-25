@@ -10,6 +10,7 @@ Active development on `reboot` branch. Core rendering, bridge, input, and runtim
 
 - [docs/core-api.md](docs/core-api.md) -- Frame format, events, host functions, interaction model, dev server
 - [docs/app-api.md](docs/app-api.md) -- Dataflow, tracked state accessors, subscriptions, effect system
+- [docs/reference/native-bridge.md](docs/reference/native-bridge.md) -- Public bridge API for `--native` projects (`register_cfunc`, `dispatch`, `push`)
 
 These docs are the source of truth. When implementing, follow them exactly.
 

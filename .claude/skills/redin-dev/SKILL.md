@@ -228,11 +228,50 @@ odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit -o
 5. `src/runtime/theme.fnl` — add to consumption table if it uses aspects
 6. `test/ui/<component>_app.fnl` + `test/ui/test_<component>.bb` — UI test
 
-## Adding a host function (framework development)
+## Adding a host function
+
+### From user code (preferred — `--native` projects)
+
+In `app.odin`, register before or after `redin.run`:
+
+```odin
+my_cfunc :: proc(L: ^bridge.Lua_State) -> i32 {
+    // No `proc "c"`, no manual context. The bridge's trampoline already
+    // set `context = bridge.host_context()` before calling.
+    n := lua_tointeger(L, 1)
+    // ...
+    return 0  // number of return values pushed onto the stack
+}
+
+main :: proc() {
+    bridge.register_cfunc("my_cfunc", my_cfunc)
+    // ...
+    redin.run(cfg)
+}
+```
+
+Pre-`redin.run` registrations are buffered and flushed inside `bridge.init`. From Fennel: `(redin.my_cfunc ...)`. From Lua: `redin.my_cfunc(...)`.
+
+For `proc "c"` cfuncs (escape hatch — usually not needed), use `bridge.register_cfunc_raw` and call `context = bridge.host_context()` yourself at entry.
+
+### From the framework (in-tree contributors only)
 
 1. `src/redin/bridge/bridge.odin` — write `proc "c" (L: ^Lua_State) -> i32` callback with `context = g_context`
-2. `src/redin/bridge/bridge.odin` — register with `register_cfunc(b.L, "name", callback)` in `init` proc
+2. `src/redin/bridge/bridge.odin` — add `register_cfunc_init(b.L, "name", callback)` line inside the `init` proc, between `lua_newtable(b.L)` and `lua_setglobal(b.L, "redin")`
 3. Call from Fennel: `(redin.name ...)` or from Lua: `redin.name(...)`
+
+## Bridge API for native code
+
+`package bridge` (importable from user `app.odin`) exposes:
+
+| Proc | Use |
+|---|---|
+| `bridge.register_cfunc(name, fn: proc(L) -> i32)` | Register a Lua cfunc with a regular Odin proc. Trampoline auto-sets context. Safe before or after `bridge.init`. |
+| `bridge.register_cfunc_raw(name, fn: Lua_CFunction)` | Same but takes `proc "c"` directly. Caller manages context. |
+| `bridge.host_context() -> runtime.Context` | The runtime context the bridge captured at init. Only needed by `register_cfunc_raw` callers. |
+| `bridge.push(L, value: any)` | Marshaller: Odin → Lua. Supports primitives, slices, arrays, dynamic arrays, maps, structs, unions, pointers, enums, any. Bails at depth 32 on cycles. |
+| `bridge.dispatch(event, payload: any) -> (ok, err)` | Marshal payload + push to Fennel as `[:dispatch [:event-name payload]]`. Calls the matching `reg-handler`. |
+| `bridge.dispatch_tos(L, event) -> (ok, err)` | Zero-copy: caller already pushed payload onto the stack (hot path, e.g. per-frame state). |
 
 ## redin-cli
 

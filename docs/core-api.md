@@ -333,6 +333,8 @@ Checks: color format, enum membership (`font`, `weight`, `align`), opacity range
 
 Functions Odin exposes to the Lua VM under the `redin` global table. Available from any Fennel or Lua code.
 
+> Extending this table from user Odin code (in `--native` projects) is documented separately in [`reference/native-bridge.md`](reference/native-bridge.md). Use `bridge.register_cfunc(name, fn)` to add `redin.<name>` entries at runtime without forking framework files.
+
 ### `redin.log(...)`
 
 Print to stdout. Variadic, joins arguments with tabs.

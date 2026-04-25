@@ -10,7 +10,7 @@ Starts when the app is launched with `--dev`. Listens on `localhost:8800` (walks
 
 Read endpoints reflect the last state pushed to the host. Write endpoints queue events into the main input channel as if they came from real user input.
 
-Implementation: `src/host/bridge/devserver.odin`.
+Implementation: `src/redin/bridge/devserver.odin`.
 
 ### Authentication
 
