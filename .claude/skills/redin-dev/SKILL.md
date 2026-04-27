@@ -87,6 +87,20 @@ Layout uses the Anchor enum: `top_left`, `top_center`, `top_right`, `center_left
 
 Format: `[anchor x y w h]` — 5 elements. Values: px number, `:full`, or `:M_N` fraction.
 
+## Animate attribute
+
+Any element accepts an `:animate` map that draws a registered canvas provider at a host-relative rect. Same `[anchor x y w h]` syntax as viewport, but `w`/`h`/offset are resolved against the host element's size, not the screen.
+
+```fennel
+[:button {:click [:dismiss]
+          :animate {:provider :star-blink
+                    :rect [:top_left -4 -4 16 16]
+                    :z :above}}        ;; :above (default) or :behind
+  "Dismiss"]
+```
+
+Click-through: the decoration's rect never enters the hit-test arrays, so clicks land on the host. Same canvas registry as `:canvas` — providers are the animation engine, the framework just positions them. Unknown provider names silently no-op; malformed `:rect` warns at parse time and skips drawing.
+
 ## Canvas API (Fennel/Lua)
 
 ### Drawing from scripting (no binary changes needed)

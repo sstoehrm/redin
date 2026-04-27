@@ -189,6 +189,27 @@ The flattening is a single pass when the frame enters the pipeline. No fragment 
 
 **Rule:** Visual properties (`bg`, `color`, `border`, `font-size`, `font`, `weight`, `radius`, `border-width`, `opacity`, `shadow`, `line-height`, `padding`) belong in the theme only, never on elements.
 
+### Animation
+
+Any element may carry an `:animate` map that renders a registered canvas provider at a viewport-anchored rect relative to the host. Useful for corner ornaments — a blinking notification star, a soft glow behind a tile, a badge in the bottom-right.
+
+```fennel
+[:button {:animate {:provider :star-blink
+                    :rect [:top_left -4 -4 16 16]
+                    :z :above}}
+  "Click me"]
+```
+
+| Field | Required | Type | Notes |
+|---|---|---|---|
+| `:provider` | yes | keyword or string | Name of a registered canvas provider (same registry as `:canvas`). |
+| `:rect` | yes | 5-element vector | `[anchor x y w h]`, identical to the `:viewport` syntax on `:stack`. Negative `x`/`y` allowed for overhang outside the host. |
+| `:z` | no | `:above` (default) or `:behind` | Draw order relative to the host element. |
+
+The decoration is purely visual: clicks fall through to the host. The provider's `mouse-in?` / `mouse-pressed?` queries still work in canvas-local coordinates so the decoration can react visually to hover.
+
+If the provider name isn't registered, `canvas.process` silently no-ops (same posture as a `:canvas` pointing at an unregistered name). Malformed `:rect` (wrong arity, unknown anchor token) prints a warning at parse time and the decoration is skipped — the host element renders normally.
+
 ### Sizing model
 
 Single top-down pass. Parent tells children their size.

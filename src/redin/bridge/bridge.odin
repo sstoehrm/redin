@@ -15,18 +15,19 @@ import rl "vendor:raylib"
 import "../canvas"
 
 Bridge :: struct {
-	L:              ^Lua_State,
-	paths:          [dynamic]types.Path,
-	nodes:          [dynamic]types.Node,
-	parent_indices: [dynamic]int,
-	children_list:  [dynamic]types.Children,
-	theme:          map[string]types.Theme,
-	http_client:    Http_Client,
-	shell_client:   Shell_Client,
-	hot_reload:     Hot_Reload,
-	dev_server:     Dev_Server,
-	frame_changed:  bool,
-	dev_mode:       bool,
+	L:               ^Lua_State,
+	paths:           [dynamic]types.Path,
+	nodes:           [dynamic]types.Node,
+	parent_indices:  [dynamic]int,
+	children_list:   [dynamic]types.Children,
+	node_animations: [dynamic]Maybe(types.Animate_Decoration),
+	theme:           map[string]types.Theme,
+	http_client:     Http_Client,
+	shell_client:    Shell_Client,
+	hot_reload:      Hot_Reload,
+	dev_server:      Dev_Server,
+	frame_changed:   bool,
+	dev_mode:        bool,
 }
 
 g_bridge: ^Bridge
@@ -184,6 +185,13 @@ clear_frame :: proc(b: ^Bridge) {
 	}
 	delete(b.children_list)
 	b.children_list = {}
+	for entry in b.node_animations {
+		if d, has := entry.?; has && len(d.provider) > 0 {
+			delete(d.provider)
+		}
+	}
+	delete(b.node_animations)
+	b.node_animations = {}
 }
 
 // ---------------------------------------------------------------------------
@@ -879,6 +887,85 @@ deliver_shell_response :: proc(b: ^Bridge, resp: ^Shell_Response) {
 // Lua table → flat parallel arrays (DFS traversal)
 // ---------------------------------------------------------------------------
 
+// Parse a :animate attribute table at attrs_idx. Returns the parsed
+// decoration on success; the second return is false when the attribute
+// is missing or malformed (in which case nothing is stored). The caller
+// owns the returned decoration's `provider` string.
+parse_animate_attr :: proc(L: ^Lua_State, attrs_idx: i32) -> (types.Animate_Decoration, bool) {
+	zero: types.Animate_Decoration
+	if attrs_idx <= 0 do return zero, false
+
+	lua_getfield(L, attrs_idx, "animate")
+	defer lua_pop(L, 1)
+	if !lua_istable(L, -1) do return zero, false
+	a_idx := lua_gettop(L)
+
+	// :provider — required string
+	provider: string
+	lua_getfield(L, a_idx, "provider")
+	if lua_isstring(L, -1) {
+		provider = strings.clone_from_cstring(lua_tostring_raw(L, -1))
+	}
+	lua_pop(L, 1)
+	if len(provider) == 0 {
+		fmt.eprintln("animate: missing or non-string :provider, skipping")
+		return zero, false
+	}
+
+	// :rect — required 5-element vector matching :viewport entries
+	rect: types.ViewportRect
+	rect_ok := false
+	lua_getfield(L, a_idx, "rect")
+	if lua_istable(L, -1) {
+		r_idx := lua_gettop(L)
+		if int(lua_objlen(L, r_idx)) == 5 {
+			lua_rawgeti(L, r_idx, 1)
+			if lua_isstring(L, -1) {
+				rect.anchor = parse_anchor(string(lua_tostring_raw(L, -1)))
+			}
+			lua_pop(L, 1)
+			fields := [4]^types.ViewportValue{&rect.x, &rect.y, &rect.w, &rect.h}
+			for j in 0 ..< 4 {
+				lua_rawgeti(L, r_idx, i32(j + 2))
+				if lua_isnumber(L, -1) {
+					fields[j]^ = f32(lua_tonumber(L, -1))
+				} else if lua_isstring(L, -1) {
+					s := string(lua_tostring_raw(L, -1))
+					if s == "full" {
+						fields[j]^ = types.SizeValue.FULL
+					} else {
+						fields[j]^ = parse_fraction(s)
+					}
+				}
+				lua_pop(L, 1)
+			}
+			rect_ok = true
+		}
+	}
+	lua_pop(L, 1)
+	if !rect_ok {
+		fmt.eprintln("animate: missing or malformed :rect (must be a 5-element vector), skipping")
+		delete(provider)
+		return zero, false
+	}
+
+	// :z — optional, defaults to .Above
+	z := types.Animate_Z.Above
+	lua_getfield(L, a_idx, "z")
+	if lua_isstring(L, -1) {
+		s := string(lua_tostring_raw(L, -1))
+		switch s {
+		case "above": z = .Above
+		case "behind": z = .Behind
+		case:
+			fmt.eprintfln("animate: unknown :z value %q, defaulting to :above", s)
+		}
+	}
+	lua_pop(L, 1)
+
+	return types.Animate_Decoration{provider = provider, rect = rect, z = z}, true
+}
+
 lua_flatten_node :: proc(L: ^Lua_State, index: i32, cur: ^[dynamic]u8, b: ^Bridge, parent_idx: int) {
 	abs_idx := index < 0 ? lua_gettop(L) + index + 1 : index
 	my_idx := len(b.nodes)
@@ -918,6 +1005,15 @@ lua_flatten_node :: proc(L: ^Lua_State, index: i32, cur: ^[dynamic]u8, b: ^Bridg
 	// Build node based on tag
 	node := lua_read_node(L, tag, attrs_idx, text_content)
 	append(&b.nodes, node)
+
+	// :animate decoration (idx-aligned with b.nodes). Always append so
+	// node_animations stays length-aligned — a missing or malformed
+	// entry pushes nil.
+	if dec, ok := parse_animate_attr(L, attrs_idx); ok {
+		append(&b.node_animations, dec)
+	} else {
+		append(&b.node_animations, nil)
+	}
 
 	// Pop attrs
 	if attrs_idx != 0 do lua_pop(L, 1)

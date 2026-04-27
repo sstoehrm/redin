@@ -43,6 +43,20 @@
                                                                   phase)))))]
                          (ctx.circle x y r {:fill [94 129 172 alpha]}))))))
 
+;; ===== Micro-animation =====
+;; A small pulsing dot used as an :animate decoration on the Add button —
+;; demonstrates how a canvas provider can be anchored to the corner of any
+;; element via the :animate attribute (see docs/core-api.md § Animation).
+
+(canvas.register :pulse-dot
+                 (fn [ctx]
+                   (let [t (redin.now)
+                         pulse (+ 0.5 (* 0.5 (math.sin (* t 3))))
+                         r (+ 4 (* 2 pulse))
+                         alpha (math.floor (+ 150 (* 105 pulse)))]
+                     (ctx.circle (/ ctx.width 2) (/ ctx.height 2) r
+                                 {:fill [235 203 139 alpha]}))))
+
 ;; ===== Theme =====
 
 (theme-mod.set-theme {:surface {:bg [46 52 64]
@@ -186,7 +200,10 @@
                           {:width 250
                            :height 42
                            :aspect :button
-                           :click [:test/add]}
+                           :click [:test/add]
+                           :animate {:provider :pulse-dot
+                                     :rect [:top_right -8 -8 16 16]
+                                     :z :above}}
                           "Add"]
                          [:vbox
                           {:overflow :scroll-y :aspect :muted}

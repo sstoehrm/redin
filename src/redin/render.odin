@@ -1,5 +1,6 @@
 package redin
 
+import "bridge"
 import "canvas"
 import "core:fmt"
 import "core:math"
@@ -201,6 +202,35 @@ layout_children_stack :: proc(
 		child_idx := int(ch.value[i])
 		layout_node(child_idx, rect, nodes, children_list, theme)
 	}
+}
+
+// Resolve an :animate decoration's ViewportRect against its host node's
+// rect. Same anchor / value semantics as the existing :viewport on
+// :stack, but axes are the host's width and height (not the screen).
+resolve_decoration_rect :: proc(vr: types.ViewportRect, host: rl.Rectangle) -> rl.Rectangle {
+	w := px(resolve_vp(vr.w, host.width))
+	h := px(resolve_vp(vr.h, host.height))
+	offset_x := px(resolve_vp(vr.x, host.width))
+	offset_y := px(resolve_vp(vr.y, host.height))
+
+	x: f32; y: f32
+	#partial switch vr.anchor {
+	case .TOP_LEFT, .CENTER_LEFT, .BOTTOM_LEFT:
+		x = host.x + offset_x
+	case .TOP_CENTER, .CENTER, .BOTTOM_CENTER:
+		x = host.x + host.width/2 - w/2 + offset_x
+	case .TOP_RIGHT, .CENTER_RIGHT, .BOTTOM_RIGHT:
+		x = host.x + host.width - w + offset_x
+	}
+	#partial switch vr.anchor {
+	case .TOP_LEFT, .TOP_CENTER, .TOP_RIGHT:
+		y = host.y + offset_y
+	case .CENTER_LEFT, .CENTER, .CENTER_RIGHT:
+		y = host.y + host.height/2 - h/2 + offset_y
+	case .BOTTOM_LEFT, .BOTTOM_CENTER, .BOTTOM_RIGHT:
+		y = host.y + host.height - h + offset_y
+	}
+	return rl.Rectangle{x, y, w, h}
 }
 
 layout_children_viewport :: proc(
@@ -411,6 +441,14 @@ draw_node :: proc(
 	rect := node_rects[idx]
 	content_rect := node_content_rects[idx]
 
+	// :animate :behind — drawn before the host's own bg/border/children.
+	if bridge.g_bridge != nil && idx < len(bridge.g_bridge.node_animations) {
+		if dec, has := bridge.g_bridge.node_animations[idx].?; has && dec.z == .Behind {
+			drect := resolve_decoration_rect(dec.rect, rect)
+			canvas.process(dec.provider, drect)
+		}
+	}
+
 	switch n in nodes[idx] {
 	case types.NodeStack:
 		draw_children(idx, nodes, children_list, theme)
@@ -465,6 +503,16 @@ draw_node :: proc(
 	case types.NodeModal:
 		draw_themed_rect(rect, n.aspect, theme)
 		draw_children(idx, nodes, children_list, theme)
+	}
+
+	// :animate :above — drawn after the host's own draw + descendant
+	// subtree complete. The recursive draw_children calls inside each
+	// switch arm have returned by now.
+	if bridge.g_bridge != nil && idx < len(bridge.g_bridge.node_animations) {
+		if dec, has := bridge.g_bridge.node_animations[idx].?; has && dec.z == .Above {
+			drect := resolve_decoration_rect(dec.rect, rect)
+			canvas.process(dec.provider, drect)
+		}
 	}
 }
 

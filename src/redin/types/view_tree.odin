@@ -35,6 +35,17 @@ ViewportRect :: struct {
 	h:      ViewportValue,
 }
 
+Animate_Z :: enum u8 {
+	Above,
+	Behind,
+}
+
+Animate_Decoration :: struct {
+	provider: string,        // owned, freed by clear_frame
+	rect:     ViewportRect,  // resolved against the host node's rect (not window)
+	z:        Animate_Z,
+}
+
 Path :: struct {
 	value:  []u8,
 	length: u8,
