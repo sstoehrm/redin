@@ -79,7 +79,7 @@ The renderer already runs every frame, and canvas providers' `update` already ru
 
 | Condition | Outcome |
 |---|---|
-| `:provider` references an unregistered name | Fall back to the same placeholder rendering `:canvas` uses today (gray rect outline + label). No error event, no crash. |
+| `:provider` references an unregistered name | `canvas.process` returns silently — no draw, no crash, same posture as a `:canvas` element pointing at an unregistered name. |
 | `:rect` is malformed (wrong arity, unknown anchor token, non-numeric coordinate) | Log a warning at parse time and discard the entry — `node_animations[idx]` stays nil, so the renderer never tries to draw it. The host element renders normally. The warning fires once per re-flatten the malformed value is seen, not once per frame. |
 
 ## Implementation outline
