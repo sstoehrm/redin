@@ -8,6 +8,7 @@ import "core:net"
 import "core:os"
 import "core:strings"
 import "core:sync"
+import "core:sys/linux"
 import "core:thread"
 import "core:time"
 import "../input"
@@ -81,6 +82,41 @@ sync_queue_drain :: proc(sq: ^Sync_Queue, out: ^[dynamic]^Pending_Request) {
 
 // --- Init/Destroy ---
 
+// Write `data` to `path` with mode 0600, refusing to follow symlinks
+// or to open any non-regular file. Used for .redin-port and .redin-token
+// — see issue #78 finding M1. Without O_NOFOLLOW, an attacker (or a
+// stale symlink in CWD) could redirect the write to an arbitrary file
+// owned by the user (e.g. ~/.ssh/authorized_keys).
+//
+// On EEXIST we lstat the path and only retry after unlinking when the
+// existing entry is a regular file — handles the legitimate case where
+// a previous --dev run crashed without cleaning up. Symlinks raise
+// ELOOP under O_NOFOLLOW, FIFOs/sockets/devices fall through without
+// retry, so neither path can be hijacked.
+write_private_no_follow :: proc(path: string, data: []u8) -> bool {
+	cpath := strings.clone_to_cstring(path, context.temp_allocator)
+	flags := linux.Open_Flags{.WRONLY, .CREAT, .EXCL, .TRUNC, .NOFOLLOW, .CLOEXEC}
+	mode  := linux.Mode{.IRUSR, .IWUSR}
+
+	fd, err := linux.open(cpath, flags, mode)
+	if err == .EEXIST {
+		// O_NOFOLLOW + O_EXCL: symlinks surface as EEXIST rather than
+		// ELOOP. lstat (NOT stat) so we inspect the entry itself, not
+		// what a symlink points at.
+		st: linux.Stat
+		if linux.lstat(cpath, &st) != .NONE do return false
+		if (transmute(u32) st.mode) & 0o170000 != 0o100000 do return false
+		if linux.unlink(cpath) != .NONE do return false
+		fd, err = linux.open(cpath, flags, mode)
+	}
+	if err != .NONE do return false
+	defer linux.close(fd)
+
+	written, werr := linux.write(fd, data)
+	if werr != .NONE || written != len(data) do return false
+	return true
+}
+
 devserver_init :: proc(ds: ^Dev_Server, b: ^Bridge) {
 	ds.bridge = b
 	ds.running = true
@@ -125,13 +161,17 @@ devserver_init :: proc(ds: ^Dev_Server, b: ^Bridge) {
 	// which leaked the bound port to anyone who could list the CWD.
 	// Testing helpers run as the same user, so 0600 doesn't regress
 	// them.
-	private_perm := os.Permissions{.Read_User, .Write_User}
+	//
+	// write_private_no_follow refuses to write through a symlink — see
+	// issue #78 finding M1. If a stale symlink in CWD points at a
+	// sensitive file, the dev server logs and continues without writing
+	// rather than overwriting the link target.
 	port_str := fmt.tprintf("%d", bound_port)
-	if err := os.write_entire_file(PORT_FILE, transmute([]u8)port_str, private_perm); err != nil {
-		fmt.eprintfln("Warning: could not write %s: %v", PORT_FILE, err)
+	if !write_private_no_follow(PORT_FILE, transmute([]u8)port_str) {
+		fmt.eprintfln("Warning: could not write %s (refused to follow non-regular path)", PORT_FILE)
 	}
-	if err := os.write_entire_file(TOKEN_FILE, transmute([]u8)ds.auth_token, private_perm); err != nil {
-		fmt.eprintfln("Warning: could not write %s: %v", TOKEN_FILE, err)
+	if !write_private_no_follow(TOKEN_FILE, transmute([]u8)ds.auth_token) {
+		fmt.eprintfln("Warning: could not write %s (refused to follow non-regular path)", TOKEN_FILE)
 	}
 
 	ds.server_thread = thread.create_and_start_with_poly_data(ds, server_thread_proc, context)
