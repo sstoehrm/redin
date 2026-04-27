@@ -56,7 +56,7 @@ Every non-OPTIONS request to the dev server needs `Authorization: Bearer <token>
 
 ### Available test suites
 
-`smoke`, `input`, `button`, `canvas`, `drag`, `image`, `line_height`, `modal`, `multiline`, `popout`, `resize`, `scroll`, `scroll_x`, `shadow`, `text_select`, `viewport`
+`smoke`, `input`, `button`, `canvas`, `drag`, `image`, `line_height`, `modal`, `multiline`, `popout`, `resize`, `scroll`, `scroll_x`, `shadow`, `text_select`, `viewport`, `animate`
 
 ## Memory leak detection
 

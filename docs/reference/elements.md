@@ -61,6 +61,7 @@ All elements accept these attributes.
 | `width` | px number or `"full"` | Element width. `"full"` expands to available space. |
 | `height` | px number or `"full"` | Element height. `"full"` expands to available space. |
 | `visible` | boolean | `false` -- element is not laid out and takes no space. |
+| `animate` | map | Render a registered canvas provider at a host-relative rect. See [core-api.md § Animation](../core-api.md#animation). |
 
 **Visual properties (`bg`, `color`, `border`, `font-size`, `weight`, `radius`, `border-width`, `opacity`) must never appear on elements.** They belong in the theme only.
 
