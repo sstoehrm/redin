@@ -11,7 +11,7 @@ echo ""
 echo "Installing system packages..."
 if command -v apt-get &>/dev/null; then
   sudo apt-get update -qq
-  sudo apt-get install -y luajit libluajit-5.1-dev libssl-dev
+  sudo apt-get install -y luajit libluajit-5.1-dev libssl-dev clang xvfb
 elif command -v dnf &>/dev/null; then
   sudo dnf install -y luajit luajit-devel openssl-devel
 elif command -v pacman &>/dev/null; then
