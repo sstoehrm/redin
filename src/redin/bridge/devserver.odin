@@ -4,6 +4,7 @@ import "core:container/queue"
 import "core:crypto"
 import "core:encoding/hex"
 import "core:fmt"
+import "core:math"
 import "core:net"
 import "core:os"
 import "core:strings"
@@ -448,19 +449,36 @@ int_to_str :: proc(buf: []u8, val: int) -> string {
 
 // Case-insensitive lookup for a header value. Returns the trimmed
 // value, or "" if the header is absent.
+//
+// Skips past the request line (everything up to the first \r\n) so a
+// path/query containing the literal "host:" or "authorization:" can
+// never be mistaken for a header. Issue #78 finding L1: previously the
+// first non-boundary match short-circuited the lookup with "", which
+// turned benign URLs like /state/host:foo into spurious 403s and
+// could be turned into a Host/auth bypass by a future refactor.
 find_header_value :: proc(headers: string, name_lower: string) -> string {
 	lower := strings.to_lower(headers, context.temp_allocator)
 	needle := strings.concatenate({name_lower, ":"}, context.temp_allocator)
-	idx := strings.index(lower, needle)
-	if idx < 0 do return ""
-	// Require the header to start at a line boundary (or the very
-	// start of the buffer) so a body substring can't be mistaken for
-	// a header.
-	if idx > 0 && lower[idx - 1] != '\n' do return ""
-	rest := headers[idx + len(needle):]
-	end := strings.index_any(rest, "\r\n")
-	if end < 0 do end = len(rest)
-	return strings.trim_space(rest[:end])
+
+	start := 0
+	if rl_end := strings.index(lower, "\r\n"); rl_end >= 0 {
+		start = rl_end + 2
+	}
+
+	pos := start
+	for pos < len(lower) {
+		rel := strings.index(lower[pos:], needle)
+		if rel < 0 do return ""
+		idx := pos + rel
+		if idx == start || lower[idx - 1] == '\n' {
+			rest := headers[idx + len(needle):]
+			end := strings.index_any(rest, "\r\n")
+			if end < 0 do end = len(rest)
+			return strings.trim_space(rest[:end])
+		}
+		pos = idx + len(needle)
+	}
+	return ""
 }
 
 // Verify the request's Host header matches one of the expected bound
@@ -964,18 +982,36 @@ handle_post_events :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string)
 }
 
 handle_post_click :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string) {
+	// Issue #78 finding L2: previously this enqueued any (x,y) the
+	// client sent, including NaN, Infinity, negative, and screen-out-of-
+	// bounds values. /resize already validates and returns 400 on bad
+	// input — /click now follows the same pattern.
 	L := ds.bridge.L
 	pos := 0
-	if json_decode_value(L, body, &pos) && lua_istable(L, -1) {
-		lua_getfield(L, -1, "x")
-		x := f32(lua_tonumber(L, -1))
-		lua_pop(L, 1)
-		lua_getfield(L, -1, "y")
-		y := f32(lua_tonumber(L, -1))
-		lua_pop(L, 1)
-		lua_pop(L, 1)
-		append(&ds.event_queue, types.InputEvent(types.MouseEvent{x = x, y = y, button = .LEFT}))
+	if !json_decode_value(L, body, &pos) {
+		respond_json_error(ch, 400, `{"error":"invalid JSON"}`)
+		return
 	}
+	defer lua_pop(L, 1)
+	if !lua_istable(L, -1) {
+		respond_json_error(ch, 400, `{"error":"body must be an object"}`)
+		return
+	}
+	lua_getfield(L, -1, "x")
+	x := f32(lua_tonumber(L, -1))
+	lua_pop(L, 1)
+	lua_getfield(L, -1, "y")
+	y := f32(lua_tonumber(L, -1))
+	lua_pop(L, 1)
+
+	sw := f32(rl.GetScreenWidth())
+	sh := f32(rl.GetScreenHeight())
+	if math.is_nan(x) || math.is_nan(y) || math.is_inf(x) || math.is_inf(y) ||
+	   x < 0 || y < 0 || x > sw || y > sh {
+		respond_json_error(ch, 400, `{"error":"x,y out of range"}`)
+		return
+	}
+	append(&ds.event_queue, types.InputEvent(types.MouseEvent{x = x, y = y, button = .LEFT}))
 	respond_json_ok(ch)
 }
 
