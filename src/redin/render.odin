@@ -1,5 +1,6 @@
 package redin
 
+import "bridge"
 import "canvas"
 import "core:fmt"
 import "core:math"
@@ -439,6 +440,14 @@ draw_node :: proc(
 	if idx < 0 || idx >= len(nodes) do return
 	rect := node_rects[idx]
 	content_rect := node_content_rects[idx]
+
+	// :animate :behind — drawn before the host's own bg/border/children.
+	if bridge.g_bridge != nil && idx < len(bridge.g_bridge.node_animations) {
+		if dec, has := bridge.g_bridge.node_animations[idx].?; has && dec.z == .Behind {
+			drect := resolve_decoration_rect(dec.rect, rect)
+			canvas.process(dec.provider, drect)
+		}
+	}
 
 	switch n in nodes[idx] {
 	case types.NodeStack:
