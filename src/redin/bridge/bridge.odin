@@ -14,18 +14,19 @@ import rl "vendor:raylib"
 import "../canvas"
 
 Bridge :: struct {
-	L:              ^Lua_State,
-	paths:          [dynamic]types.Path,
-	nodes:          [dynamic]types.Node,
-	parent_indices: [dynamic]int,
-	children_list:  [dynamic]types.Children,
-	theme:          map[string]types.Theme,
-	http_client:    Http_Client,
-	shell_client:   Shell_Client,
-	hot_reload:     Hot_Reload,
-	dev_server:     Dev_Server,
-	frame_changed:  bool,
-	dev_mode:       bool,
+	L:               ^Lua_State,
+	paths:           [dynamic]types.Path,
+	nodes:           [dynamic]types.Node,
+	parent_indices:  [dynamic]int,
+	children_list:   [dynamic]types.Children,
+	node_animations: [dynamic]Maybe(types.Animate_Decoration),
+	theme:           map[string]types.Theme,
+	http_client:     Http_Client,
+	shell_client:    Shell_Client,
+	hot_reload:      Hot_Reload,
+	dev_server:      Dev_Server,
+	frame_changed:   bool,
+	dev_mode:        bool,
 }
 
 g_bridge: ^Bridge
@@ -183,6 +184,13 @@ clear_frame :: proc(b: ^Bridge) {
 	}
 	delete(b.children_list)
 	b.children_list = {}
+	for entry in b.node_animations {
+		if d, has := entry.?; has && len(d.provider) > 0 {
+			delete(d.provider)
+		}
+	}
+	delete(b.node_animations)
+	b.node_animations = {}
 }
 
 // ---------------------------------------------------------------------------
