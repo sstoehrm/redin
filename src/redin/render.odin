@@ -504,6 +504,16 @@ draw_node :: proc(
 		draw_themed_rect(rect, n.aspect, theme)
 		draw_children(idx, nodes, children_list, theme)
 	}
+
+	// :animate :above — drawn after the host's own draw + descendant
+	// subtree complete. The recursive draw_children calls inside each
+	// switch arm have returned by now.
+	if bridge.g_bridge != nil && idx < len(bridge.g_bridge.node_animations) {
+		if dec, has := bridge.g_bridge.node_animations[idx].?; has && dec.z == .Above {
+			drect := resolve_decoration_rect(dec.rect, rect)
+			canvas.process(dec.provider, drect)
+		}
+	}
 }
 
 draw_children :: proc(
