@@ -203,6 +203,35 @@ layout_children_stack :: proc(
 	}
 }
 
+// Resolve an :animate decoration's ViewportRect against its host node's
+// rect. Same anchor / value semantics as the existing :viewport on
+// :stack, but axes are the host's width and height (not the screen).
+resolve_decoration_rect :: proc(vr: types.ViewportRect, host: rl.Rectangle) -> rl.Rectangle {
+	w := px(resolve_vp(vr.w, host.width))
+	h := px(resolve_vp(vr.h, host.height))
+	offset_x := px(resolve_vp(vr.x, host.width))
+	offset_y := px(resolve_vp(vr.y, host.height))
+
+	x: f32; y: f32
+	#partial switch vr.anchor {
+	case .TOP_LEFT, .CENTER_LEFT, .BOTTOM_LEFT:
+		x = host.x + offset_x
+	case .TOP_CENTER, .CENTER, .BOTTOM_CENTER:
+		x = host.x + host.width/2 - w/2 + offset_x
+	case .TOP_RIGHT, .CENTER_RIGHT, .BOTTOM_RIGHT:
+		x = host.x + host.width - w + offset_x
+	}
+	#partial switch vr.anchor {
+	case .TOP_LEFT, .TOP_CENTER, .TOP_RIGHT:
+		y = host.y + offset_y
+	case .CENTER_LEFT, .CENTER, .CENTER_RIGHT:
+		y = host.y + host.height/2 - h/2 + offset_y
+	case .BOTTOM_LEFT, .BOTTOM_CENTER, .BOTTOM_RIGHT:
+		y = host.y + host.height - h + offset_y
+	}
+	return rl.Rectangle{x, y, w, h}
+}
+
 layout_children_viewport :: proc(
 	idx: int,
 	stack: types.NodeStack,
