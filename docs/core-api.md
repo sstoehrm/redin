@@ -66,6 +66,34 @@ Functions for building apps (see [app-api](app-api.md) for details):
 
 ---
 
+## Security model
+
+redin is a desktop framework, not a sandboxed runtime. The posture matches `python script.py` or any other interpreter you launch yourself: the script you run gets full local-user authority. This section spells out the consequences, since "I'll ship this app to a friend" is a tempting next step that requires more thought than people sometimes give it.
+
+### Lua / Fennel app code
+
+The `.fnl` (or `.lua`) file you pass on the command line runs in the same Lua state as redin's own runtime, with `luaL_openlibs` having loaded everything: `os`, `io`, `debug`, `package`, `ffi`. Anything your shell user can do, the app can do — read your home directory, spawn processes, dlopen system libraries, mutate global state.
+
+This is by design and appropriate for a development framework. **It does mean redin should not be used to run untrusted `.fnl` files.** If you're considering distributing a redin app to someone else, package and audit the application code as you would any other native binary; treat it as code, not data.
+
+The runtime's internal tables (`dataflow`, `effect`, `view`, etc.) are reachable from app code via `require`. Don't rely on them being private — they're "internal" by convention only.
+
+### `redin.http` — unrestricted URLs
+
+The `redin.http` host function (and the `:http` effect that wraps it) sends whatever URL the app constructs. There is no allowlist for loopback (`127/8`), link-local (`169.254/16`), RFC1918 (`10/8`, `172.16/12`, `192.168/16`), or `file://`. Any string that reaches the helper hits the network as-is.
+
+For most apps this is fine — the app author chose the URL. If your app embeds third-party templates, plugin URLs, or anything that could turn a remote string into a request target, **sanitize before dispatching**. Server-side request forgery (SSRF) is otherwise on the table.
+
+A 16 MiB cap on response bodies is enforced by the host (oversized announcements fail fast with a "Response body too large" error). Per-request wall-clock timeout is not yet wired through to the worker thread; the `:timeout` field on the effect is currently advisory.
+
+### Dev server (`--dev`)
+
+The dev server is the one place redin actively defends against external callers. It binds loopback only and requires a per-run Bearer token written to `./.redin-token` (mode 0600) plus a matching `Host` header to defend against DNS rebinding. See [Dev server](#dev-server-http) below for details.
+
+Production builds (no `--dev`) don't run the server at all and have no listening sockets.
+
+---
+
 ## Frame format
 
 A frame is a nested array: `[tag, attrs, ...children]`.
@@ -491,4 +519,4 @@ Requests graceful shutdown of the application.
 
 ### CORS
 
-All responses include `Access-Control-Allow-Origin: *`. OPTIONS requests return a 204 with appropriate CORS headers.
+The dev server emits no `Access-Control-*` headers and serves `OPTIONS` with a `405 Method Not Allowed`. CORS preflight is intentionally not supported: the server is for local tools (curl, Claude, IDE extensions), not browser-origin code, and admitting browser callers would weaken the same-origin protection that already comes for free with the auth-token requirement.
