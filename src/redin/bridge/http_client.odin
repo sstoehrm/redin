@@ -8,6 +8,13 @@ import "core:thread"
 import http "lib:odin-http"
 import http_client "lib:odin-http/client"
 
+// Cap on the response body the HTTP client is willing to allocate for a
+// single request. odin-http honours the cap based on Content-Length, so
+// an oversized announcement short-circuits before any body bytes are
+// read. Issue #78 finding M2: previously unbounded — a malicious or
+// misbehaving remote could exhaust host memory.
+HTTP_MAX_BODY :: 16 * 1024 * 1024 // 16 MiB
+
 Http_Request :: struct {
 	id:      string,
 	url:     string,
@@ -98,7 +105,6 @@ http_request_destroy :: proc(req: ^Http_Request) {
 	delete(req.headers)
 }
 
-@(private = "file")
 execute_http_request :: proc(req: Http_Request) -> Http_Response {
 	response: Http_Response
 	response.id = req.id
@@ -145,7 +151,7 @@ execute_http_request :: proc(req: Http_Request) -> Http_Response {
 
 	response.status = int(res.status)
 
-	body, was_alloc, body_err := http_client.response_body(&res)
+	body, was_alloc, body_err := http_client.response_body(&res, HTTP_MAX_BODY)
 	if body_err == .None {
 		switch b in body {
 		case http_client.Body_Plain:
@@ -154,6 +160,11 @@ execute_http_request :: proc(req: Http_Request) -> Http_Response {
 			response.body = strings.clone("")
 		case http_client.Body_Error:
 		}
+	} else if body_err == .Too_Long {
+		response.status = 0
+		response.error_msg = fmt.aprintf(
+			"Response body too large (cap %d bytes)", HTTP_MAX_BODY,
+		)
 	} else {
 		response.error_msg = fmt.aprintf("Body read failed: %v", body_err)
 	}
