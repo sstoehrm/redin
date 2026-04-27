@@ -1,6 +1,7 @@
 package bridge
 
 import "core:fmt"
+import "core:math"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
@@ -362,6 +363,30 @@ lua_rawgeti_number :: proc(L: ^Lua_State, idx: i32, i: i32) -> f64 {
 	return lua_tonumber(L, -1)
 }
 
+// Clamp an arbitrary numeric value to a u8. Used for canvas colour
+// components — pre-fix they were truncated via `u8(...)`, so a buggy
+// Fennel provider returning {255, 256, -1} silently rendered the wrong
+// colour. Issue #78 finding L3.
+clamp_byte :: proc(n: f64) -> u8 {
+	if math.is_nan(n) do return 0
+	if n <= 0 do return 0
+	if n >= 255 do return 255
+	return u8(n)
+}
+
+// Sanitize a canvas dimension (width / height / radius / coordinate
+// magnitude). Bails on NaN, Inf, negative, or above the texture-side
+// ceiling, so a malformed canvas command can be skipped instead of
+// flowing junk into Raylib's draw calls. Issue #78 finding L3.
+@(private = "file")
+DIM_MAX :: 16384
+
+sanitize_dim :: proc(v: f32) -> (f32, bool) {
+	if math.is_nan(v) || math.is_inf(v) do return 0, false
+	if v < 0 || v > DIM_MAX do return 0, false
+	return v, true
+}
+
 // Read a color [r,g,b] or [r,g,b,a] from a table field. Returns ok=false if field missing.
 read_color_field :: proc(L: ^Lua_State, idx: i32, field: cstring) -> (rl.Color, bool) {
 	lua_getfield(L, idx, field)
@@ -369,14 +394,14 @@ read_color_field :: proc(L: ^Lua_State, idx: i32, field: cstring) -> (rl.Color, 
 	if !lua_istable(L, -1) do return {}, false
 
 	color_idx := lua_gettop(L)
-	r := u8(lua_rawgeti_number(L, color_idx, 1))
-	g := u8(lua_rawgeti_number(L, color_idx, 2))
-	b := u8(lua_rawgeti_number(L, color_idx, 3))
+	r := clamp_byte(lua_rawgeti_number(L, color_idx, 1))
+	g := clamp_byte(lua_rawgeti_number(L, color_idx, 2))
+	b := clamp_byte(lua_rawgeti_number(L, color_idx, 3))
 
 	lua_rawgeti(L, color_idx, 4)
 	a := u8(255)
 	if lua_isnumber(L, -1) {
-		a = u8(lua_tonumber(L, -1))
+		a = clamp_byte(lua_tonumber(L, -1))
 	}
 	lua_pop(L, 1)
 
@@ -490,8 +515,9 @@ execute_canvas_command :: proc(L: ^Lua_State, idx: i32, tag: string, ox: f32, oy
 	case "rect":
 		x := f32(lua_rawgeti_number(L, idx, 2)) + ox
 		y := f32(lua_rawgeti_number(L, idx, 3)) + oy
-		w := f32(lua_rawgeti_number(L, idx, 4))
-		h := f32(lua_rawgeti_number(L, idx, 5))
+		w, w_ok := sanitize_dim(f32(lua_rawgeti_number(L, idx, 4)))
+		h, h_ok := sanitize_dim(f32(lua_rawgeti_number(L, idx, 5)))
+		if !w_ok || !h_ok do return
 		lua_rawgeti(L, idx, 6)
 		opts := lua_gettop(L)
 
@@ -521,7 +547,8 @@ execute_canvas_command :: proc(L: ^Lua_State, idx: i32, tag: string, ox: f32, oy
 	case "circle":
 		cx := f32(lua_rawgeti_number(L, idx, 2)) + ox
 		cy := f32(lua_rawgeti_number(L, idx, 3)) + oy
-		cr := f32(lua_rawgeti_number(L, idx, 4))
+		cr, cr_ok := sanitize_dim(f32(lua_rawgeti_number(L, idx, 4)))
+		if !cr_ok do return
 		lua_rawgeti(L, idx, 5)
 		opts := lua_gettop(L)
 
@@ -536,8 +563,9 @@ execute_canvas_command :: proc(L: ^Lua_State, idx: i32, tag: string, ox: f32, oy
 	case "ellipse":
 		cx := f32(lua_rawgeti_number(L, idx, 2)) + ox
 		cy := f32(lua_rawgeti_number(L, idx, 3)) + oy
-		rx := f32(lua_rawgeti_number(L, idx, 4))
-		ry := f32(lua_rawgeti_number(L, idx, 5))
+		rx, rx_ok := sanitize_dim(f32(lua_rawgeti_number(L, idx, 4)))
+		ry, ry_ok := sanitize_dim(f32(lua_rawgeti_number(L, idx, 5)))
+		if !rx_ok || !ry_ok do return
 		lua_rawgeti(L, idx, 6)
 		opts := lua_gettop(L)
 
@@ -572,6 +600,12 @@ execute_canvas_command :: proc(L: ^Lua_State, idx: i32, tag: string, ox: f32, oy
 		x := f32(lua_rawgeti_number(L, idx, 2)) + ox
 		y := f32(lua_rawgeti_number(L, idx, 3)) + oy
 		lua_rawgeti(L, idx, 4)
+		// Skip the command instead of feeding nil into DrawTextEx if the
+		// table cell isn't a string. Issue #78 finding L3.
+		if !lua_isstring(L, -1) {
+			lua_pop(L, 1)
+			return
+		}
 		text := lua_tostring_raw(L, -1)
 		lua_rawgeti(L, idx, 5)
 		opts := lua_gettop(L)
@@ -635,8 +669,9 @@ execute_canvas_command :: proc(L: ^Lua_State, idx: i32, tag: string, ox: f32, oy
 	case "image":
 		x := f32(lua_rawgeti_number(L, idx, 2)) + ox
 		y := f32(lua_rawgeti_number(L, idx, 3)) + oy
-		w := f32(lua_rawgeti_number(L, idx, 4))
-		h := f32(lua_rawgeti_number(L, idx, 5))
+		w, w_ok := sanitize_dim(f32(lua_rawgeti_number(L, idx, 4)))
+		h, h_ok := sanitize_dim(f32(lua_rawgeti_number(L, idx, 5)))
+		if !w_ok || !h_ok do return
 		rl.DrawRectangleLinesEx({x, y, w, h}, 1, rl.GRAY)
 		rl.DrawText("img", i32(x) + 2, i32(y) + 2, 12, rl.GRAY)
 	}
