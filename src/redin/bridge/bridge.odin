@@ -1872,6 +1872,78 @@ lua_read_tags :: proc(L: ^Lua_State, tbl_idx: i32, slot_idx: i32) -> []string {
     return nil
 }
 
+// Parse `:draggable [tags {options} payload]`. Populates the drag_* fields
+// of `out`. On error, fields stay zero and an error is logged.
+lua_read_draggable :: proc(L: ^Lua_State, attrs_idx: i32, out: ^types.Drag_Attrs) {
+    if attrs_idx <= 0 do return
+    lua_getfield(L, attrs_idx, "draggable")
+    defer lua_pop(L, 1)
+    if !lua_istable(L, -1) do return
+    tbl := lua_gettop(L)
+
+    // Slot 1 — tags
+    out.drag_tags = lua_read_tags(L, tbl, 1)
+    if len(out.drag_tags) == 0 {
+        fmt.eprintln(":draggable: missing or empty tag list, skipping")
+        return
+    }
+
+    // Slot 2 — options table
+    lua_rawgeti(L, tbl, 2)
+    if !lua_istable(L, -1) {
+        lua_pop(L, 1)
+        fmt.eprintln(":draggable: expected options table at slot 2, skipping")
+        return
+    }
+    opts := lua_gettop(L)
+
+    // :event (required)
+    lua_getfield(L, opts, "event")
+    if lua_isstring(L, -1) {
+        out.drag_event = strings.clone_from_cstring(lua_tostring_raw(L, -1))
+    }
+    lua_pop(L, 1)
+    if len(out.drag_event) == 0 {
+        fmt.eprintln(":draggable: missing :event in options, skipping")
+        lua_pop(L, 1)  // pop opts
+        return
+    }
+
+    // :mode (optional, default Preview)
+    lua_getfield(L, opts, "mode")
+    if lua_isstring(L, -1) {
+        s := string(lua_tostring_raw(L, -1))
+        switch s {
+        case "preview": out.drag_mode = .Preview
+        case "none":    out.drag_mode = .None
+        case:           fmt.eprintfln(":draggable: unknown :mode %q, defaulting to :preview", s)
+        }
+    }
+    lua_pop(L, 1)
+
+    // :aspect (optional)
+    lua_getfield(L, opts, "aspect")
+    if lua_isstring(L, -1) {
+        out.drag_aspect = strings.clone_from_cstring(lua_tostring_raw(L, -1))
+    }
+    lua_pop(L, 1)
+
+    // :animate (optional, reuse parse_animate_attr against the options table)
+    if dec, ok := parse_animate_attr(L, opts); ok {
+        out.drag_animate = dec
+    }
+
+    lua_pop(L, 1)  // pop opts
+
+    // Slot 3 — payload (any Lua value, stored as registry ref)
+    lua_rawgeti(L, tbl, 3)
+    if !lua_isnil(L, -1) {
+        out.drag_ctx = luaL_ref(L, LUA_REGISTRYINDEX)  // pops value
+    } else {
+        lua_pop(L, 1)
+    }
+}
+
 // Read a drag/drop 3-element vector field: [:group :event payload]
 // Returns group, event as strings, and payload as a Lua registry ref.
 lua_get_drag_drop :: proc(L: ^Lua_State, index: i32, field: cstring) -> (group: string, event: string, ctx: i32) {
