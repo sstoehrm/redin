@@ -95,6 +95,34 @@
   [x y]
   (post-json "/click" {:x x :y y}))
 
+(defn mouse-down
+  "Press the left mouse button at (x, y) via POST /input/mouse-down."
+  [x y]
+  (post-json "/input/mouse-down" {:x x :y y}))
+
+(defn mouse-move
+  "Move the mouse to (x, y) without releasing via POST /input/mouse-move."
+  [x y]
+  (post-json "/input/mouse-move" {:x x :y y}))
+
+(defn mouse-up
+  "Release the left mouse button via POST /input/mouse-up.
+   Optional (x, y) to also update position."
+  ([] (post-json "/input/mouse-up" {}))
+  ([x y] (post-json "/input/mouse-up" {:x x :y y})))
+
+(defn key-press
+  "Queue a key press event via POST /input/key.
+   keyname is a string like \"escape\", \"enter\", \"a\", \"f1\", etc.
+   Optional mods map: {:shift bool :ctrl bool :alt bool :super bool}."
+  ([keyname] (post-json "/input/key" {:key keyname}))
+  ([keyname mods] (post-json "/input/key" {:key keyname :mods mods})))
+
+(defn drag-state
+  "Fetch current drag state via GET /drag-state."
+  []
+  (get-json "/drag-state"))
+
 (defn set-theme
   "Replace the theme via PUT /aspects."
   [theme]

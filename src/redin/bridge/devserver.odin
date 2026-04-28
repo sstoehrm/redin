@@ -584,6 +584,8 @@ process_request :: proc(ds: ^Dev_Server, req: ^Pending_Request) {
 			handle_screenshot(ch)
 		} else if req.path == "/window" {
 			handle_get_window(ch)
+		} else if req.path == "/drag-state" {
+			handle_get_drag_state(ch)
 		} else {
 			respond_text(ch, 404, "Not found")
 		}
@@ -603,6 +605,14 @@ process_request :: proc(ds: ^Dev_Server, req: ^Pending_Request) {
 		} else if req.path == "/restore" {
 			rl.RestoreWindow()
 			respond_json_ok(ch)
+		} else if req.path == "/input/mouse-down" {
+			handle_post_mouse_down(ds, ch, req.body)
+		} else if req.path == "/input/mouse-move" {
+			handle_post_mouse_move(ds, ch, req.body)
+		} else if req.path == "/input/mouse-up" {
+			handle_post_mouse_up(ds, ch, req.body)
+		} else if req.path == "/input/key" {
+			handle_post_key(ds, ch, req.body)
 		} else {
 			respond_text(ch, 404, "Not found")
 		}
@@ -1079,6 +1089,232 @@ handle_put_aspects :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string)
 	} else {
 		lua_pop(L, 1)
 	}
+	respond_json_ok(ch)
+}
+
+// --- Drag state GET ---
+
+handle_get_drag_state :: proc(ch: ^Response_Channel) {
+	b := strings.builder_make()
+	defer strings.builder_destroy(&b)
+
+	switch s in input.drag {
+	case input.Drag_Idle:
+		strings.write_string(&b, `{"state":"idle"}`)
+
+	case input.Drag_Pending:
+		// Build src_tags JSON array.
+		tags_str := drag_tags_to_json(s.src_tags)
+		defer delete(tags_str)
+		src_mode_str := drag_mode_string(s.src_mode)
+		src_event_json := fmt.tprintf("%q", s.src_event)
+		fmt.sbprintf(&b,
+			`{{"state":"pending","src_idx":%d,"over_drop_idx":null,"over_zone_idx":null,"src_tags":%s,"src_event":%s,"src_mode":"%s"}}`,
+			s.src_idx, tags_str, src_event_json, src_mode_str,
+		)
+
+	case input.Drag_Active:
+		tags_str := drag_tags_to_json(s.src_tags)
+		defer delete(tags_str)
+		src_mode_str := drag_mode_string(s.src_mode)
+		src_event_json := fmt.tprintf("%q", s.src_event)
+		over_drop: string
+		over_zone: string
+		if s.over_drop_idx < 0 {
+			over_drop = "null"
+		} else {
+			over_drop = fmt.tprintf("%d", s.over_drop_idx)
+		}
+		if s.over_zone_idx < 0 {
+			over_zone = "null"
+		} else {
+			over_zone = fmt.tprintf("%d", s.over_zone_idx)
+		}
+		fmt.sbprintf(&b,
+			`{{"state":"active","src_idx":%d,"over_drop_idx":%s,"over_zone_idx":%s,"src_tags":%s,"src_event":%s,"src_mode":"%s"}}`,
+			s.src_idx, over_drop, over_zone, tags_str, src_event_json, src_mode_str,
+		)
+
+	case:
+		// Nil union state (should not happen in practice).
+		strings.write_string(&b, `{"state":"idle"}`)
+	}
+
+	respond_json(ch, strings.to_string(b))
+}
+
+@(private)
+drag_tags_to_json :: proc(tags: []string) -> string {
+	if tags == nil || len(tags) == 0 do return "null"
+	b := strings.builder_make()
+	strings.write_byte(&b, '[')
+	for tag, i in tags {
+		if i > 0 do strings.write_byte(&b, ',')
+		fmt.sbprintf(&b, "%q", tag)
+	}
+	strings.write_byte(&b, ']')
+	return strings.to_string(b)
+}
+
+@(private)
+drag_mode_string :: proc(mode: types.Drag_Mode) -> string {
+	switch mode {
+	case .Preview: return "preview"
+	case .None:    return "none"
+	}
+	return "none"
+}
+
+// --- Input override helpers ---
+
+// Parse {x, y} from JSON body. Returns ok=false and responds with 400 if
+// the body is invalid or coordinates are out of range.
+@(private)
+parse_xy_body :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string) -> (x, y: f32, ok: bool) {
+	L := ds.bridge.L
+	pos := 0
+	if !json_decode_value(L, body, &pos) {
+		respond_json_error(ch, 400, `{"error":"invalid JSON"}`)
+		return 0, 0, false
+	}
+	defer lua_pop(L, 1)
+	if !lua_istable(L, -1) {
+		respond_json_error(ch, 400, `{"error":"body must be an object"}`)
+		return 0, 0, false
+	}
+	lua_getfield(L, -1, "x")
+	x = f32(lua_tonumber(L, -1))
+	lua_pop(L, 1)
+	lua_getfield(L, -1, "y")
+	y = f32(lua_tonumber(L, -1))
+	lua_pop(L, 1)
+
+	sw := f32(rl.GetScreenWidth())
+	sh := f32(rl.GetScreenHeight())
+	if math.is_nan(x) || math.is_nan(y) || math.is_inf(x) || math.is_inf(y) ||
+	   x < 0 || y < 0 || x > sw || y > sh {
+		respond_json_error(ch, 400, `{"error":"x,y out of range"}`)
+		return 0, 0, false
+	}
+	return x, y, true
+}
+
+// --- POST /input/mouse-down ---
+
+handle_post_mouse_down :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string) {
+	x, y, ok := parse_xy_body(ds, ch, body)
+	if !ok do return
+	input.fake_mouse_pos = rl.Vector2{x, y}
+	input.fake_lmb_down  = true
+	append(&ds.event_queue, types.InputEvent(types.MouseEvent{x = x, y = y, button = .LEFT}))
+	respond_json_ok(ch)
+}
+
+// --- POST /input/mouse-move ---
+
+handle_post_mouse_move :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string) {
+	x, y, ok := parse_xy_body(ds, ch, body)
+	if !ok do return
+	input.fake_mouse_pos = rl.Vector2{x, y}
+	// fake_lmb_down is unchanged — move-while-held is detected via threshold
+	respond_json_ok(ch)
+}
+
+// --- POST /input/mouse-up ---
+
+handle_post_mouse_up :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string) {
+	// x,y are optional. Parse them only if present and non-empty.
+	if len(strings.trim_space(body)) > 2 {
+		// Body is non-trivial; try to parse x,y. We use the same Lua decoder
+		// but only update fake_mouse_pos when x,y are valid numbers.
+		L := ds.bridge.L
+		pos := 0
+		if !json_decode_value(L, body, &pos) {
+			respond_json_error(ch, 400, `{"error":"invalid JSON"}`)
+			return
+		}
+		defer lua_pop(L, 1)
+		if lua_istable(L, -1) {
+			lua_getfield(L, -1, "x")
+			xv := f32(lua_tonumber(L, -1))
+			lua_pop(L, 1)
+			lua_getfield(L, -1, "y")
+			yv := f32(lua_tonumber(L, -1))
+			lua_pop(L, 1)
+			sw := f32(rl.GetScreenWidth())
+			sh := f32(rl.GetScreenHeight())
+			if !math.is_nan(xv) && !math.is_nan(yv) &&
+			   !math.is_inf(xv) && !math.is_inf(yv) &&
+			   xv >= 0 && yv >= 0 && xv <= sw && yv <= sh {
+				input.fake_mouse_pos = rl.Vector2{xv, yv}
+			}
+		}
+	}
+	input.fake_lmb_down = false
+	respond_json_ok(ch)
+}
+
+// --- POST /input/key ---
+
+handle_post_key :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string) {
+	L := ds.bridge.L
+	pos := 0
+	if !json_decode_value(L, body, &pos) {
+		respond_json_error(ch, 400, `{"error":"invalid JSON"}`)
+		return
+	}
+	defer lua_pop(L, 1)
+	if !lua_istable(L, -1) {
+		respond_json_error(ch, 400, `{"error":"body must be an object"}`)
+		return
+	}
+
+	// Read key name
+	lua_getfield(L, -1, "key")
+	key_cstr := lua_tostring_raw(L, -1)
+	key_str := string(key_cstr)
+	lua_pop(L, 1)
+
+	// Use the shared string_to_key from bridge.odin (returns .KEY_NULL for unknowns).
+	rl_key := string_to_key(strings.to_lower(key_str, context.temp_allocator))
+	if rl_key == .KEY_NULL {
+		respond_json_error(ch, 400, `{"error":"unknown key name"}`)
+		return
+	}
+
+	// Optional mods object
+	mods: types.KeyMods
+	lua_getfield(L, -1, "mods")
+	if lua_istable(L, -1) {
+		lua_getfield(L, -1, "shift")
+		mods.shift = lua_toboolean(L, -1) != 0
+		lua_pop(L, 1)
+		lua_getfield(L, -1, "ctrl")
+		mods.ctrl = lua_toboolean(L, -1) != 0
+		lua_pop(L, 1)
+		lua_getfield(L, -1, "alt")
+		mods.alt = lua_toboolean(L, -1) != 0
+		lua_pop(L, 1)
+		lua_getfield(L, -1, "super")
+		mods.super = lua_toboolean(L, -1) != 0
+		lua_pop(L, 1)
+	}
+	lua_pop(L, 1)
+
+	// Use fake mouse pos if set, else 0,0
+	mx: f32 = 0
+	my: f32 = 0
+	if pos_v, pos_ok := input.fake_mouse_pos.?; pos_ok {
+		mx = pos_v.x
+		my = pos_v.y
+	}
+
+	append(&ds.event_queue, types.InputEvent(types.KeyEvent{
+		x   = mx,
+		y   = my,
+		key = rl_key,
+		mods = mods,
+	}))
 	respond_json_ok(ch)
 }
 

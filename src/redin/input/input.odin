@@ -9,6 +9,23 @@ import rl "vendor:raylib"
 // Currently focused node index, -1 means none.
 focused_idx: int = -1
 
+// Test-mode overrides for raylib mouse state. When unset (nil), the
+// accessors fall through to real raylib state. Set by the dev server
+// via /input/* endpoints. Persists across frames until the test changes
+// or clears it.
+fake_mouse_pos: Maybe(rl.Vector2)
+fake_lmb_down:  Maybe(bool)
+
+mouse_position :: proc() -> rl.Vector2 {
+	if pos, ok := fake_mouse_pos.?; ok do return pos
+	return rl.GetMousePosition()
+}
+
+lmb_down :: proc() -> bool {
+	if d, ok := fake_lmb_down.?; ok do return d
+	return rl.IsMouseButtonDown(.LEFT)
+}
+
 // Deepest event-listener-bearing node under `pt`, or -1 if none.
 // "Deepest" = highest node_idx among listener matches; nodes[] is
 // DFS-ordered, so a descendant always has a higher idx than its

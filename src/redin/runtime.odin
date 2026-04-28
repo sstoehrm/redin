@@ -212,6 +212,14 @@ run :: proc(cfg: Config) {
 		bridge.poll_timers(&b)
 		profile.end(s_br1)
 
+		// Re-extract listeners if render_tick pushed a new frame (which calls
+		// clear_frame, invalidating the node strings that listeners reference).
+		// This must happen after render_tick and before any hit-testing.
+		if b.frame_changed {
+			delete(listeners)
+			listeners = input.extract_listeners(b.paths, b.nodes, b.theme)
+		}
+
 		// --- Input (2/4): listener / focus / drag computation ---
 		s_input2a := profile.begin(.Input)
 		user_events := input.get_user_events(input_events, listeners, node_rects[:])

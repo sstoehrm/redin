@@ -128,7 +128,8 @@ process_drag :: proc(
 	node_rects: []rl.Rectangle,
 ) -> [dynamic]types.Dispatch_Event {
 	dispatch: [dynamic]types.Dispatch_Event
-	mouse := rl.GetMousePosition()
+	mouse := mouse_position()
+
 
 	// Escape cancels any in-flight drag (Pending or Active). When cancelling
 	// from Active with an entered :drag-over zone, fire a final :phase :leave
@@ -142,7 +143,7 @@ process_drag :: proc(
 	}
 	if esc_pressed {
 		switch &s in drag {
-		case Drag_Idle:
+		case Drag_Idle, nil:
 			// Nothing to cancel.
 		case Drag_Pending:
 			free_captured(s.captured)
@@ -163,7 +164,10 @@ process_drag :: proc(
 	}
 
 	switch &s in drag {
-	case Drag_Idle:
+	case Drag_Idle, nil:
+		// nil case: Drag_Idle is a zero-sized struct; Odin's union
+		// discriminant is 0 for nil/zero-value, same as for an unset union.
+		// Treat nil as Idle so the initial state correctly handles mouse-down.
 		// Mouse-down on a DragListener → Pending.
 		for event in input_events {
 			me, is_mouse := event.(types.MouseEvent)
@@ -221,7 +225,7 @@ process_drag :: proc(
 		}
 
 	case Drag_Pending:
-		if rl.IsMouseButtonDown(.LEFT) {
+		if lmb_down() {
 			dx := mouse.x - s.start_pos.x
 			dy := mouse.y - s.start_pos.y
 			if dx*dx + dy*dy >= DRAG_THRESHOLD * DRAG_THRESHOLD {
@@ -280,7 +284,7 @@ process_drag :: proc(
 		}
 		s.over_drop_idx = new_drop
 
-		if !rl.IsMouseButtonDown(.LEFT) {
+		if !lmb_down() {
 			// Drop dispatch.
 			if new_drop >= 0 {
 				drop_event := ""
@@ -344,7 +348,7 @@ node_over_event :: proc(n: types.Node) -> string {
 is_dragging :: proc() -> bool {
 	switch _ in drag {
 	case Drag_Pending, Drag_Active: return true
-	case Drag_Idle:                 return false
+	case Drag_Idle, nil:            return false
 	}
 	return false
 }
