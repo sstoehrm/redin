@@ -117,6 +117,30 @@ check_hotreload :: proc(b: ^Bridge) {
 	}
 }
 
+clear_drag_attrs :: proc(d: ^types.Drag_Attrs) {
+	for s in d.drag_tags do delete(s)
+	if d.drag_tags != nil do delete(d.drag_tags)
+	if len(d.drag_event) > 0 do delete(d.drag_event)
+	if len(d.drag_aspect) > 0 do delete(d.drag_aspect)
+	if dec, ok := d.drag_animate.?; ok && len(dec.provider) > 0 do delete(dec.provider)
+	if d.drag_ctx != 0 do luaL_unref(g_bridge.L, LUA_REGISTRYINDEX, d.drag_ctx)
+
+	for s in d.drop_tags do delete(s)
+	if d.drop_tags != nil do delete(d.drop_tags)
+	if len(d.drop_event) > 0 do delete(d.drop_event)
+	if len(d.drop_aspect) > 0 do delete(d.drop_aspect)
+	if dec, ok := d.drop_animate.?; ok && len(dec.provider) > 0 do delete(dec.provider)
+	if d.drop_ctx != 0 do luaL_unref(g_bridge.L, LUA_REGISTRYINDEX, d.drop_ctx)
+
+	for s in d.over_tags do delete(s)
+	if d.over_tags != nil do delete(d.over_tags)
+	if len(d.over_event) > 0 do delete(d.over_event)
+	if len(d.over_aspect) > 0 do delete(d.over_aspect)
+	if dec, ok := d.over_animate.?; ok && len(dec.provider) > 0 do delete(dec.provider)
+
+	d^ = {}
+}
+
 clear_node_strings :: proc(n: types.Node) {
 	switch v in n {
 	case types.NodeStack:
@@ -131,6 +155,10 @@ clear_node_strings :: proc(n: types.Node) {
 		if len(v.draggable_event) > 0 do delete(v.draggable_event)
 		if len(v.dropable_group) > 0 do delete(v.dropable_group)
 		if len(v.dropable_event) > 0 do delete(v.dropable_event)
+		{
+			d := v.drag
+			clear_drag_attrs(&d)
+		}
 	case types.NodeHbox:
 		if len(v.overflow) > 0 do delete(v.overflow)
 		if len(v.aspect) > 0 do delete(v.aspect)
@@ -138,6 +166,10 @@ clear_node_strings :: proc(n: types.Node) {
 		if len(v.draggable_event) > 0 do delete(v.draggable_event)
 		if len(v.dropable_group) > 0 do delete(v.dropable_group)
 		if len(v.dropable_event) > 0 do delete(v.dropable_event)
+		{
+			d := v.drag
+			clear_drag_attrs(&d)
+		}
 	case types.NodeInput:
 		if len(v.change) > 0 do delete(v.change)
 		if len(v.key) > 0 do delete(v.key)
