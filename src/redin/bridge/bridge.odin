@@ -1640,9 +1640,25 @@ deliver_dispatch_events :: proc(b: ^Bridge, events: []types.Dispatch_Event) {
 			lua_rawseti(L, -2, 1)
 
 		case types.Drag_Over_Event:
-			// not yet dispatched to Lua — wired in a later task
-			lua_pop(L, 2) // pop the events table and redin_events
-			continue
+			// [:dispatch [:event-name {:phase :enter|:leave}]]
+			lua_createtable(L, 2, 0)
+			lua_pushstring(L, "dispatch")
+			lua_rawseti(L, -2, 1)
+
+			lua_createtable(L, 2, 0)
+			ev_name := strings.clone_to_cstring(e.event_name, context.temp_allocator)
+			lua_pushstring(L, ev_name)
+			lua_rawseti(L, -2, 1)
+
+			// {:phase :enter} or {:phase :leave}
+			lua_createtable(L, 0, 1)
+			phase: cstring = e.phase == .Enter ? "enter" : "leave"
+			lua_pushstring(L, phase)
+			lua_setfield(L, -2, "phase")
+			lua_rawseti(L, -2, 2)
+
+			lua_rawseti(L, -2, 2)
+			lua_rawseti(L, -2, 1)
 		}
 
 		if lua_pcall(L, 1, 0, 0) != 0 {
