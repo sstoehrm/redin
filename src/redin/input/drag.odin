@@ -19,16 +19,31 @@ free_string_slice :: proc(s: []string) {
 	if s != nil do delete(s)
 }
 
+// Heap-clone an Animate_Decoration so the captured drag state owns its
+// `provider` string independent of node lifetime. Pass-through nil.
+clone_animate :: proc(src: Maybe(types.Animate_Decoration)) -> Maybe(types.Animate_Decoration) {
+	dec, ok := src.?
+	if !ok do return nil
+	out := dec
+	if len(dec.provider) > 0 do out.provider = strings.clone(dec.provider)
+	return out
+}
+
+// Free an Animate_Decoration's owned provider string, if any.
+free_animate :: proc(m: Maybe(types.Animate_Decoration)) {
+	if dec, ok := m.?; ok && len(dec.provider) > 0 do delete(dec.provider)
+}
+
 // ---- v2 state machine ----
 
 Drag_Captured :: struct {
 	src_idx:     int,
 	start_pos:   rl.Vector2,
-	src_tags:    []string,                       // borrowed from node
-	src_event:   string,
+	src_tags:    []string,                       // owned (heap-cloned at capture)
+	src_event:   string,                         // owned (heap-cloned at capture)
 	src_mode:    types.Drag_Mode,
-	src_aspect:  string,
-	src_animate: Maybe(types.Animate_Decoration),
+	src_aspect:  string,                         // owned
+	src_animate: Maybe(types.Animate_Decoration),// owned (provider string inside)
 	src_ctx_ref: i32,
 }
 
@@ -139,16 +154,16 @@ process_drag :: proc(
 			}
 			switch n in nodes[winner] {
 			case types.NodeVbox:
-				cap.src_event   = n.drag_event
+				cap.src_event   = strings.clone(n.drag_event)
 				cap.src_mode    = n.drag_mode
-				cap.src_aspect  = n.drag_aspect
-				cap.src_animate = n.drag_animate
+				cap.src_aspect  = strings.clone(n.drag_aspect)
+				cap.src_animate = clone_animate(n.drag_animate)
 				cap.src_ctx_ref = n.drag_ctx
 			case types.NodeHbox:
-				cap.src_event   = n.drag_event
+				cap.src_event   = strings.clone(n.drag_event)
 				cap.src_mode    = n.drag_mode
-				cap.src_aspect  = n.drag_aspect
-				cap.src_animate = n.drag_animate
+				cap.src_aspect  = strings.clone(n.drag_aspect)
+				cap.src_animate = clone_animate(n.drag_animate)
 				cap.src_ctx_ref = n.drag_ctx
 			case types.NodeStack, types.NodeCanvas, types.NodeInput,
 				 types.NodeButton, types.NodeText, types.NodeImage,
@@ -179,6 +194,9 @@ process_drag :: proc(
 			}
 		} else {
 			free_string_slice(s.src_tags)
+			if len(s.src_event) > 0 do delete(s.src_event)
+			if len(s.src_aspect) > 0 do delete(s.src_aspect)
+			free_animate(s.src_animate)
 			drag = Drag_Idle{}
 		}
 
@@ -187,6 +205,9 @@ process_drag :: proc(
 		// with our tags, cancel.
 		if s.src_idx < 0 || s.src_idx >= len(nodes) {
 			free_string_slice(s.src_tags)
+			if len(s.src_event) > 0 do delete(s.src_event)
+			if len(s.src_aspect) > 0 do delete(s.src_aspect)
+			free_animate(s.src_animate)
 			drag = Drag_Idle{}
 			return dispatch
 		}
@@ -256,6 +277,9 @@ process_drag :: proc(
 			}
 
 			free_string_slice(s.src_tags)
+			if len(s.src_event) > 0 do delete(s.src_event)
+			if len(s.src_aspect) > 0 do delete(s.src_aspect)
+			free_animate(s.src_animate)
 			drag = Drag_Idle{}
 		}
 	}
