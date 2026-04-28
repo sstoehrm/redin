@@ -1944,6 +1944,59 @@ lua_read_draggable :: proc(L: ^Lua_State, attrs_idx: i32, out: ^types.Drag_Attrs
     }
 }
 
+// Parse `:dropable [tags {options} payload]`.
+lua_read_dropable :: proc(L: ^Lua_State, attrs_idx: i32, out: ^types.Drag_Attrs) {
+    if attrs_idx <= 0 do return
+    lua_getfield(L, attrs_idx, "dropable")
+    defer lua_pop(L, 1)
+    if !lua_istable(L, -1) do return
+    tbl := lua_gettop(L)
+
+    out.drop_tags = lua_read_tags(L, tbl, 1)
+    if len(out.drop_tags) == 0 {
+        fmt.eprintln(":dropable: missing or empty tag list, skipping")
+        return
+    }
+
+    lua_rawgeti(L, tbl, 2)
+    if !lua_istable(L, -1) {
+        lua_pop(L, 1)
+        fmt.eprintln(":dropable: expected options table at slot 2, skipping")
+        return
+    }
+    opts := lua_gettop(L)
+
+    lua_getfield(L, opts, "event")
+    if lua_isstring(L, -1) {
+        out.drop_event = strings.clone_from_cstring(lua_tostring_raw(L, -1))
+    }
+    lua_pop(L, 1)
+    if len(out.drop_event) == 0 {
+        fmt.eprintln(":dropable: missing :event in options, skipping")
+        lua_pop(L, 1)
+        return
+    }
+
+    lua_getfield(L, opts, "aspect")
+    if lua_isstring(L, -1) {
+        out.drop_aspect = strings.clone_from_cstring(lua_tostring_raw(L, -1))
+    }
+    lua_pop(L, 1)
+
+    if dec, ok := parse_animate_attr(L, opts); ok {
+        out.drop_animate = dec
+    }
+
+    lua_pop(L, 1)
+
+    lua_rawgeti(L, tbl, 3)
+    if !lua_isnil(L, -1) {
+        out.drop_ctx = luaL_ref(L, LUA_REGISTRYINDEX)
+    } else {
+        lua_pop(L, 1)
+    }
+}
+
 // Read a drag/drop 3-element vector field: [:group :event payload]
 // Returns group, event as strings, and payload as a Lua registry ref.
 lua_get_drag_drop :: proc(L: ^Lua_State, index: i32, field: cstring) -> (group: string, event: string, ctx: i32) {
