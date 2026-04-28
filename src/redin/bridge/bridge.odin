@@ -1834,6 +1834,44 @@ lua_get_number_field :: proc(L: ^Lua_State, index: i32, field: cstring) -> f32 {
 	return 0
 }
 
+// Reads slot at `slot_idx` of the table at `tbl_idx` as a tag list:
+//   - a string keyword → one-element slice
+//   - a Lua array of strings → cloned multi-element slice
+//   - anything else → empty slice
+// Returned strings are heap-cloned and owned by the caller (freed by
+// clear_node_strings via Drag_Attrs cleanup).
+lua_read_tags :: proc(L: ^Lua_State, tbl_idx: i32, slot_idx: i32) -> []string {
+    lua_rawgeti(L, tbl_idx, slot_idx)
+    defer lua_pop(L, 1)
+
+    if lua_isstring(L, -1) {
+        out := make([]string, 1)
+        out[0] = strings.clone_from_cstring(lua_tostring_raw(L, -1))
+        return out
+    }
+
+    if lua_istable(L, -1) {
+        n := int(lua_objlen(L, -1))
+        if n == 0 do return nil
+        list_idx := lua_gettop(L)
+        tmp: [dynamic]string
+        defer delete(tmp)
+        for i in 1..=n {
+            lua_rawgeti(L, list_idx, i32(i))
+            if lua_isstring(L, -1) {
+                append(&tmp, strings.clone_from_cstring(lua_tostring_raw(L, -1)))
+            }
+            lua_pop(L, 1)
+        }
+        if len(tmp) == 0 do return nil
+        out := make([]string, len(tmp))
+        copy(out, tmp[:])
+        return out
+    }
+
+    return nil
+}
+
 // Read a drag/drop 3-element vector field: [:group :event payload]
 // Returns group, event as strings, and payload as a Lua registry ref.
 lua_get_drag_drop :: proc(L: ^Lua_State, index: i32, field: cstring) -> (group: string, event: string, ctx: i32) {
