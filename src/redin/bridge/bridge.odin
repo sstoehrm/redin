@@ -1997,6 +1997,47 @@ lua_read_dropable :: proc(L: ^Lua_State, attrs_idx: i32, out: ^types.Drag_Attrs)
     }
 }
 
+// Parse `:drag-over [tags {options}]` (no payload slot).
+lua_read_drag_over :: proc(L: ^Lua_State, attrs_idx: i32, out: ^types.Drag_Attrs) {
+    if attrs_idx <= 0 do return
+    lua_getfield(L, attrs_idx, "drag-over")
+    defer lua_pop(L, 1)
+    if !lua_istable(L, -1) do return
+    tbl := lua_gettop(L)
+
+    out.over_tags = lua_read_tags(L, tbl, 1)
+    if len(out.over_tags) == 0 {
+        fmt.eprintln(":drag-over: missing or empty tag list, skipping")
+        return
+    }
+
+    lua_rawgeti(L, tbl, 2)
+    if !lua_istable(L, -1) {
+        lua_pop(L, 1)
+        return
+    }
+    opts := lua_gettop(L)
+
+    // :event is OPTIONAL on :drag-over (visual-only zones don't need a handler)
+    lua_getfield(L, opts, "event")
+    if lua_isstring(L, -1) {
+        out.over_event = strings.clone_from_cstring(lua_tostring_raw(L, -1))
+    }
+    lua_pop(L, 1)
+
+    lua_getfield(L, opts, "aspect")
+    if lua_isstring(L, -1) {
+        out.over_aspect = strings.clone_from_cstring(lua_tostring_raw(L, -1))
+    }
+    lua_pop(L, 1)
+
+    if dec, ok := parse_animate_attr(L, opts); ok {
+        out.over_animate = dec
+    }
+
+    lua_pop(L, 1)
+}
+
 // Read a drag/drop 3-element vector field: [:group :event payload]
 // Returns group, event as strings, and payload as a Lua registry ref.
 lua_get_drag_drop :: proc(L: ^Lua_State, index: i32, field: cstring) -> (group: string, event: string, ctx: i32) {
