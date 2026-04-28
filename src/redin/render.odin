@@ -528,6 +528,81 @@ draw_children :: proc(
 	}
 }
 
+// Render the subtree rooted at `idx` translated by `delta` and clipping
+// no rects — used by the drag preview overlay. Does not write node_rects /
+// node_content_rects, so the clone is click-through.
+//
+// `override_aspect_for_root` is applied to the root if non-empty (lets the
+// preview clone use a different aspect than the source).
+draw_subtree_translated :: proc(
+	idx: int,
+	delta: rl.Vector2,
+	override_aspect_for_root: string,
+	nodes: []types.Node,
+	children_list: []types.Children,
+	theme: map[string]types.Theme,
+) {
+	if idx < 0 || idx >= len(nodes) do return
+	rect := node_rects[idx]
+	rect.x += delta.x
+	rect.y += delta.y
+	content_rect := node_content_rects[idx]
+	content_rect.x += delta.x
+	content_rect.y += delta.y
+
+	is_root := len(override_aspect_for_root) > 0
+
+	switch n in nodes[idx] {
+	case types.NodeStack:
+		draw_subtree_children_translated(idx, delta, nodes, children_list, theme)
+	case types.NodeVbox:
+		aspect := is_root ? override_aspect_for_root : n.aspect
+		draw_box_chrome(idx, rect, aspect, theme)
+		draw_subtree_children_translated(idx, delta, nodes, children_list, theme)
+	case types.NodeHbox:
+		aspect := is_root ? override_aspect_for_root : n.aspect
+		draw_box_chrome(idx, rect, aspect, theme)
+		draw_subtree_children_translated(idx, delta, nodes, children_list, theme)
+	case types.NodeButton:
+		b := n
+		if is_root do b.aspect = override_aspect_for_root
+		draw_button(rect, b, theme)
+	case types.NodeText:
+		// Pass idx = -1 — the proc treats negative idx as "no selection,
+		// no scroll-offset persistence" (see step 2 of this task).
+		t := n
+		if is_root do t.aspect = override_aspect_for_root
+		draw_text(-1, rect, t, theme)
+	case types.NodeImage:
+		aspect := is_root ? override_aspect_for_root : n.aspect
+		draw_themed_rect(rect, aspect, theme)
+		rl.DrawRectangleLinesEx(rect, 1, rl.GRAY)
+	case types.NodeCanvas:
+		// Canvas providers paint into content_rect — translation is enough.
+		if len(n.provider) > 0 do canvas.process(n.provider, content_rect)
+	case types.NodeInput:
+		// Inputs in the preview clone aren't focusable; render as a styled rect.
+		draw_themed_rect(rect, n.aspect, theme)
+	case types.NodePopout, types.NodeModal:
+		// Popouts/modals don't make sense inside a drag preview; skip.
+	}
+}
+
+draw_subtree_children_translated :: proc(
+	idx: int,
+	delta: rl.Vector2,
+	nodes: []types.Node,
+	children_list: []types.Children,
+	theme: map[string]types.Theme,
+) {
+	ch := children_list[idx]
+	for i in 0 ..< int(ch.length) {
+		// Children take the source's normal aspect, not the override —
+		// override only applies to the clone root.
+		draw_subtree_translated(int(ch.value[i]), delta, "", nodes, children_list, theme)
+	}
+}
+
 draw_box_chrome :: proc(
 	idx: int,
 	rect: rl.Rectangle,
@@ -1168,17 +1243,19 @@ draw_text :: proc(idx: int, rect: rl.Rectangle, n: types.NodeText, theme: map[st
 
 	scroll_y: f32 = 0
 	scroll_x: f32 = 0
-	if scrollable_y {
-		scroll_y = scroll_offsets[idx] if idx in scroll_offsets else 0
-		total_h := f32(len(lines)) * lh
-		max_scroll := total_h - rect.height
-		if max_scroll < 0 do max_scroll = 0
-		if scroll_y > max_scroll do scroll_y = max_scroll
-		if scroll_y < 0 do scroll_y = 0
-		scroll_offsets[idx] = scroll_y
-	}
-	if scrollable_x {
-		scroll_x = scroll_offsets_x[idx] if idx in scroll_offsets_x else 0
+	if idx >= 0 {
+		if scrollable_y {
+			scroll_y = scroll_offsets[idx] if idx in scroll_offsets else 0
+			total_h := f32(len(lines)) * lh
+			max_scroll := total_h - rect.height
+			if max_scroll < 0 do max_scroll = 0
+			if scroll_y > max_scroll do scroll_y = max_scroll
+			if scroll_y < 0 do scroll_y = 0
+			scroll_offsets[idx] = scroll_y
+		}
+		if scrollable_x {
+			scroll_x = scroll_offsets_x[idx] if idx in scroll_offsets_x else 0
+		}
 	}
 
 	// Clip when content may overflow the rect
@@ -1198,7 +1275,7 @@ draw_text :: proc(idx: int, rect: rl.Rectangle, n: types.NodeText, theme: map[st
 	}
 
 	// Render text-selection highlight when this NodeText is the active target.
-	if input.state.selection_kind == .Text && idx < len(g_paths) {
+	if idx >= 0 && input.state.selection_kind == .Text && idx < len(g_paths) {
 		this_path := g_paths[idx]
 		sel_path := input.state.selection_path
 		matches := int(this_path.length) == len(sel_path)
