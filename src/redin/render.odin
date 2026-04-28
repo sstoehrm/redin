@@ -705,8 +705,10 @@ draw_box_chrome :: proc(
 
 node_drag_animate :: proc(n: types.Node) -> Maybe(types.Animate_Decoration) {
 	switch v in n {
-	case types.NodeVbox: return v.drag_animate
-	case types.NodeHbox: return v.drag_animate
+	case types.NodeVbox:
+		if d, ok := v.draggable.?; ok do return d.animate
+	case types.NodeHbox:
+		if d, ok := v.draggable.?; ok do return d.animate
 	case types.NodeStack, types.NodeCanvas, types.NodeInput,
 		 types.NodeButton, types.NodeText, types.NodeImage,
 		 types.NodePopout, types.NodeModal:
@@ -715,8 +717,10 @@ node_drag_animate :: proc(n: types.Node) -> Maybe(types.Animate_Decoration) {
 }
 node_drop_animate :: proc(n: types.Node) -> Maybe(types.Animate_Decoration) {
 	switch v in n {
-	case types.NodeVbox: return v.drop_animate
-	case types.NodeHbox: return v.drop_animate
+	case types.NodeVbox:
+		if d, ok := v.dropable.?; ok do return d.animate
+	case types.NodeHbox:
+		if d, ok := v.dropable.?; ok do return d.animate
 	case types.NodeStack, types.NodeCanvas, types.NodeInput,
 		 types.NodeButton, types.NodeText, types.NodeImage,
 		 types.NodePopout, types.NodeModal:
@@ -725,8 +729,10 @@ node_drop_animate :: proc(n: types.Node) -> Maybe(types.Animate_Decoration) {
 }
 node_over_animate :: proc(n: types.Node) -> Maybe(types.Animate_Decoration) {
 	switch v in n {
-	case types.NodeVbox: return v.over_animate
-	case types.NodeHbox: return v.over_animate
+	case types.NodeVbox:
+		if d, ok := v.drag_over.?; ok do return d.animate
+	case types.NodeHbox:
+		if d, ok := v.drag_over.?; ok do return d.animate
 	case types.NodeStack, types.NodeCanvas, types.NodeInput,
 		 types.NodeButton, types.NodeText, types.NodeImage,
 		 types.NodePopout, types.NodeModal:
@@ -747,8 +753,10 @@ effective_aspect_for_drag :: proc(idx: int, base_aspect: string, n: types.Node) 
 	// Drop target currently hovered swaps to drop aspect.
 	if a.over_drop_idx == idx {
 		switch v in n {
-		case types.NodeVbox: if len(v.drop_aspect) > 0 do return v.drop_aspect
-		case types.NodeHbox: if len(v.drop_aspect) > 0 do return v.drop_aspect
+		case types.NodeVbox:
+			if d, ok := v.dropable.?; ok && len(d.aspect) > 0 do return d.aspect
+		case types.NodeHbox:
+			if d, ok := v.dropable.?; ok && len(d.aspect) > 0 do return d.aspect
 		case types.NodeStack, types.NodeCanvas, types.NodeInput,
 			 types.NodeButton, types.NodeText, types.NodeImage,
 			 types.NodePopout, types.NodeModal:
@@ -757,8 +765,10 @@ effective_aspect_for_drag :: proc(idx: int, base_aspect: string, n: types.Node) 
 	// Container zone hovered swaps to over aspect.
 	if a.over_zone_idx == idx {
 		switch v in n {
-		case types.NodeVbox: if len(v.over_aspect) > 0 do return v.over_aspect
-		case types.NodeHbox: if len(v.over_aspect) > 0 do return v.over_aspect
+		case types.NodeVbox:
+			if d, ok := v.drag_over.?; ok && len(d.aspect) > 0 do return d.aspect
+		case types.NodeHbox:
+			if d, ok := v.drag_over.?; ok && len(d.aspect) > 0 do return d.aspect
 		case types.NodeStack, types.NodeCanvas, types.NodeInput,
 			 types.NodeButton, types.NodeText, types.NodeImage,
 			 types.NodePopout, types.NodeModal:

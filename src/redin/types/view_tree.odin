@@ -51,28 +51,31 @@ Drag_Mode :: enum u8 {
 	None,    // no clone — source receives aspect/animate in place
 }
 
-// Bundled drag/drop/over fields embedded in container nodes via `using`.
-Drag_Attrs :: struct {
-	// :draggable — declares "what I am" + how I behave while dragged.
-	drag_tags:    []string,                  // owned slice of cloned strings
-	drag_event:   string,                    // owned, freed by clear_node_strings
-	drag_mode:    Drag_Mode,                 // zero = .Preview
-	drag_aspect:  string,                    // owned
-	drag_animate: Maybe(Animate_Decoration), // owned provider string inside
-	drag_ctx:     i32,                       // Lua registry ref (0 = none)
+// :draggable — declares "what I am" + how I behave while dragged.
+Draggable_Attrs :: struct {
+	tags:    []string,                  // owned slice of cloned strings
+	event:   string,                    // owned, freed by clear_node_strings
+	mode:    Drag_Mode,                 // zero = .Preview
+	aspect:  string,                    // owned
+	animate: Maybe(Animate_Decoration), // owned provider string inside
+	ctx:     i32,                       // Lua registry ref (0 = none)
+}
 
-	// :dropable — declares "what I accept" + how it looks on hover.
-	drop_tags:    []string,
-	drop_event:   string,
-	drop_aspect:  string,
-	drop_animate: Maybe(Animate_Decoration),
-	drop_ctx:     i32,
+// :dropable — declares "what I accept" + how it looks on hover.
+Dropable_Attrs :: struct {
+	tags:    []string,
+	event:   string,
+	aspect:  string,
+	animate: Maybe(Animate_Decoration),
+	ctx:     i32,
+}
 
-	// :drag-over — container-level zone (no payload).
-	over_tags:    []string,
-	over_event:   string,
-	over_aspect:  string,
-	over_animate: Maybe(Animate_Decoration),
+// :drag-over — container-level zone (no payload).
+Drag_Over_Attrs :: struct {
+	tags:    []string,
+	event:   string,
+	aspect:  string,
+	animate: Maybe(Animate_Decoration),
 }
 
 Path :: struct {
@@ -114,7 +117,9 @@ NodeVbox :: struct {
 		SizeValue,
 		f16,
 	},
-	using drag: Drag_Attrs,
+	draggable:  Maybe(Draggable_Attrs),
+	dropable:   Maybe(Dropable_Attrs),
+	drag_over:  Maybe(Drag_Over_Attrs),
 }
 
 NodeHbox :: struct {
@@ -129,7 +134,9 @@ NodeHbox :: struct {
 		SizeValue,
 		f32,
 	},
-	using drag: Drag_Attrs,
+	draggable:  Maybe(Draggable_Attrs),
+	dropable:   Maybe(Dropable_Attrs),
+	drag_over:  Maybe(Drag_Over_Attrs),
 }
 
 NodeInput :: struct {

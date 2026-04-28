@@ -154,17 +154,21 @@ process_drag :: proc(
 			}
 			switch n in nodes[winner] {
 			case types.NodeVbox:
-				cap.src_event   = strings.clone(n.drag_event)
-				cap.src_mode    = n.drag_mode
-				cap.src_aspect  = strings.clone(n.drag_aspect)
-				cap.src_animate = clone_animate(n.drag_animate)
-				cap.src_ctx_ref = n.drag_ctx
+				if d, ok := n.draggable.?; ok {
+					cap.src_event   = strings.clone(d.event)
+					cap.src_mode    = d.mode
+					cap.src_aspect  = strings.clone(d.aspect)
+					cap.src_animate = clone_animate(d.animate)
+					cap.src_ctx_ref = d.ctx
+				}
 			case types.NodeHbox:
-				cap.src_event   = strings.clone(n.drag_event)
-				cap.src_mode    = n.drag_mode
-				cap.src_aspect  = strings.clone(n.drag_aspect)
-				cap.src_animate = clone_animate(n.drag_animate)
-				cap.src_ctx_ref = n.drag_ctx
+				if d, ok := n.draggable.?; ok {
+					cap.src_event   = strings.clone(d.event)
+					cap.src_mode    = d.mode
+					cap.src_aspect  = strings.clone(d.aspect)
+					cap.src_animate = clone_animate(d.animate)
+					cap.src_ctx_ref = d.ctx
+				}
 			case types.NodeStack, types.NodeCanvas, types.NodeInput,
 				 types.NodeButton, types.NodeText, types.NodeImage,
 				 types.NodePopout, types.NodeModal:
@@ -248,11 +252,15 @@ process_drag :: proc(
 				drop_ctx: i32 = 0
 				switch n in nodes[new_drop] {
 				case types.NodeVbox:
-					drop_event = n.drop_event
-					drop_ctx   = n.drop_ctx
+					if d, ok := n.dropable.?; ok {
+						drop_event = d.event
+						drop_ctx   = d.ctx
+					}
 				case types.NodeHbox:
-					drop_event = n.drop_event
-					drop_ctx   = n.drop_ctx
+					if d, ok := n.dropable.?; ok {
+						drop_event = d.event
+						drop_ctx   = d.ctx
+					}
 				case types.NodeStack, types.NodeCanvas, types.NodeInput,
 					 types.NodeButton, types.NodeText, types.NodeImage,
 					 types.NodePopout, types.NodeModal:
@@ -290,12 +298,13 @@ process_drag :: proc(
 // Helper — extract :drag-over event name from a node, "" if not a container or no event.
 node_over_event :: proc(n: types.Node) -> string {
 	switch v in n {
-	case types.NodeVbox: return v.over_event
-	case types.NodeHbox: return v.over_event
+	case types.NodeVbox:
+		if d, ok := v.drag_over.?; ok do return d.event
+	case types.NodeHbox:
+		if d, ok := v.drag_over.?; ok do return d.event
 	case types.NodeStack, types.NodeCanvas, types.NodeInput,
 		 types.NodeButton, types.NodeText, types.NodeImage,
 		 types.NodePopout, types.NodeModal:
-		return ""
 	}
 	return ""
 }
