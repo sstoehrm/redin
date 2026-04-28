@@ -71,9 +71,15 @@
                                      :border_width 2
                                      :radius 4}
                       :row {:padding [4 4 4 4]}
-                      :row#drag {:bg [76 86 106]}
-                      :row#drag-start {:bg [136 46 106]}
+                      :row-dragging {:bg [136 46 106]
+                                     :padding [4 4 4 4]
+                                     :radius 4}
+                      :row-drop-hot {:bg [76 86 106]
+                                     :padding [4 4 4 4]}
                       :muted {:font-size 13 :color [76 86 106]}
+                      :muted-armed {:font-size 13
+                                    :color [76 86 106]
+                                    :bg [54 60 72]}
                       :input {:bg [59 66 82]
                               :color [236 239 244]
                               :border [76 86 106]
@@ -146,6 +152,8 @@
 
 (reg-handler :event/drag (fn [db event] db))
 
+(reg-handler :event/over (fn [db event] db))
+
 (reg-handler :event/drop (fn [db event]
                            (let [ctx (. event 2)
                                  from-idx ctx.from
@@ -206,14 +214,28 @@
                                      :z :above}}
                           "Add"]
                          [:vbox
-                          {:overflow :scroll-y :aspect :muted}
+                          {:overflow :scroll-y
+                           :aspect :muted
+                           :drag-over [:row-drag
+                                       {:event :event/over
+                                        :aspect :muted-armed}]}
                           (icollect [i item (ipairs (or items []))]
                             [:hbox
                              {:layout :center
                               :aspect :row
                               :height 42
-                              :draggable [:row :event/drag i]
-                              :dropable [:row :event/drop i]}
+                              :draggable [:row-drag
+                                          {:mode :preview
+                                           :event :event/drag
+                                           :aspect :row-dragging
+                                           :animate {:provider :pulse-dot
+                                                     :rect [:top_right -6 -6 12 12]
+                                                     :z :above}}
+                                          i]
+                              :dropable [:row-drag
+                                         {:event :event/drop
+                                          :aspect :row-drop-hot}
+                                         i]}
                              [:text {:aspect :body} item.text]
                              [:button
                               {:width 250

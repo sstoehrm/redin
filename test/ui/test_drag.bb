@@ -60,3 +60,31 @@
   (assert-element {:tag :text :id :item-2 :text "B"})
   (assert-element {:tag :text :id :item-3 :text "C"})
   (assert-element {:tag :text :id :item-4 :text "D"}))
+
+;; -- Drag-over phase events --
+
+(deftest drag-over-enter-fires
+  (dispatch ["event/reset"])
+  (wait-ms 200)
+  ;; Synthesise an :event/over with :phase :enter (the framework would fire
+  ;; this when a compatible drag enters the zone; here we test the handler
+  ;; receives it correctly)
+  (dispatch ["event/over" {:phase "enter"}])
+  (wait-for (state= "last-over" "enter") {:timeout 2000}))
+
+(deftest drag-over-leave-fires
+  (dispatch ["event/over" {:phase "leave"}])
+  (wait-for (state= "last-over" "leave") {:timeout 2000}))
+
+;; -- Tag-aware drop --
+
+(deftest drop-shape-includes-tags-context
+  ;; The framework filters drops by tag intersection; here the handler
+  ;; just receives :from / :to. This case verifies the handler still gets
+  ;; the right shape after the API change.
+  (dispatch ["event/reset"])
+  (wait-ms 200)
+  (dispatch ["event/drop" {:from 1 :to 4}])
+  (wait-ms 200)
+  (assert-state "last-drop.from" #(= % 1) "from preserved")
+  (assert-state "last-drop.to"   #(= % 4) "to preserved"))

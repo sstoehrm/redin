@@ -1,18 +1,24 @@
-;; Test app for drag-and-drop UI tests
+;; Test app for drag-and-drop UI tests (v2 API)
 (local dataflow (require :dataflow))
 (local theme-mod (require :theme))
 
 (theme-mod.set-theme
-  {:surface {:bg [46 52 64] :padding [24 24 24 24]}
-   :body    {:font-size 14 :color [216 222 233]}
-   :row     {:padding [4 4 4 4]}
-   :row#drag {:bg [76 86 106]}
-   :row#drag-start {:bg [136 46 106]}})
+  {:surface       {:bg [46 52 64] :padding [24 24 24 24]}
+   :body          {:font-size 14 :color [216 222 233]}
+   :row           {:padding [4 4 4 4]}
+   :row-dragging  {:bg [136 46 106] :padding [4 4 4 4] :radius 4}
+   :row-drop-hot  {:bg [76 86 106] :padding [4 4 4 4]}
+   :muted         {:font-size 13 :color [76 86 106]}
+   :muted-armed   {:font-size 13 :color [76 86 106] :bg [54 60 72]}})
 
 (dataflow.init
-  {:items [{:text "A"} {:text "B"} {:text "C"} {:text "D"}]
+  {:items [{:text "A" :kind :sword}
+           {:text "B" :kind :shield}
+           {:text "C" :kind :sword}
+           {:text "D" :kind :shield}]
    :last-drag nil
-   :last-drop nil})
+   :last-drop nil
+   :last-over nil})
 
 (global redin_get_state (. dataflow :_get-raw-db))
 
@@ -21,55 +27,65 @@
     (let [ctx (. event 2)]
       (assoc db :last-drag ctx.value))))
 
-(reg-handler :event/drop
+(reg-handler :event/over
   (fn [db event]
     (let [ctx (. event 2)]
-      (assoc db :last-drop {:from ctx.from :to ctx.to})
-      ;; Reorder items: move item at :from to position :to
-      (let [from-idx ctx.from
-            to-idx ctx.to
-            items (get db :items [])]
-        (when (and from-idx to-idx
-                   (> from-idx 0) (<= from-idx (length items))
-                   (> to-idx 0) (<= to-idx (length items))
-                   (not= from-idx to-idx))
-          (let [item (. items from-idx)
-                new-items (icollect [i v (ipairs items)]
-                            (when (not= i from-idx) v))]
-            ;; Insert at to-idx (adjust if removing shifted indices)
-            (let [insert-at (if (> from-idx to-idx) to-idx (- to-idx 1))]
-              (table.insert new-items (math.min insert-at (+ (length new-items) 1)) item)
-              (assoc db :items new-items)))))
+      (assoc db :last-over ctx.phase))))
+
+(reg-handler :event/drop
+  (fn [db event]
+    (let [ctx (. event 2)
+          from-idx ctx.from
+          to-idx   ctx.to
+          items    (get db :items [])]
+      (assoc db :last-drop {:from from-idx :to to-idx})
+      (when (and from-idx to-idx
+                 (> from-idx 0) (<= from-idx (length items))
+                 (> to-idx 0)   (<= to-idx (length items))
+                 (not= from-idx to-idx))
+        (let [item (. items from-idx)
+              new-items (icollect [i v (ipairs items)]
+                          (when (not= i from-idx) v))]
+          (let [insert-at (if (> from-idx to-idx) to-idx (- to-idx 1))]
+            (table.insert new-items (math.min insert-at (+ (length new-items) 1)) item)
+            (assoc db :items new-items))))
       db)))
 
 (reg-handler :event/reset
   (fn [db event]
-    (assoc (assoc (assoc db :items [{:text "A"} {:text "B"} {:text "C"} {:text "D"}])
-                  :last-drag nil)
-           :last-drop nil)))
+    (-> db
+        (assoc :items [{:text "A" :kind :sword}
+                       {:text "B" :kind :shield}
+                       {:text "C" :kind :sword}
+                       {:text "D" :kind :shield}])
+        (assoc :last-drag nil)
+        (assoc :last-drop nil)
+        (assoc :last-over nil))))
 
-(reg-sub :items (fn [db] (get db :items [])))
+(reg-sub :items     (fn [db] (get db :items [])))
 (reg-sub :last-drag (fn [db] (get db :last-drag)))
 (reg-sub :last-drop (fn [db] (get db :last-drop)))
+(reg-sub :last-over (fn [db] (get db :last-over)))
 
 (global main_view
   (fn []
-    (let [items (subscribe :items)
-          last-drag (subscribe :last-drag)
-          last-drop (subscribe :last-drop)]
+    (let [items (subscribe :items)]
       [:vbox {:aspect :surface}
-       [:text {:id :title :aspect :body} "Drag Test"]
-       [:text {:id :last-drag-val :aspect :body}
-        (.. "drag:" (tostring (or last-drag "")))]
-       [:text {:id :last-drop-from :aspect :body}
-        (.. "drop-from:" (tostring (or (and last-drop last-drop.from) "")))]
-       [:text {:id :last-drop-to :aspect :body}
-        (.. "drop-to:" (tostring (or (and last-drop last-drop.to) "")))]
-       [:vbox {:id :item-list}
+       [:text {:id :title :aspect :body} "Drag Test v2"]
+       [:vbox {:id :item-list
+               :aspect :muted
+               :drag-over [:item {:event :event/over :aspect :muted-armed}]}
         (icollect [i item (ipairs (or items []))]
           [:hbox {:id (.. :row- (tostring i))
                   :aspect :row
                   :height 42
-                  :draggable [:row :event/drag i]
-                  :dropable [:row :event/drop i]}
+                  :draggable [[:item item.kind]
+                              {:mode :preview
+                               :event :event/drag
+                               :aspect :row-dragging}
+                              i]
+                  :dropable [[:item item.kind]
+                             {:event :event/drop
+                              :aspect :row-drop-hot}
+                             i]}
            [:text {:id (.. :item- (tostring i)) :aspect :body} item.text]])]])))

@@ -152,14 +152,14 @@ State variants use `#` notation. The renderer resolves variants by appending `#s
 | focus      | `#focus`      | Keyboard focus                         |
 | active     | `#active`     | Mouse button down                      |
 | disabled   | `#disabled`   | Disabled element                       |
-| drag-start | `#drag-start` | Node is being dragged                  |
-| drag       | `#drag`       | Compatible drag hovers over drop target |
 
 ```fennel
 {:button        {:bg [76 86 106] :color [236 239 244]}
  :button#hover  {:bg [94 105 126]}}
 ;; On hover: bg changes to [94 105 126], color stays [236 239 244]
 ```
+
+Drag-and-drop visual feedback is no longer expressed via `#`-cascade variants. It lives on the `:draggable`, `:dropable`, and `:drag-over` attributes' `:aspect` field, which performs a direct aspect swap while the relevant drag state is active. See [docs/core-api.md § Drag-and-drop](../core-api.md#drag-and-drop) for the full attribute reference and examples.
 
 ### Composition + state merge order
 

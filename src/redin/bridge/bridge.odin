@@ -118,6 +118,38 @@ check_hotreload :: proc(b: ^Bridge) {
 	}
 }
 
+clear_draggable_attrs :: proc(m: Maybe(types.Draggable_Attrs)) {
+	d, ok := m.?
+	if !ok do return
+	for s in d.tags do delete(s)
+	if d.tags != nil do delete(d.tags)
+	if len(d.event) > 0 do delete(d.event)
+	if len(d.aspect) > 0 do delete(d.aspect)
+	if dec, ok2 := d.animate.?; ok2 && len(dec.provider) > 0 do delete(dec.provider)
+	if d.ctx != 0 do luaL_unref(g_bridge.L, LUA_REGISTRYINDEX, d.ctx)
+}
+
+clear_dropable_attrs :: proc(m: Maybe(types.Dropable_Attrs)) {
+	d, ok := m.?
+	if !ok do return
+	for s in d.tags do delete(s)
+	if d.tags != nil do delete(d.tags)
+	if len(d.event) > 0 do delete(d.event)
+	if len(d.aspect) > 0 do delete(d.aspect)
+	if dec, ok2 := d.animate.?; ok2 && len(dec.provider) > 0 do delete(dec.provider)
+	if d.ctx != 0 do luaL_unref(g_bridge.L, LUA_REGISTRYINDEX, d.ctx)
+}
+
+clear_drag_over_attrs :: proc(m: Maybe(types.Drag_Over_Attrs)) {
+	d, ok := m.?
+	if !ok do return
+	for s in d.tags do delete(s)
+	if d.tags != nil do delete(d.tags)
+	if len(d.event) > 0 do delete(d.event)
+	if len(d.aspect) > 0 do delete(d.aspect)
+	if dec, ok2 := d.animate.?; ok2 && len(dec.provider) > 0 do delete(dec.provider)
+}
+
 clear_node_strings :: proc(n: types.Node) {
 	switch v in n {
 	case types.NodeStack:
@@ -128,17 +160,15 @@ clear_node_strings :: proc(n: types.Node) {
 	case types.NodeVbox:
 		if len(v.overflow) > 0 do delete(v.overflow)
 		if len(v.aspect) > 0 do delete(v.aspect)
-		if len(v.draggable_group) > 0 do delete(v.draggable_group)
-		if len(v.draggable_event) > 0 do delete(v.draggable_event)
-		if len(v.dropable_group) > 0 do delete(v.dropable_group)
-		if len(v.dropable_event) > 0 do delete(v.dropable_event)
+		clear_draggable_attrs(v.draggable)
+		clear_dropable_attrs(v.dropable)
+		clear_drag_over_attrs(v.drag_over)
 	case types.NodeHbox:
 		if len(v.overflow) > 0 do delete(v.overflow)
 		if len(v.aspect) > 0 do delete(v.aspect)
-		if len(v.draggable_group) > 0 do delete(v.draggable_group)
-		if len(v.draggable_event) > 0 do delete(v.draggable_event)
-		if len(v.dropable_group) > 0 do delete(v.dropable_group)
-		if len(v.dropable_event) > 0 do delete(v.dropable_event)
+		clear_draggable_attrs(v.draggable)
+		clear_dropable_attrs(v.dropable)
+		clear_drag_over_attrs(v.drag_over)
 	case types.NodeInput:
 		if len(v.change) > 0 do delete(v.change)
 		if len(v.key) > 0 do delete(v.key)
@@ -1146,8 +1176,9 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 			if len(layout) > 0 {
 				v.layout = parse_anchor(layout)
 			}
-			v.draggable_group, v.draggable_event, v.draggable_ctx = lua_get_drag_drop(L, attrs_idx, "draggable")
-			v.dropable_group, v.dropable_event, v.dropable_ctx = lua_get_drag_drop(L, attrs_idx, "dropable")
+			v.draggable = lua_read_draggable(L, attrs_idx)
+			v.dropable  = lua_read_dropable (L, attrs_idx)
+			v.drag_over = lua_read_drag_over(L, attrs_idx)
 		}
 		return v
 
@@ -1162,8 +1193,9 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 			if len(layout) > 0 {
 				h.layout = parse_anchor(layout)
 			}
-			h.draggable_group, h.draggable_event, h.draggable_ctx = lua_get_drag_drop(L, attrs_idx, "draggable")
-			h.dropable_group, h.dropable_event, h.dropable_ctx = lua_get_drag_drop(L, attrs_idx, "dropable")
+			h.draggable = lua_read_draggable(L, attrs_idx)
+			h.dropable  = lua_read_dropable (L, attrs_idx)
+			h.drag_over = lua_read_drag_over(L, attrs_idx)
 		}
 		return h
 
@@ -1633,6 +1665,27 @@ deliver_dispatch_events :: proc(b: ^Bridge, events: []types.Dispatch_Event) {
 
 			lua_rawseti(L, -2, 2)
 			lua_rawseti(L, -2, 1)
+
+		case types.Drag_Over_Event:
+			// [:dispatch [:event-name {:phase :enter|:leave}]]
+			lua_createtable(L, 2, 0)
+			lua_pushstring(L, "dispatch")
+			lua_rawseti(L, -2, 1)
+
+			lua_createtable(L, 2, 0)
+			ev_name := strings.clone_to_cstring(e.event_name, context.temp_allocator)
+			lua_pushstring(L, ev_name)
+			lua_rawseti(L, -2, 1)
+
+			// {:phase :enter} or {:phase :leave}
+			lua_createtable(L, 0, 1)
+			phase: cstring = e.phase == .Enter ? "enter" : "leave"
+			lua_pushstring(L, phase)
+			lua_setfield(L, -2, "phase")
+			lua_rawseti(L, -2, 2)
+
+			lua_rawseti(L, -2, 2)
+			lua_rawseti(L, -2, 1)
 		}
 
 		if lua_pcall(L, 1, 0, 0) != 0 {
@@ -1864,38 +1917,235 @@ lua_get_number_field :: proc(L: ^Lua_State, index: i32, field: cstring) -> f32 {
 	return 0
 }
 
-// Read a drag/drop 3-element vector field: [:group :event payload]
-// Returns group, event as strings, and payload as a Lua registry ref.
-lua_get_drag_drop :: proc(L: ^Lua_State, index: i32, field: cstring) -> (group: string, event: string, ctx: i32) {
-	lua_getfield(L, index, field)
+// Reads slot at `slot_idx` of the table at `tbl_idx` as a tag list:
+//   - a string keyword → one-element slice
+//   - a Lua array of strings → cloned multi-element slice
+//   - anything else → empty slice
+// Returned strings are heap-cloned and owned by the caller (freed by
+// clear_node_strings via Drag_Attrs cleanup).
+lua_read_tags :: proc(L: ^Lua_State, tbl_idx: i32, slot_idx: i32) -> []string {
+    lua_rawgeti(L, tbl_idx, slot_idx)
+    defer lua_pop(L, 1)
+
+    if lua_isstring(L, -1) {
+        out := make([]string, 1)
+        out[0] = strings.clone_from_cstring(lua_tostring_raw(L, -1))
+        return out
+    }
+
+    if lua_istable(L, -1) {
+        n := int(lua_objlen(L, -1))
+        if n == 0 do return nil
+        list_idx := lua_gettop(L)
+        tmp: [dynamic]string
+        defer delete(tmp)
+        for i in 1..=n {
+            lua_rawgeti(L, list_idx, i32(i))
+            if lua_isstring(L, -1) {
+                append(&tmp, strings.clone_from_cstring(lua_tostring_raw(L, -1)))
+            }
+            lua_pop(L, 1)
+        }
+        if len(tmp) == 0 do return nil
+        out := make([]string, len(tmp))
+        copy(out, tmp[:])
+        return out
+    }
+
+    return nil
+}
+
+// Parse `:draggable [tags {options} payload]`. Populates the drag_* fields
+// of `out`. On error, fields stay zero and an error is logged.
+lua_read_draggable :: proc(L: ^Lua_State, attrs_idx: i32) -> Maybe(types.Draggable_Attrs) {
+	if attrs_idx <= 0 do return nil
+	lua_getfield(L, attrs_idx, "draggable")
 	defer lua_pop(L, 1)
-	if !lua_istable(L, -1) do return "", "", 0
+	if !lua_istable(L, -1) do return nil
 	tbl := lua_gettop(L)
 
-	// [1] = group keyword
-	lua_rawgeti(L, tbl, 1)
-	if lua_isstring(L, -1) {
-		group = strings.clone_from_cstring(lua_tostring_raw(L, -1))
+	// Slot 1 — tags
+	tags := lua_read_tags(L, tbl, 1)
+	if len(tags) == 0 {
+		fmt.eprintln(":draggable: missing or empty tag list, skipping")
+		return nil
 	}
-	lua_pop(L, 1)
 
-	// [2] = event keyword
+	// Slot 2 — options table
 	lua_rawgeti(L, tbl, 2)
+	if !lua_istable(L, -1) {
+		lua_pop(L, 1)
+		fmt.eprintln(":draggable: expected options table at slot 2, skipping")
+		for s in tags do delete(s)
+		delete(tags)
+		return nil
+	}
+	opts := lua_gettop(L)
+
+	out: types.Draggable_Attrs
+	out.tags = tags
+
+	// :event (required)
+	lua_getfield(L, opts, "event")
 	if lua_isstring(L, -1) {
-		event = strings.clone_from_cstring(lua_tostring_raw(L, -1))
+		out.event = strings.clone_from_cstring(lua_tostring_raw(L, -1))
+	}
+	lua_pop(L, 1)
+	if len(out.event) == 0 {
+		fmt.eprintln(":draggable: missing :event in options, skipping")
+		lua_pop(L, 1)  // pop opts
+		for s in out.tags do delete(s)
+		delete(out.tags)
+		return nil
+	}
+
+	// :mode (optional, default Preview)
+	lua_getfield(L, opts, "mode")
+	if lua_isstring(L, -1) {
+		s := string(lua_tostring_raw(L, -1))
+		switch s {
+		case "preview": out.mode = .Preview
+		case "none":    out.mode = .None
+		case:           fmt.eprintfln(":draggable: unknown :mode %q, defaulting to :preview", s)
+		}
 	}
 	lua_pop(L, 1)
 
-	// [3] = payload (any Lua value, stored as registry ref)
+	// :aspect (optional)
+	lua_getfield(L, opts, "aspect")
+	if lua_isstring(L, -1) {
+		out.aspect = strings.clone_from_cstring(lua_tostring_raw(L, -1))
+	}
+	lua_pop(L, 1)
+
+	// :animate (optional, reuse parse_animate_attr against the options table)
+	if dec, ok := parse_animate_attr(L, opts); ok {
+		out.animate = dec
+	}
+
+	lua_pop(L, 1)  // pop opts
+
+	// Slot 3 — payload (any Lua value, stored as registry ref)
 	lua_rawgeti(L, tbl, 3)
 	if !lua_isnil(L, -1) {
-		ctx = luaL_ref(L, LUA_REGISTRYINDEX) // pops value
+		out.ctx = luaL_ref(L, LUA_REGISTRYINDEX)  // pops value
 	} else {
 		lua_pop(L, 1)
 	}
 
-	return
+	return out
 }
+
+// Parse `:dropable [tags {options} payload]`.
+lua_read_dropable :: proc(L: ^Lua_State, attrs_idx: i32) -> Maybe(types.Dropable_Attrs) {
+	if attrs_idx <= 0 do return nil
+	lua_getfield(L, attrs_idx, "dropable")
+	defer lua_pop(L, 1)
+	if !lua_istable(L, -1) do return nil
+	tbl := lua_gettop(L)
+
+	tags := lua_read_tags(L, tbl, 1)
+	if len(tags) == 0 {
+		fmt.eprintln(":dropable: missing or empty tag list, skipping")
+		return nil
+	}
+
+	lua_rawgeti(L, tbl, 2)
+	if !lua_istable(L, -1) {
+		lua_pop(L, 1)
+		fmt.eprintln(":dropable: expected options table at slot 2, skipping")
+		for s in tags do delete(s)
+		delete(tags)
+		return nil
+	}
+	opts := lua_gettop(L)
+
+	out: types.Dropable_Attrs
+	out.tags = tags
+
+	lua_getfield(L, opts, "event")
+	if lua_isstring(L, -1) {
+		out.event = strings.clone_from_cstring(lua_tostring_raw(L, -1))
+	}
+	lua_pop(L, 1)
+	if len(out.event) == 0 {
+		fmt.eprintln(":dropable: missing :event in options, skipping")
+		lua_pop(L, 1)
+		for s in out.tags do delete(s)
+		delete(out.tags)
+		return nil
+	}
+
+	lua_getfield(L, opts, "aspect")
+	if lua_isstring(L, -1) {
+		out.aspect = strings.clone_from_cstring(lua_tostring_raw(L, -1))
+	}
+	lua_pop(L, 1)
+
+	if dec, ok := parse_animate_attr(L, opts); ok {
+		out.animate = dec
+	}
+
+	lua_pop(L, 1)
+
+	lua_rawgeti(L, tbl, 3)
+	if !lua_isnil(L, -1) {
+		out.ctx = luaL_ref(L, LUA_REGISTRYINDEX)
+	} else {
+		lua_pop(L, 1)
+	}
+
+	return out
+}
+
+// Parse `:drag-over [tags {options}]` (no payload slot).
+lua_read_drag_over :: proc(L: ^Lua_State, attrs_idx: i32) -> Maybe(types.Drag_Over_Attrs) {
+	if attrs_idx <= 0 do return nil
+	lua_getfield(L, attrs_idx, "drag-over")
+	defer lua_pop(L, 1)
+	if !lua_istable(L, -1) do return nil
+	tbl := lua_gettop(L)
+
+	tags := lua_read_tags(L, tbl, 1)
+	if len(tags) == 0 {
+		fmt.eprintln(":drag-over: missing or empty tag list, skipping")
+		return nil
+	}
+
+	lua_rawgeti(L, tbl, 2)
+	if !lua_istable(L, -1) {
+		lua_pop(L, 1)
+		for s in tags do delete(s)
+		delete(tags)
+		return nil
+	}
+	opts := lua_gettop(L)
+
+	out: types.Drag_Over_Attrs
+	out.tags = tags
+
+	// :event is OPTIONAL on :drag-over (visual-only zones don't need a handler)
+	lua_getfield(L, opts, "event")
+	if lua_isstring(L, -1) {
+		out.event = strings.clone_from_cstring(lua_tostring_raw(L, -1))
+	}
+	lua_pop(L, 1)
+
+	lua_getfield(L, opts, "aspect")
+	if lua_isstring(L, -1) {
+		out.aspect = strings.clone_from_cstring(lua_tostring_raw(L, -1))
+	}
+	lua_pop(L, 1)
+
+	if dec, ok := parse_animate_attr(L, opts); ok {
+		out.animate = dec
+	}
+
+	lua_pop(L, 1)
+
+	return out
+}
+
 
 // Read an optional boolean field. Returns (value, true) when the field exists
 // and is a boolean, (false, false) otherwise. Callers use the existence flag to

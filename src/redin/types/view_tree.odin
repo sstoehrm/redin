@@ -46,6 +46,38 @@ Animate_Decoration :: struct {
 	z:        Animate_Z,
 }
 
+Drag_Mode :: enum u8 {
+	Preview, // default — clone of dragged subtree at cursor
+	None,    // no clone — source receives aspect/animate in place
+}
+
+// :draggable — declares "what I am" + how I behave while dragged.
+Draggable_Attrs :: struct {
+	tags:    []string,                  // owned slice of cloned strings
+	event:   string,                    // owned, freed by clear_node_strings
+	mode:    Drag_Mode,                 // zero = .Preview
+	aspect:  string,                    // owned
+	animate: Maybe(Animate_Decoration), // owned provider string inside
+	ctx:     i32,                       // Lua registry ref (0 = none)
+}
+
+// :dropable — declares "what I accept" + how it looks on hover.
+Dropable_Attrs :: struct {
+	tags:    []string,
+	event:   string,
+	aspect:  string,
+	animate: Maybe(Animate_Decoration),
+	ctx:     i32,
+}
+
+// :drag-over — container-level zone (no payload).
+Drag_Over_Attrs :: struct {
+	tags:    []string,
+	event:   string,
+	aspect:  string,
+	animate: Maybe(Animate_Decoration),
+}
+
 Path :: struct {
 	value:  []u8,
 	length: u8,
@@ -74,43 +106,37 @@ NodeCanvas :: struct {
 }
 
 NodeVbox :: struct {
-	overflow:        string,
-	layout:          Anchor,
-	aspect:          string,
-	width:           union {
+	overflow:   string,
+	layout:     Anchor,
+	aspect:     string,
+	width:      union {
 		SizeValue,
 		f16,
 	},
-	height:          union {
+	height:     union {
 		SizeValue,
 		f16,
 	},
-	draggable_group: string,
-	draggable_event: string,
-	draggable_ctx:   i32,
-	dropable_group:  string,
-	dropable_event:  string,
-	dropable_ctx:    i32,
+	draggable:  Maybe(Draggable_Attrs),
+	dropable:   Maybe(Dropable_Attrs),
+	drag_over:  Maybe(Drag_Over_Attrs),
 }
 
 NodeHbox :: struct {
-	overflow:        string,
-	layout:          Anchor,
-	aspect:          string,
-	width:           union {
+	overflow:   string,
+	layout:     Anchor,
+	aspect:     string,
+	width:      union {
 		SizeValue,
 		f32,
 	},
-	height:          union {
+	height:     union {
 		SizeValue,
 		f32,
 	},
-	draggable_group: string,
-	draggable_event: string,
-	draggable_ctx:   i32,
-	dropable_group:  string,
-	dropable_event:  string,
-	dropable_ctx:    i32,
+	draggable:  Maybe(Draggable_Attrs),
+	dropable:   Maybe(Dropable_Attrs),
+	drag_over:  Maybe(Drag_Over_Attrs),
 }
 
 NodeInput :: struct {

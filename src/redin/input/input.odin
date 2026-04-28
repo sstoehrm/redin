@@ -29,7 +29,8 @@ deepest_listener_idx :: proc(
 		case types.DragListener:         idx = l.node_idx
 		case types.DropListener:         idx = l.node_idx
 		case types.Text_Select_Listener: idx = l.node_idx
-		case types.HoverListener, types.KeyListener, types.ChangeListener:
+		case types.HoverListener, types.KeyListener, types.ChangeListener,
+		     types.DragOverListener:
 		}
 		if idx < 0 || idx >= len(node_rects) do continue
 		if idx <= best do continue
@@ -67,19 +68,37 @@ extract_listeners :: proc(
 			aspect = n.aspect
 		case types.NodeVbox:
 			aspect = n.aspect
-			if len(n.draggable_group) > 0 {
-				append(&listeners, types.Listener(types.DragListener{node_idx = idx}))
+			if d, ok := n.draggable.?; ok && len(d.tags) > 0 && len(d.event) > 0 {
+				append(&listeners, types.Listener(types.DragListener{
+					node_idx = idx, tags = d.tags,
+				}))
 			}
-			if len(n.dropable_group) > 0 {
-				append(&listeners, types.Listener(types.DropListener{node_idx = idx, group = n.dropable_group}))
+			if d, ok := n.dropable.?; ok && len(d.tags) > 0 && len(d.event) > 0 {
+				append(&listeners, types.Listener(types.DropListener{
+					node_idx = idx, tags = d.tags,
+				}))
+			}
+			if d, ok := n.drag_over.?; ok && len(d.tags) > 0 {
+				append(&listeners, types.Listener(types.DragOverListener{
+					node_idx = idx, tags = d.tags,
+				}))
 			}
 		case types.NodeHbox:
 			aspect = n.aspect
-			if len(n.draggable_group) > 0 {
-				append(&listeners, types.Listener(types.DragListener{node_idx = idx}))
+			if d, ok := n.draggable.?; ok && len(d.tags) > 0 && len(d.event) > 0 {
+				append(&listeners, types.Listener(types.DragListener{
+					node_idx = idx, tags = d.tags,
+				}))
 			}
-			if len(n.dropable_group) > 0 {
-				append(&listeners, types.Listener(types.DropListener{node_idx = idx, group = n.dropable_group}))
+			if d, ok := n.dropable.?; ok && len(d.tags) > 0 && len(d.event) > 0 {
+				append(&listeners, types.Listener(types.DropListener{
+					node_idx = idx, tags = d.tags,
+				}))
+			}
+			if d, ok := n.drag_over.?; ok && len(d.tags) > 0 {
+				append(&listeners, types.Listener(types.DragOverListener{
+					node_idx = idx, tags = d.tags,
+				}))
 			}
 		case types.NodeText:
 			aspect = n.aspect

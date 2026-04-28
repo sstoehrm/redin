@@ -101,6 +101,30 @@ Any element accepts an `:animate` map that draws a registered canvas provider at
 
 Click-through: the decoration's rect never enters the hit-test arrays, so clicks land on the host. Same canvas registry as `:canvas` — providers are the animation engine, the framework just positions them. Unknown provider names silently no-op; malformed `:rect` warns at parse time and skips drawing.
 
+## Drag-and-drop attributes
+
+`vbox` and `hbox` accept three universal attributes, all sharing `[tags {options} ?payload]`:
+
+- `:draggable [tags {options} payload]` — what the element IS while dragged. Required: `:event`. Optional: `:mode` (`:preview` (default, clone-at-cursor) | `:none`), `:aspect`, `:animate`.
+- `:dropable [tags {options} payload]` — what the element ACCEPTS. Required: `:event`. Optional: `:aspect`, `:animate`.
+- `:drag-over [tags {options}]` — container-level zone (no payload). Optional: `:event` (fires `{:phase :enter}` / `{:phase :leave}`), `:aspect`, `:animate`.
+
+Tags = single keyword (`:item`) or vector (`[:item :sword]`); a draggable and a dropable interact when their tag sets intersect. Visual feedback is via `:aspect` swap (no `#`-cascade). Events: drag-start fires `{:value <payload>}`, drop fires `{:from <src> :to <dst>}`.
+
+```fennel
+[:vbox {:overflow :scroll-y
+        :aspect :muted
+        :drag-over [:row-drag {:event :event/over :aspect :muted-armed}]}
+  (icollect [i item (ipairs items)]
+    [:hbox {:aspect :row
+            :draggable [:row-drag {:mode :preview
+                                   :event :event/drag
+                                   :aspect :row-dragging} i]
+            :dropable [:row-drag {:event :event/drop
+                                  :aspect :row-drop-hot} i]}
+      ...])]
+```
+
 ## Canvas API (Fennel/Lua)
 
 ### Drawing from scripting (no binary changes needed)

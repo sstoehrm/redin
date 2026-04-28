@@ -25,11 +25,17 @@ ChangeListener :: struct {
 
 DragListener :: struct {
 	node_idx: int,
+	tags:     []string, // borrowed from node; lives until next clear_frame
 }
 
 DropListener :: struct {
 	node_idx: int,
-	group:    string,
+	tags:     []string,
+}
+
+DragOverListener :: struct {
+	node_idx: int,
+	tags:     []string,
 }
 
 // Emitted for every NodeText whose :selectable attribute is not false.
@@ -47,5 +53,6 @@ Listener :: union {
 	ChangeListener,
 	DragListener,
 	DropListener,
+	DragOverListener,
 	Text_Select_Listener,
 }

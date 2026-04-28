@@ -143,6 +143,10 @@ run :: proc(cfg: Config) {
 	rl.InitWindow(g_window_config.width, g_window_config.height, g_window_config.title)
 	defer rl.CloseWindow()
 	rl.SetTargetFPS(120)
+	// Disable Raylib's default Escape-closes-window behavior. Apps own the
+	// Escape key (drag-cancel, modal-dismiss, etc.); the window closes via
+	// the close button or `redin.request_shutdown()`.
+	rl.SetExitKey(.KEY_NULL)
 
 	font.init()
 	defer font.destroy()
@@ -285,6 +289,7 @@ run :: proc(cfg: Config) {
 
 		s_render := profile.begin(.Render)
 		draw_tree(b.theme, b.nodes[:], b.children_list[:])
+		render_drag_preview(b.nodes[:], b.children_list[:], b.theme)
 		profile.end(s_render)
 
 		profile.draw_overlay()

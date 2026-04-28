@@ -210,6 +210,43 @@ The decoration is purely visual: clicks fall through to the host. The provider's
 
 If the provider name isn't registered, `canvas.process` silently no-ops (same posture as a `:canvas` pointing at an unregistered name). Malformed `:rect` (wrong arity, unknown anchor token) prints a warning at parse time and the decoration is skipped — the host element renders normally.
 
+### Drag-and-drop
+
+Three universal attributes; all share `[tags {options} ?payload]`:
+
+- `:draggable [tags {options} payload]` — declares "what I am" + how the element behaves while dragged. Required: `:event`. Optional: `:mode` (`:preview` (default) | `:none`), `:aspect`, `:animate`.
+- `:dropable [tags {options} payload]` — declares "what I accept" + the hover aspect. Required: `:event`. Optional: `:aspect`, `:animate`.
+- `:drag-over [tags {options}]` — container-level zone. Optional: `:event` (fires `:phase :enter` / `:leave`), `:aspect`, `:animate`. No payload slot.
+
+Tags are a single keyword (one tag) or a vector of keywords (multi-tag); a draggable and a dropable interact when their tag sets intersect.
+
+Visual feedback is expressed via aspect swaps (in the options map's `:aspect` field) rather than theme `#`-variants. While dragged in `:none` mode, the source's aspect swaps to the draggable's `:aspect`. While a compatible drag hovers, the dropable cell's aspect swaps to the dropable's `:aspect`. While a compatible drag is in flight inside a container, the container's aspect swaps to the `:drag-over`'s `:aspect`. In `:preview` mode, a clone of the dragged subtree renders at the cursor on the overlay layer, click-through; the clone's root uses the draggable's `:aspect` (if set).
+
+Events:
+
+| Trigger | Payload to handler |
+|---|---|
+| Drag-start (4px threshold) | `[:event {:value <drag-payload>}]` |
+| Drag enters/leaves a `:drag-over` container | `[:event {:phase :enter}]` / `[:event {:phase :leave}]` |
+| Drop on a compatible `:dropable` | `[:event {:from <drag-payload> :to <drop-payload>}]` |
+| Release over no compatible target | (no event; state resets silently) |
+
+Example (todo-list reorder):
+
+```fennel
+[:vbox {:overflow :scroll-y
+        :aspect :muted
+        :drag-over [:row-drag {:event :event/over :aspect :muted-armed}]}
+  (icollect [i item (ipairs items)]
+    [:hbox {:aspect :row
+            :draggable [:row-drag {:mode :preview
+                                   :event :event/drag
+                                   :aspect :row-dragging} i]
+            :dropable [:row-drag {:event :event/drop
+                                  :aspect :row-drop-hot} i]}
+      ...])]
+```
+
 ### Sizing model
 
 Single top-down pass. Parent tells children their size.

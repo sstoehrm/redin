@@ -287,15 +287,8 @@ layout_box :: proc(
 	content_rect := rect
 	pad: [4]u8
 	if len(aspect) > 0 {
-		if t, ok := theme[aspect]; ok do pad = t.padding
-		if input.dragging_idx == idx {
-			drag_start_key := strings.concatenate({aspect, "#drag-start"}, context.temp_allocator)
-			if dt, ok := theme[drag_start_key]; ok && dt.padding != {} do pad = dt.padding
-		}
-		if input.drag_over_idx == idx {
-			drag_key := strings.concatenate({aspect, "#drag"}, context.temp_allocator)
-			if dt, ok := theme[drag_key]; ok && dt.padding != {} do pad = dt.padding
-		}
+		effective_aspect := effective_aspect_for_drag(idx, aspect, nodes[idx])
+		if t, ok := theme[effective_aspect]; ok do pad = t.padding
 		if pad != {} {
 			content_rect = rl.Rectangle{
 				rect.x + f32(pad[3]),
@@ -431,6 +424,40 @@ draw_tree :: proc(
 	draw_node(0, nodes, children_list, theme)
 }
 
+DRAG_PREVIEW_OFFSET :: f32(8)
+
+render_drag_preview :: proc(
+	nodes: []types.Node,
+	children_list: []types.Children,
+	theme: map[string]types.Theme,
+) {
+	a, ok := input.drag.(input.Drag_Active)
+	if !ok || a.src_mode != .Preview do return
+	if a.src_idx < 0 || a.src_idx >= len(nodes) do return
+	if a.src_idx >= len(node_rects) do return
+
+	src_rect := node_rects[a.src_idx]
+	mouse    := rl.GetMousePosition()
+	delta    := rl.Vector2{
+		mouse.x - src_rect.x - DRAG_PREVIEW_OFFSET,
+		mouse.y - src_rect.y - DRAG_PREVIEW_OFFSET,
+	}
+
+	draw_subtree_translated(a.src_idx, delta, a.src_aspect, nodes, children_list, theme)
+
+	// :animate on the clone (overlay layer).
+	if dec, ok := a.src_animate.?; ok {
+		translated := rl.Rectangle{
+			src_rect.x + delta.x,
+			src_rect.y + delta.y,
+			src_rect.width,
+			src_rect.height,
+		}
+		drect := resolve_decoration_rect(dec.rect, translated)
+		canvas.process(dec.provider, drect)
+	}
+}
+
 draw_node :: proc(
 	idx: int,
 	nodes: []types.Node,
@@ -448,15 +475,40 @@ draw_node :: proc(
 			canvas.process(dec.provider, drect)
 		}
 	}
+	// Drag-state-gated :animate (drop_animate, over_animate) on :behind layer.
+	if a, ok := input.drag.(input.Drag_Active); ok {
+		// Drop target's :animate fires when this idx is the active drop.
+		if a.over_drop_idx == idx {
+			if dec, ok2 := node_drop_animate(nodes[idx]).?; ok2 && dec.z == .Behind {
+				drect := resolve_decoration_rect(dec.rect, rect)
+				canvas.process(dec.provider, drect)
+			}
+		}
+		if a.over_zone_idx == idx {
+			if dec, ok2 := node_over_animate(nodes[idx]).?; ok2 && dec.z == .Behind {
+				drect := resolve_decoration_rect(dec.rect, rect)
+				canvas.process(dec.provider, drect)
+			}
+		}
+		// Source's drag_animate in :none mode (preview-mode animate runs on the clone, not here)
+		if a.src_idx == idx && a.src_mode == .None {
+			if dec, ok2 := node_drag_animate(nodes[idx]).?; ok2 && dec.z == .Behind {
+				drect := resolve_decoration_rect(dec.rect, rect)
+				canvas.process(dec.provider, drect)
+			}
+		}
+	}
 
 	switch n in nodes[idx] {
 	case types.NodeStack:
 		draw_children(idx, nodes, children_list, theme)
 	case types.NodeVbox:
-		draw_box_chrome(idx, rect, n.aspect, theme)
+		aspect := effective_aspect_for_drag(idx, n.aspect, nodes[idx])
+		draw_box_chrome(idx, rect, aspect, theme)
 		draw_box_children(idx, content_rect, n.overflow, true, nodes, children_list, theme)
 	case types.NodeHbox:
-		draw_box_chrome(idx, rect, n.aspect, theme)
+		aspect := effective_aspect_for_drag(idx, n.aspect, nodes[idx])
+		draw_box_chrome(idx, rect, aspect, theme)
 		draw_box_children(idx, content_rect, n.overflow, false, nodes, children_list, theme)
 	case types.NodeCanvas:
 		if len(n.aspect) > 0 {
@@ -514,6 +566,27 @@ draw_node :: proc(
 			canvas.process(dec.provider, drect)
 		}
 	}
+	// Drag-state-gated :animate (drop_animate, over_animate) on :above layer.
+	if a, ok := input.drag.(input.Drag_Active); ok {
+		if a.over_drop_idx == idx {
+			if dec, ok2 := node_drop_animate(nodes[idx]).?; ok2 && dec.z == .Above {
+				drect := resolve_decoration_rect(dec.rect, rect)
+				canvas.process(dec.provider, drect)
+			}
+		}
+		if a.over_zone_idx == idx {
+			if dec, ok2 := node_over_animate(nodes[idx]).?; ok2 && dec.z == .Above {
+				drect := resolve_decoration_rect(dec.rect, rect)
+				canvas.process(dec.provider, drect)
+			}
+		}
+		if a.src_idx == idx && a.src_mode == .None {
+			if dec, ok2 := node_drag_animate(nodes[idx]).?; ok2 && dec.z == .Above {
+				drect := resolve_decoration_rect(dec.rect, rect)
+				canvas.process(dec.provider, drect)
+			}
+		}
+	}
 }
 
 draw_children :: proc(
@@ -525,6 +598,81 @@ draw_children :: proc(
 	ch := children_list[idx]
 	for i in 0 ..< int(ch.length) {
 		draw_node(int(ch.value[i]), nodes, children_list, theme)
+	}
+}
+
+// Render the subtree rooted at `idx` translated by `delta` and clipping
+// no rects — used by the drag preview overlay. Does not write node_rects /
+// node_content_rects, so the clone is click-through.
+//
+// `override_aspect_for_root` is applied to the root if non-empty (lets the
+// preview clone use a different aspect than the source).
+draw_subtree_translated :: proc(
+	idx: int,
+	delta: rl.Vector2,
+	override_aspect_for_root: string,
+	nodes: []types.Node,
+	children_list: []types.Children,
+	theme: map[string]types.Theme,
+) {
+	if idx < 0 || idx >= len(nodes) do return
+	rect := node_rects[idx]
+	rect.x += delta.x
+	rect.y += delta.y
+	content_rect := node_content_rects[idx]
+	content_rect.x += delta.x
+	content_rect.y += delta.y
+
+	is_root := len(override_aspect_for_root) > 0
+
+	switch n in nodes[idx] {
+	case types.NodeStack:
+		draw_subtree_children_translated(idx, delta, nodes, children_list, theme)
+	case types.NodeVbox:
+		aspect := is_root ? override_aspect_for_root : n.aspect
+		draw_box_chrome(idx, rect, aspect, theme)
+		draw_subtree_children_translated(idx, delta, nodes, children_list, theme)
+	case types.NodeHbox:
+		aspect := is_root ? override_aspect_for_root : n.aspect
+		draw_box_chrome(idx, rect, aspect, theme)
+		draw_subtree_children_translated(idx, delta, nodes, children_list, theme)
+	case types.NodeButton:
+		b := n
+		if is_root do b.aspect = override_aspect_for_root
+		draw_button(rect, b, theme)
+	case types.NodeText:
+		// Pass idx = -1 — the proc treats negative idx as "no selection,
+		// no scroll-offset persistence" (see step 2 of this task).
+		t := n
+		if is_root do t.aspect = override_aspect_for_root
+		draw_text(-1, rect, t, theme)
+	case types.NodeImage:
+		aspect := is_root ? override_aspect_for_root : n.aspect
+		draw_themed_rect(rect, aspect, theme)
+		rl.DrawRectangleLinesEx(rect, 1, rl.GRAY)
+	case types.NodeCanvas:
+		// Canvas providers paint into content_rect — translation is enough.
+		if len(n.provider) > 0 do canvas.process(n.provider, content_rect)
+	case types.NodeInput:
+		// Inputs in the preview clone aren't focusable; render as a styled rect.
+		draw_themed_rect(rect, n.aspect, theme)
+	case types.NodePopout, types.NodeModal:
+		// Popouts/modals don't make sense inside a drag preview; skip.
+	}
+}
+
+draw_subtree_children_translated :: proc(
+	idx: int,
+	delta: rl.Vector2,
+	nodes: []types.Node,
+	children_list: []types.Children,
+	theme: map[string]types.Theme,
+) {
+	ch := children_list[idx]
+	for i in 0 ..< int(ch.length) {
+		// Children take the source's normal aspect, not the override —
+		// override only applies to the clone root.
+		draw_subtree_translated(int(ch.value[i]), delta, "", nodes, children_list, theme)
 	}
 }
 
@@ -549,23 +697,84 @@ draw_box_chrome :: proc(
 		}
 		shadow = t.shadow
 	}
-	if input.dragging_idx == idx {
-		drag_start_key := strings.concatenate({aspect, "#drag-start"}, context.temp_allocator)
-		if dt, ok := theme[drag_start_key]; ok && dt.bg != {} {
-			bg_color = rl.Color{dt.bg[0], dt.bg[1], dt.bg[2], 255}
-			has_bg = true
-		}
-	}
-	if input.drag_over_idx == idx {
-		drag_key := strings.concatenate({aspect, "#drag"}, context.temp_allocator)
-		if dt, ok := theme[drag_key]; ok && dt.bg != {} {
-			bg_color = rl.Color{dt.bg[0], dt.bg[1], dt.bg[2], 255}
-			has_bg = true
-		}
-	}
-
 	draw_shadow(rect, shadow, 0)
 	if has_bg do rl.DrawRectangleRec(rect, bg_color)
+}
+
+// ---- helpers for drag-state-gated animate fields ----
+
+node_drag_animate :: proc(n: types.Node) -> Maybe(types.Animate_Decoration) {
+	switch v in n {
+	case types.NodeVbox:
+		if d, ok := v.draggable.?; ok do return d.animate
+	case types.NodeHbox:
+		if d, ok := v.draggable.?; ok do return d.animate
+	case types.NodeStack, types.NodeCanvas, types.NodeInput,
+		 types.NodeButton, types.NodeText, types.NodeImage,
+		 types.NodePopout, types.NodeModal:
+	}
+	return nil
+}
+node_drop_animate :: proc(n: types.Node) -> Maybe(types.Animate_Decoration) {
+	switch v in n {
+	case types.NodeVbox:
+		if d, ok := v.dropable.?; ok do return d.animate
+	case types.NodeHbox:
+		if d, ok := v.dropable.?; ok do return d.animate
+	case types.NodeStack, types.NodeCanvas, types.NodeInput,
+		 types.NodeButton, types.NodeText, types.NodeImage,
+		 types.NodePopout, types.NodeModal:
+	}
+	return nil
+}
+node_over_animate :: proc(n: types.Node) -> Maybe(types.Animate_Decoration) {
+	switch v in n {
+	case types.NodeVbox:
+		if d, ok := v.drag_over.?; ok do return d.animate
+	case types.NodeHbox:
+		if d, ok := v.drag_over.?; ok do return d.animate
+	case types.NodeStack, types.NodeCanvas, types.NodeInput,
+		 types.NodeButton, types.NodeText, types.NodeImage,
+		 types.NodePopout, types.NodeModal:
+	}
+	return nil
+}
+
+// Resolve which aspect the renderer should use for `idx` taking active drag
+// state into account. Returns the original aspect when nothing applies.
+effective_aspect_for_drag :: proc(idx: int, base_aspect: string, n: types.Node) -> string {
+	a, ok := input.drag.(input.Drag_Active)
+	if !ok do return base_aspect
+
+	// Source node in :none mode swaps to drag aspect.
+	if a.src_idx == idx && a.src_mode == .None && len(a.src_aspect) > 0 {
+		return a.src_aspect
+	}
+	// Drop target currently hovered swaps to drop aspect.
+	if a.over_drop_idx == idx {
+		switch v in n {
+		case types.NodeVbox:
+			if d, ok := v.dropable.?; ok && len(d.aspect) > 0 do return d.aspect
+		case types.NodeHbox:
+			if d, ok := v.dropable.?; ok && len(d.aspect) > 0 do return d.aspect
+		case types.NodeStack, types.NodeCanvas, types.NodeInput,
+			 types.NodeButton, types.NodeText, types.NodeImage,
+			 types.NodePopout, types.NodeModal:
+		}
+	}
+	// Container zone hovered swaps to over aspect.
+	if a.over_zone_idx == idx {
+		switch v in n {
+		case types.NodeVbox:
+			if d, ok := v.drag_over.?; ok && len(d.aspect) > 0 do return d.aspect
+		case types.NodeHbox:
+			if d, ok := v.drag_over.?; ok && len(d.aspect) > 0 do return d.aspect
+		case types.NodeStack, types.NodeCanvas, types.NodeInput,
+			 types.NodeButton, types.NodeText, types.NodeImage,
+			 types.NodePopout, types.NodeModal:
+		}
+	}
+	return base_aspect
 }
 
 draw_box_children :: proc(
@@ -1168,17 +1377,19 @@ draw_text :: proc(idx: int, rect: rl.Rectangle, n: types.NodeText, theme: map[st
 
 	scroll_y: f32 = 0
 	scroll_x: f32 = 0
-	if scrollable_y {
-		scroll_y = scroll_offsets[idx] if idx in scroll_offsets else 0
-		total_h := f32(len(lines)) * lh
-		max_scroll := total_h - rect.height
-		if max_scroll < 0 do max_scroll = 0
-		if scroll_y > max_scroll do scroll_y = max_scroll
-		if scroll_y < 0 do scroll_y = 0
-		scroll_offsets[idx] = scroll_y
-	}
-	if scrollable_x {
-		scroll_x = scroll_offsets_x[idx] if idx in scroll_offsets_x else 0
+	if idx >= 0 {
+		if scrollable_y {
+			scroll_y = scroll_offsets[idx] if idx in scroll_offsets else 0
+			total_h := f32(len(lines)) * lh
+			max_scroll := total_h - rect.height
+			if max_scroll < 0 do max_scroll = 0
+			if scroll_y > max_scroll do scroll_y = max_scroll
+			if scroll_y < 0 do scroll_y = 0
+			scroll_offsets[idx] = scroll_y
+		}
+		if scrollable_x {
+			scroll_x = scroll_offsets_x[idx] if idx in scroll_offsets_x else 0
+		}
 	}
 
 	// Clip when content may overflow the rect
@@ -1198,7 +1409,7 @@ draw_text :: proc(idx: int, rect: rl.Rectangle, n: types.NodeText, theme: map[st
 	}
 
 	// Render text-selection highlight when this NodeText is the active target.
-	if input.state.selection_kind == .Text && idx < len(g_paths) {
+	if idx >= 0 && input.state.selection_kind == .Text && idx < len(g_paths) {
 		this_path := g_paths[idx]
 		sel_path := input.state.selection_path
 		matches := int(this_path.length) == len(sel_path)
