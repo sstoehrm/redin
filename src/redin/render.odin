@@ -287,15 +287,8 @@ layout_box :: proc(
 	content_rect := rect
 	pad: [4]u8
 	if len(aspect) > 0 {
-		if t, ok := theme[aspect]; ok do pad = t.padding
-		if input.dragging_idx == idx {
-			drag_start_key := strings.concatenate({aspect, "#drag-start"}, context.temp_allocator)
-			if dt, ok := theme[drag_start_key]; ok && dt.padding != {} do pad = dt.padding
-		}
-		if input.drag_over_idx == idx {
-			drag_key := strings.concatenate({aspect, "#drag"}, context.temp_allocator)
-			if dt, ok := theme[drag_key]; ok && dt.padding != {} do pad = dt.padding
-		}
+		effective_aspect := effective_aspect_for_drag(idx, aspect, nodes[idx])
+		if t, ok := theme[effective_aspect]; ok do pad = t.padding
 		if pad != {} {
 			content_rect = rl.Rectangle{
 				rect.x + f32(pad[3]),
@@ -448,15 +441,40 @@ draw_node :: proc(
 			canvas.process(dec.provider, drect)
 		}
 	}
+	// Drag-state-gated :animate (drop_animate, over_animate) on :behind layer.
+	if a, ok := input.drag.(input.Drag_Active); ok {
+		// Drop target's :animate fires when this idx is the active drop.
+		if a.over_drop_idx == idx {
+			if dec, ok2 := node_drop_animate(nodes[idx]).?; ok2 && dec.z == .Behind {
+				drect := resolve_decoration_rect(dec.rect, rect)
+				canvas.process(dec.provider, drect)
+			}
+		}
+		if a.over_zone_idx == idx {
+			if dec, ok2 := node_over_animate(nodes[idx]).?; ok2 && dec.z == .Behind {
+				drect := resolve_decoration_rect(dec.rect, rect)
+				canvas.process(dec.provider, drect)
+			}
+		}
+		// Source's drag_animate in :none mode (preview-mode animate runs on the clone, not here)
+		if a.src_idx == idx && a.src_mode == .None {
+			if dec, ok2 := node_drag_animate(nodes[idx]).?; ok2 && dec.z == .Behind {
+				drect := resolve_decoration_rect(dec.rect, rect)
+				canvas.process(dec.provider, drect)
+			}
+		}
+	}
 
 	switch n in nodes[idx] {
 	case types.NodeStack:
 		draw_children(idx, nodes, children_list, theme)
 	case types.NodeVbox:
-		draw_box_chrome(idx, rect, n.aspect, theme)
+		aspect := effective_aspect_for_drag(idx, n.aspect, nodes[idx])
+		draw_box_chrome(idx, rect, aspect, theme)
 		draw_box_children(idx, content_rect, n.overflow, true, nodes, children_list, theme)
 	case types.NodeHbox:
-		draw_box_chrome(idx, rect, n.aspect, theme)
+		aspect := effective_aspect_for_drag(idx, n.aspect, nodes[idx])
+		draw_box_chrome(idx, rect, aspect, theme)
 		draw_box_children(idx, content_rect, n.overflow, false, nodes, children_list, theme)
 	case types.NodeCanvas:
 		if len(n.aspect) > 0 {
@@ -512,6 +530,27 @@ draw_node :: proc(
 		if dec, has := bridge.g_bridge.node_animations[idx].?; has && dec.z == .Above {
 			drect := resolve_decoration_rect(dec.rect, rect)
 			canvas.process(dec.provider, drect)
+		}
+	}
+	// Drag-state-gated :animate (drop_animate, over_animate) on :above layer.
+	if a, ok := input.drag.(input.Drag_Active); ok {
+		if a.over_drop_idx == idx {
+			if dec, ok2 := node_drop_animate(nodes[idx]).?; ok2 && dec.z == .Above {
+				drect := resolve_decoration_rect(dec.rect, rect)
+				canvas.process(dec.provider, drect)
+			}
+		}
+		if a.over_zone_idx == idx {
+			if dec, ok2 := node_over_animate(nodes[idx]).?; ok2 && dec.z == .Above {
+				drect := resolve_decoration_rect(dec.rect, rect)
+				canvas.process(dec.provider, drect)
+			}
+		}
+		if a.src_idx == idx && a.src_mode == .None {
+			if dec, ok2 := node_drag_animate(nodes[idx]).?; ok2 && dec.z == .Above {
+				drect := resolve_decoration_rect(dec.rect, rect)
+				canvas.process(dec.provider, drect)
+			}
 		}
 	}
 }
@@ -624,23 +663,74 @@ draw_box_chrome :: proc(
 		}
 		shadow = t.shadow
 	}
-	if input.dragging_idx == idx {
-		drag_start_key := strings.concatenate({aspect, "#drag-start"}, context.temp_allocator)
-		if dt, ok := theme[drag_start_key]; ok && dt.bg != {} {
-			bg_color = rl.Color{dt.bg[0], dt.bg[1], dt.bg[2], 255}
-			has_bg = true
-		}
-	}
-	if input.drag_over_idx == idx {
-		drag_key := strings.concatenate({aspect, "#drag"}, context.temp_allocator)
-		if dt, ok := theme[drag_key]; ok && dt.bg != {} {
-			bg_color = rl.Color{dt.bg[0], dt.bg[1], dt.bg[2], 255}
-			has_bg = true
-		}
-	}
-
 	draw_shadow(rect, shadow, 0)
 	if has_bg do rl.DrawRectangleRec(rect, bg_color)
+}
+
+// ---- helpers for drag-state-gated animate fields ----
+
+node_drag_animate :: proc(n: types.Node) -> Maybe(types.Animate_Decoration) {
+	switch v in n {
+	case types.NodeVbox: return v.drag_animate
+	case types.NodeHbox: return v.drag_animate
+	case types.NodeStack, types.NodeCanvas, types.NodeInput,
+		 types.NodeButton, types.NodeText, types.NodeImage,
+		 types.NodePopout, types.NodeModal:
+	}
+	return nil
+}
+node_drop_animate :: proc(n: types.Node) -> Maybe(types.Animate_Decoration) {
+	switch v in n {
+	case types.NodeVbox: return v.drop_animate
+	case types.NodeHbox: return v.drop_animate
+	case types.NodeStack, types.NodeCanvas, types.NodeInput,
+		 types.NodeButton, types.NodeText, types.NodeImage,
+		 types.NodePopout, types.NodeModal:
+	}
+	return nil
+}
+node_over_animate :: proc(n: types.Node) -> Maybe(types.Animate_Decoration) {
+	switch v in n {
+	case types.NodeVbox: return v.over_animate
+	case types.NodeHbox: return v.over_animate
+	case types.NodeStack, types.NodeCanvas, types.NodeInput,
+		 types.NodeButton, types.NodeText, types.NodeImage,
+		 types.NodePopout, types.NodeModal:
+	}
+	return nil
+}
+
+// Resolve which aspect the renderer should use for `idx` taking active drag
+// state into account. Returns the original aspect when nothing applies.
+effective_aspect_for_drag :: proc(idx: int, base_aspect: string, n: types.Node) -> string {
+	a, ok := input.drag.(input.Drag_Active)
+	if !ok do return base_aspect
+
+	// Source node in :none mode swaps to drag aspect.
+	if a.src_idx == idx && a.src_mode == .None && len(a.src_aspect) > 0 {
+		return a.src_aspect
+	}
+	// Drop target currently hovered swaps to drop aspect.
+	if a.over_drop_idx == idx {
+		switch v in n {
+		case types.NodeVbox: if len(v.drop_aspect) > 0 do return v.drop_aspect
+		case types.NodeHbox: if len(v.drop_aspect) > 0 do return v.drop_aspect
+		case types.NodeStack, types.NodeCanvas, types.NodeInput,
+			 types.NodeButton, types.NodeText, types.NodeImage,
+			 types.NodePopout, types.NodeModal:
+		}
+	}
+	// Container zone hovered swaps to over aspect.
+	if a.over_zone_idx == idx {
+		switch v in n {
+		case types.NodeVbox: if len(v.over_aspect) > 0 do return v.over_aspect
+		case types.NodeHbox: if len(v.over_aspect) > 0 do return v.over_aspect
+		case types.NodeStack, types.NodeCanvas, types.NodeInput,
+			 types.NodeButton, types.NodeText, types.NodeImage,
+			 types.NodePopout, types.NodeModal:
+		}
+	}
+	return base_aspect
 }
 
 draw_box_children :: proc(
