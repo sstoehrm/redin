@@ -68,19 +68,37 @@ extract_listeners :: proc(
 			aspect = n.aspect
 		case types.NodeVbox:
 			aspect = n.aspect
-			if len(n.draggable_group) > 0 {
-				append(&listeners, types.Listener(types.DragListener{node_idx = idx}))
+			if len(n.drag_tags) > 0 && len(n.drag_event) > 0 {
+				append(&listeners, types.Listener(types.DragListener{
+					node_idx = idx, tags = n.drag_tags,
+				}))
 			}
-			if len(n.dropable_group) > 0 {
-				append(&listeners, types.Listener(types.DropListener{node_idx = idx, group = n.dropable_group}))
+			if len(n.drop_tags) > 0 && len(n.drop_event) > 0 {
+				append(&listeners, types.Listener(types.DropListener{
+					node_idx = idx, tags = n.drop_tags, group = "",
+				}))
+			}
+			if len(n.over_tags) > 0 {
+				append(&listeners, types.Listener(types.DragOverListener{
+					node_idx = idx, tags = n.over_tags,
+				}))
 			}
 		case types.NodeHbox:
 			aspect = n.aspect
-			if len(n.draggable_group) > 0 {
-				append(&listeners, types.Listener(types.DragListener{node_idx = idx}))
+			if len(n.drag_tags) > 0 && len(n.drag_event) > 0 {
+				append(&listeners, types.Listener(types.DragListener{
+					node_idx = idx, tags = n.drag_tags,
+				}))
 			}
-			if len(n.dropable_group) > 0 {
-				append(&listeners, types.Listener(types.DropListener{node_idx = idx, group = n.dropable_group}))
+			if len(n.drop_tags) > 0 && len(n.drop_event) > 0 {
+				append(&listeners, types.Listener(types.DropListener{
+					node_idx = idx, tags = n.drop_tags, group = "",
+				}))
+			}
+			if len(n.over_tags) > 0 {
+				append(&listeners, types.Listener(types.DragOverListener{
+					node_idx = idx, tags = n.over_tags,
+				}))
 			}
 		case types.NodeText:
 			aspect = n.aspect

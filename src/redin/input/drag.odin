@@ -1,7 +1,23 @@
 package input
 
+import "core:strings"
 import "../types"
 import rl "vendor:raylib"
+
+// Heap-clone a borrowed []string into an owned slice. Used to detach
+// captured drag state from the per-frame listener tags (which are freed
+// across re-flattens via clear_node_strings).
+clone_string_slice :: proc(src: []string) -> []string {
+	if len(src) == 0 do return nil
+	out := make([]string, len(src))
+	for s, i in src do out[i] = strings.clone(s)
+	return out
+}
+
+free_string_slice :: proc(s: []string) {
+	for v in s do delete(v)
+	if s != nil do delete(s)
+}
 
 // ---- v2 state machine ----
 
@@ -131,7 +147,7 @@ process_drag :: proc(
 			cap := Drag_Captured{
 				src_idx   = winner,
 				start_pos = pt,
-				src_tags  = tags,
+				src_tags  = clone_string_slice(tags),
 			}
 			switch n in nodes[winner] {
 			case types.NodeVbox:
@@ -174,6 +190,7 @@ process_drag :: proc(
 				}
 			}
 		} else {
+			free_string_slice(s.src_tags)
 			drag = Drag_Idle{}
 		}
 
@@ -181,6 +198,7 @@ process_drag :: proc(
 		// Re-flatten safety: if the source idx no longer points at a draggable
 		// with our tags, cancel.
 		if s.src_idx < 0 || s.src_idx >= len(nodes) {
+			free_string_slice(s.src_tags)
 			drag = Drag_Idle{}
 			return dispatch
 		}
@@ -249,6 +267,7 @@ process_drag :: proc(
 				}
 			}
 
+			free_string_slice(s.src_tags)
 			drag = Drag_Idle{}
 		}
 	}
