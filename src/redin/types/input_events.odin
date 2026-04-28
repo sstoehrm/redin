@@ -66,10 +66,21 @@ Drop_Event :: struct {
 	to_ref:     i32, // Lua registry ref for drop target payload
 }
 
+Drag_Over_Phase :: enum {
+	Enter,
+	Leave,
+}
+
+Drag_Over_Event :: struct {
+	event_name: string,
+	phase:      Drag_Over_Phase,
+}
+
 Dispatch_Event :: union {
 	Change_Event,
 	Key_Event_Dispatch,
 	Click_Event,
 	Drag_Event,
 	Drop_Event,
+	Drag_Over_Event,
 }

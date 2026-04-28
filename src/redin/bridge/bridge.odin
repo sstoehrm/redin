@@ -1598,6 +1598,11 @@ deliver_dispatch_events :: proc(b: ^Bridge, events: []types.Dispatch_Event) {
 
 			lua_rawseti(L, -2, 2)
 			lua_rawseti(L, -2, 1)
+
+		case types.Drag_Over_Event:
+			// not yet dispatched to Lua — wired in a later task
+			lua_pop(L, 2) // pop the events table and redin_events
+			continue
 		}
 
 		if lua_pcall(L, 1, 0, 0) != 0 {

@@ -46,6 +46,35 @@ Animate_Decoration :: struct {
 	z:        Animate_Z,
 }
 
+Drag_Mode :: enum u8 {
+	Preview, // default — clone of dragged subtree at cursor
+	None,    // no clone — source receives aspect/animate in place
+}
+
+// Bundled drag/drop/over fields embedded in container nodes via `using`.
+Drag_Attrs :: struct {
+	// :draggable — declares "what I am" + how I behave while dragged.
+	drag_tags:    []string,                  // owned slice of cloned strings
+	drag_event:   string,                    // owned, freed by clear_node_strings
+	drag_mode:    Drag_Mode,                 // zero = .Preview
+	drag_aspect:  string,                    // owned
+	drag_animate: Maybe(Animate_Decoration), // owned provider string inside
+	drag_ctx:     i32,                       // Lua registry ref (0 = none)
+
+	// :dropable — declares "what I accept" + how it looks on hover.
+	drop_tags:    []string,
+	drop_event:   string,
+	drop_aspect:  string,
+	drop_animate: Maybe(Animate_Decoration),
+	drop_ctx:     i32,
+
+	// :drag-over — container-level zone (no payload).
+	over_tags:    []string,
+	over_event:   string,
+	over_aspect:  string,
+	over_animate: Maybe(Animate_Decoration),
+}
+
 Path :: struct {
 	value:  []u8,
 	length: u8,
@@ -91,6 +120,7 @@ NodeVbox :: struct {
 	dropable_group:  string,
 	dropable_event:  string,
 	dropable_ctx:    i32,
+	using drag:      Drag_Attrs,
 }
 
 NodeHbox :: struct {
@@ -111,6 +141,7 @@ NodeHbox :: struct {
 	dropable_group:  string,
 	dropable_event:  string,
 	dropable_ctx:    i32,
+	using drag:      Drag_Attrs,
 }
 
 NodeInput :: struct {

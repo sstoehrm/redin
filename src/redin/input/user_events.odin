@@ -53,7 +53,8 @@ get_user_events :: proc(
 						append(&user_events, types.UserEvent{event = .FOCUS, node_idx = winner})
 					}
 				case types.HoverListener, types.KeyListener, types.ChangeListener,
-				     types.DragListener, types.DropListener, types.Text_Select_Listener:
+				     types.DragListener, types.DropListener, types.Text_Select_Listener,
+				     types.DragOverListener:
 				}
 			}
 

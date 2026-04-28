@@ -33,7 +33,8 @@ apply_listeners :: proc(
 					case types.ClickListener:
 						if l.node_idx == winner do has_active = true
 					case types.HoverListener, types.KeyListener, types.ChangeListener,
-					     types.DragListener, types.DropListener, types.Text_Select_Listener:
+					     types.DragListener, types.DropListener, types.Text_Select_Listener,
+					     types.DragOverListener:
 					}
 				}
 			}

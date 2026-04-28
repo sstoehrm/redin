@@ -29,7 +29,8 @@ deepest_listener_idx :: proc(
 		case types.DragListener:         idx = l.node_idx
 		case types.DropListener:         idx = l.node_idx
 		case types.Text_Select_Listener: idx = l.node_idx
-		case types.HoverListener, types.KeyListener, types.ChangeListener:
+		case types.HoverListener, types.KeyListener, types.ChangeListener,
+		     types.DragOverListener:
 		}
 		if idx < 0 || idx >= len(node_rects) do continue
 		if idx <= best do continue
