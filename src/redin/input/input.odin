@@ -75,7 +75,7 @@ extract_listeners :: proc(
 			}
 			if len(n.drop_tags) > 0 && len(n.drop_event) > 0 {
 				append(&listeners, types.Listener(types.DropListener{
-					node_idx = idx, tags = n.drop_tags, group = "",
+					node_idx = idx, tags = n.drop_tags,
 				}))
 			}
 			if len(n.over_tags) > 0 {
@@ -92,7 +92,7 @@ extract_listeners :: proc(
 			}
 			if len(n.drop_tags) > 0 && len(n.drop_event) > 0 {
 				append(&listeners, types.Listener(types.DropListener{
-					node_idx = idx, tags = n.drop_tags, group = "",
+					node_idx = idx, tags = n.drop_tags,
 				}))
 			}
 			if len(n.over_tags) > 0 {

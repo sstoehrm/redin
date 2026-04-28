@@ -103,45 +103,33 @@ NodeCanvas :: struct {
 }
 
 NodeVbox :: struct {
-	overflow:        string,
-	layout:          Anchor,
-	aspect:          string,
-	width:           union {
+	overflow:   string,
+	layout:     Anchor,
+	aspect:     string,
+	width:      union {
 		SizeValue,
 		f16,
 	},
-	height:          union {
+	height:     union {
 		SizeValue,
 		f16,
 	},
-	draggable_group: string,
-	draggable_event: string,
-	draggable_ctx:   i32,
-	dropable_group:  string,
-	dropable_event:  string,
-	dropable_ctx:    i32,
-	using drag:      Drag_Attrs,
+	using drag: Drag_Attrs,
 }
 
 NodeHbox :: struct {
-	overflow:        string,
-	layout:          Anchor,
-	aspect:          string,
-	width:           union {
+	overflow:   string,
+	layout:     Anchor,
+	aspect:     string,
+	width:      union {
 		SizeValue,
 		f32,
 	},
-	height:          union {
+	height:     union {
 		SizeValue,
 		f32,
 	},
-	draggable_group: string,
-	draggable_event: string,
-	draggable_ctx:   i32,
-	dropable_group:  string,
-	dropable_event:  string,
-	dropable_ctx:    i32,
-	using drag:      Drag_Attrs,
+	using drag: Drag_Attrs,
 }
 
 NodeInput :: struct {

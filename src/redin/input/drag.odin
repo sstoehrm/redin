@@ -97,18 +97,6 @@ deepest_drag_over_match :: proc(
 
 DRAG_THRESHOLD :: 4.0
 
-Drag_Source :: struct {
-	group:       string,
-	event:       string,
-	context_ref: i32,
-}
-
-dragging_idx:   int = -1
-drag_over_idx:  int = -1
-drag_pending:   bool = false
-drag_start_pos: rl.Vector2
-drag_source:    Drag_Source
-
 process_drag :: proc(
 	input_events: []types.InputEvent,
 	listeners: []types.Listener,

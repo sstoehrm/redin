@@ -30,8 +30,7 @@ DragListener :: struct {
 
 DropListener :: struct {
 	node_idx: int,
-	group:    string,   // v1 — deleted in task 17
-	tags:     []string, // v2 — borrowed from node, freed by clear_node_strings
+	tags:     []string,
 }
 
 DragOverListener :: struct {

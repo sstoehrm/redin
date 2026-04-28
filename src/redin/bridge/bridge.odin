@@ -151,10 +151,6 @@ clear_node_strings :: proc(n: types.Node) {
 	case types.NodeVbox:
 		if len(v.overflow) > 0 do delete(v.overflow)
 		if len(v.aspect) > 0 do delete(v.aspect)
-		if len(v.draggable_group) > 0 do delete(v.draggable_group)
-		if len(v.draggable_event) > 0 do delete(v.draggable_event)
-		if len(v.dropable_group) > 0 do delete(v.dropable_group)
-		if len(v.dropable_event) > 0 do delete(v.dropable_event)
 		{
 			d := v.drag
 			clear_drag_attrs(&d)
@@ -162,10 +158,6 @@ clear_node_strings :: proc(n: types.Node) {
 	case types.NodeHbox:
 		if len(v.overflow) > 0 do delete(v.overflow)
 		if len(v.aspect) > 0 do delete(v.aspect)
-		if len(v.draggable_group) > 0 do delete(v.draggable_group)
-		if len(v.draggable_event) > 0 do delete(v.draggable_event)
-		if len(v.dropable_group) > 0 do delete(v.dropable_group)
-		if len(v.dropable_event) > 0 do delete(v.dropable_event)
 		{
 			d := v.drag
 			clear_drag_attrs(&d)
@@ -1143,9 +1135,6 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 			if len(layout) > 0 {
 				v.layout = parse_anchor(layout)
 			}
-			v.draggable_group, v.draggable_event, v.draggable_ctx = lua_get_drag_drop(L, attrs_idx, "draggable")
-			v.dropable_group, v.dropable_event, v.dropable_ctx = lua_get_drag_drop(L, attrs_idx, "dropable")
-
 			lua_read_draggable(L, attrs_idx, &v.drag)
 			lua_read_dropable (L, attrs_idx, &v.drag)
 			lua_read_drag_over(L, attrs_idx, &v.drag)
@@ -1163,9 +1152,6 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 			if len(layout) > 0 {
 				h.layout = parse_anchor(layout)
 			}
-			h.draggable_group, h.draggable_event, h.draggable_ctx = lua_get_drag_drop(L, attrs_idx, "draggable")
-			h.dropable_group, h.dropable_event, h.dropable_ctx = lua_get_drag_drop(L, attrs_idx, "dropable")
-
 			lua_read_draggable(L, attrs_idx, &h.drag)
 			lua_read_dropable (L, attrs_idx, &h.drag)
 			lua_read_drag_over(L, attrs_idx, &h.drag)
@@ -2094,38 +2080,6 @@ lua_read_drag_over :: proc(L: ^Lua_State, attrs_idx: i32, out: ^types.Drag_Attrs
     lua_pop(L, 1)
 }
 
-// Read a drag/drop 3-element vector field: [:group :event payload]
-// Returns group, event as strings, and payload as a Lua registry ref.
-lua_get_drag_drop :: proc(L: ^Lua_State, index: i32, field: cstring) -> (group: string, event: string, ctx: i32) {
-	lua_getfield(L, index, field)
-	defer lua_pop(L, 1)
-	if !lua_istable(L, -1) do return "", "", 0
-	tbl := lua_gettop(L)
-
-	// [1] = group keyword
-	lua_rawgeti(L, tbl, 1)
-	if lua_isstring(L, -1) {
-		group = strings.clone_from_cstring(lua_tostring_raw(L, -1))
-	}
-	lua_pop(L, 1)
-
-	// [2] = event keyword
-	lua_rawgeti(L, tbl, 2)
-	if lua_isstring(L, -1) {
-		event = strings.clone_from_cstring(lua_tostring_raw(L, -1))
-	}
-	lua_pop(L, 1)
-
-	// [3] = payload (any Lua value, stored as registry ref)
-	lua_rawgeti(L, tbl, 3)
-	if !lua_isnil(L, -1) {
-		ctx = luaL_ref(L, LUA_REGISTRYINDEX) // pops value
-	} else {
-		lua_pop(L, 1)
-	}
-
-	return
-}
 
 // Read an optional boolean field. Returns (value, true) when the field exists
 // and is a boolean, (false, false) otherwise. Callers use the existence flag to
