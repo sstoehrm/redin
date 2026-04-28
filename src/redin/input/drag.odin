@@ -3,6 +3,35 @@ package input
 import "../types"
 import rl "vendor:raylib"
 
+// ---- v2 state machine ----
+
+Drag_Captured :: struct {
+    src_idx:     int,
+    start_pos:   rl.Vector2,
+    src_tags:    []string,                       // borrowed from node
+    src_event:   string,
+    src_mode:    types.Drag_Mode,
+    src_aspect:  string,
+    src_animate: Maybe(types.Animate_Decoration),
+    src_ctx_ref: i32,
+}
+
+Drag_Idle    :: struct {}
+
+Drag_Pending :: struct {
+    using captured: Drag_Captured,
+}
+
+Drag_Active :: struct {
+    using captured: Drag_Captured,
+    over_zone_idx:  int,        // -1 if no zone hovered
+    over_drop_idx:  int,        // -1 if no drop cell hovered
+}
+
+Drag_State :: union { Drag_Idle, Drag_Pending, Drag_Active }
+
+drag: Drag_State = Drag_Idle{}
+
 DRAG_THRESHOLD :: 4.0
 
 Drag_Source :: struct {
