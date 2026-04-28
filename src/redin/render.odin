@@ -424,6 +424,40 @@ draw_tree :: proc(
 	draw_node(0, nodes, children_list, theme)
 }
 
+DRAG_PREVIEW_OFFSET :: f32(8)
+
+render_drag_preview :: proc(
+	nodes: []types.Node,
+	children_list: []types.Children,
+	theme: map[string]types.Theme,
+) {
+	a, ok := input.drag.(input.Drag_Active)
+	if !ok || a.src_mode != .Preview do return
+	if a.src_idx < 0 || a.src_idx >= len(nodes) do return
+	if a.src_idx >= len(node_rects) do return
+
+	src_rect := node_rects[a.src_idx]
+	mouse    := rl.GetMousePosition()
+	delta    := rl.Vector2{
+		mouse.x - src_rect.x - DRAG_PREVIEW_OFFSET,
+		mouse.y - src_rect.y - DRAG_PREVIEW_OFFSET,
+	}
+
+	draw_subtree_translated(a.src_idx, delta, a.src_aspect, nodes, children_list, theme)
+
+	// :animate on the clone (overlay layer).
+	if dec, ok := a.src_animate.?; ok {
+		translated := rl.Rectangle{
+			src_rect.x + delta.x,
+			src_rect.y + delta.y,
+			src_rect.width,
+			src_rect.height,
+		}
+		drect := resolve_decoration_rect(dec.rect, translated)
+		canvas.process(dec.provider, drect)
+	}
+}
+
 draw_node :: proc(
 	idx: int,
 	nodes: []types.Node,

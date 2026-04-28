@@ -285,6 +285,7 @@ run :: proc(cfg: Config) {
 
 		s_render := profile.begin(.Render)
 		draw_tree(b.theme, b.nodes[:], b.children_list[:])
+		render_drag_preview(b.nodes[:], b.children_list[:], b.theme)
 		profile.end(s_render)
 
 		profile.draw_overlay()
