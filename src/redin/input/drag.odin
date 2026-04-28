@@ -32,6 +32,53 @@ Drag_State :: union { Drag_Idle, Drag_Pending, Drag_Active }
 
 drag: Drag_State = Drag_Idle{}
 
+// True iff src and target share at least one tag.
+drag_matches :: proc(src, target: []string) -> bool {
+    for s in src do for t in target do if s == t do return true
+    return false
+}
+
+// Deepest matching DropListener under `pt` whose tags overlap `src_tags`.
+// Deepest = highest node_idx (DFS-ordered nodes guarantee descendants > ancestors).
+deepest_dropable_match :: proc(
+    src_tags: []string,
+    pt: rl.Vector2,
+    listeners: []types.Listener,
+    node_rects: []rl.Rectangle,
+) -> int {
+    best := -1
+    for listener in listeners {
+        l, ok := listener.(types.DropListener)
+        if !ok do continue
+        if !drag_matches(src_tags, l.tags) do continue
+        if l.node_idx < 0 || l.node_idx >= len(node_rects) do continue
+        if l.node_idx <= best do continue
+        if !rl.CheckCollisionPointRec(pt, node_rects[l.node_idx]) do continue
+        best = l.node_idx
+    }
+    return best
+}
+
+// Deepest matching DragOverListener under `pt`.
+deepest_drag_over_match :: proc(
+    src_tags: []string,
+    pt: rl.Vector2,
+    listeners: []types.Listener,
+    node_rects: []rl.Rectangle,
+) -> int {
+    best := -1
+    for listener in listeners {
+        l, ok := listener.(types.DragOverListener)
+        if !ok do continue
+        if !drag_matches(src_tags, l.tags) do continue
+        if l.node_idx < 0 || l.node_idx >= len(node_rects) do continue
+        if l.node_idx <= best do continue
+        if !rl.CheckCollisionPointRec(pt, node_rects[l.node_idx]) do continue
+        best = l.node_idx
+    }
+    return best
+}
+
 DRAG_THRESHOLD :: 4.0
 
 Drag_Source :: struct {
