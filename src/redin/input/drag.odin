@@ -34,6 +34,15 @@ free_animate :: proc(m: Maybe(types.Animate_Decoration)) {
 	if dec, ok := m.?; ok && len(dec.provider) > 0 do delete(dec.provider)
 }
 
+// Release every heap-owned field of a Drag_Captured. Safe to call once per
+// transition out of Pending or Active back to Idle.
+free_captured :: proc(c: Drag_Captured) {
+	free_string_slice(c.src_tags)
+	if len(c.src_event) > 0 do delete(c.src_event)
+	if len(c.src_aspect) > 0 do delete(c.src_aspect)
+	free_animate(c.src_animate)
+}
+
 // ---- v2 state machine ----
 
 Drag_Captured :: struct {
@@ -121,6 +130,38 @@ process_drag :: proc(
 	dispatch: [dynamic]types.Dispatch_Event
 	mouse := rl.GetMousePosition()
 
+	// Escape cancels any in-flight drag (Pending or Active). When cancelling
+	// from Active with an entered :drag-over zone, fire a final :phase :leave
+	// so the app can tear down zone-level state. No drop event fires.
+	esc_pressed := false
+	for event in input_events {
+		if ke, is_key := event.(types.KeyEvent); is_key && ke.key == .ESCAPE {
+			esc_pressed = true
+			break
+		}
+	}
+	if esc_pressed {
+		switch &s in drag {
+		case Drag_Idle:
+			// Nothing to cancel.
+		case Drag_Pending:
+			free_captured(s.captured)
+			drag = Drag_Idle{}
+		case Drag_Active:
+			if s.over_zone_idx >= 0 && s.over_zone_idx < len(nodes) {
+				if ev := node_over_event(nodes[s.over_zone_idx]); len(ev) > 0 {
+					append(&dispatch, types.Dispatch_Event(types.Drag_Over_Event{
+						event_name = ev,
+						phase      = .Leave,
+					}))
+				}
+			}
+			free_captured(s.captured)
+			drag = Drag_Idle{}
+		}
+		return dispatch
+	}
+
 	switch &s in drag {
 	case Drag_Idle:
 		// Mouse-down on a DragListener → Pending.
@@ -197,10 +238,7 @@ process_drag :: proc(
 				}
 			}
 		} else {
-			free_string_slice(s.src_tags)
-			if len(s.src_event) > 0 do delete(s.src_event)
-			if len(s.src_aspect) > 0 do delete(s.src_aspect)
-			free_animate(s.src_animate)
+			free_captured(s.captured)
 			drag = Drag_Idle{}
 		}
 
@@ -208,10 +246,7 @@ process_drag :: proc(
 		// Re-flatten safety: if the source idx no longer points at a draggable
 		// with our tags, cancel.
 		if s.src_idx < 0 || s.src_idx >= len(nodes) {
-			free_string_slice(s.src_tags)
-			if len(s.src_event) > 0 do delete(s.src_event)
-			if len(s.src_aspect) > 0 do delete(s.src_aspect)
-			free_animate(s.src_animate)
+			free_captured(s.captured)
 			drag = Drag_Idle{}
 			return dispatch
 		}
@@ -284,10 +319,7 @@ process_drag :: proc(
 				}
 			}
 
-			free_string_slice(s.src_tags)
-			if len(s.src_event) > 0 do delete(s.src_event)
-			if len(s.src_aspect) > 0 do delete(s.src_aspect)
-			free_animate(s.src_animate)
+			free_captured(s.captured)
 			drag = Drag_Idle{}
 		}
 	}
