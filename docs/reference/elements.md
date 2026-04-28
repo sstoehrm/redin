@@ -62,6 +62,9 @@ All elements accept these attributes.
 | `height` | px number or `"full"` | Element height. `"full"` expands to available space. |
 | `visible` | boolean | `false` -- element is not laid out and takes no space. |
 | `animate` | map | Render a registered canvas provider at a host-relative rect. See [core-api.md § Animation](../core-api.md#animation). |
+| `draggable` | `[tags {options} payload]` | Declare this element as draggable. See [core-api.md § Drag-and-drop](../core-api.md#drag-and-drop). |
+| `dropable` | `[tags {options} payload]` | Declare this element as a drop target. See [core-api.md § Drag-and-drop](../core-api.md#drag-and-drop). |
+| `drag-over` | `[tags {options}]` | Declare this element as a drag-over container zone. See [core-api.md § Drag-and-drop](../core-api.md#drag-and-drop). |
 
 **Visual properties (`bg`, `color`, `border`, `font-size`, `weight`, `radius`, `border-width`, `opacity`) must never appear on elements.** They belong in the theme only.
 
