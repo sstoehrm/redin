@@ -1113,6 +1113,10 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 			}
 			v.draggable_group, v.draggable_event, v.draggable_ctx = lua_get_drag_drop(L, attrs_idx, "draggable")
 			v.dropable_group, v.dropable_event, v.dropable_ctx = lua_get_drag_drop(L, attrs_idx, "dropable")
+
+			lua_read_draggable(L, attrs_idx, &v.drag)
+			lua_read_dropable (L, attrs_idx, &v.drag)
+			lua_read_drag_over(L, attrs_idx, &v.drag)
 		}
 		return v
 
@@ -1129,6 +1133,10 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 			}
 			h.draggable_group, h.draggable_event, h.draggable_ctx = lua_get_drag_drop(L, attrs_idx, "draggable")
 			h.dropable_group, h.dropable_event, h.dropable_ctx = lua_get_drag_drop(L, attrs_idx, "dropable")
+
+			lua_read_draggable(L, attrs_idx, &h.drag)
+			lua_read_dropable (L, attrs_idx, &h.drag)
+			lua_read_drag_over(L, attrs_idx, &h.drag)
 		}
 		return h
 
