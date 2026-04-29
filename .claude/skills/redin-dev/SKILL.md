@@ -125,6 +125,22 @@ Tags = single keyword (`:item`) or vector (`[:item :sword]`); a draggable and a 
       ...])]
 ```
 
+### Drag handles
+
+When a draggable container has interactive children (text that should be selectable, buttons), the click winner is the deepest hit — usually the text — so dragging-by-row-body breaks. Use a drag handle:
+
+```fennel
+[:hbox {:draggable [:row-drag {:handle false :event :event/drag} payload]
+        :dropable  [:row-drag {:event :event/drop} payload]}
+ [:vbox {:width 24 :aspect :grip :drag-handle true}]   ;; grab surface
+ [:text {} item.text]                                  ;; selectable
+ [:button {:click :remove} "x"]]                       ;; clickable
+```
+
+`:handle false` on the draggable opts the container out; `:drag-handle true` on any descendant marks it as a grab surface for the nearest `:draggable` ancestor. `:handle true` (default) keeps the container as a grab surface and makes any handles additive.
+
+`:drag-handle` is allowed on `:vbox`, `:hbox`, and `:button`. On a button, it is mutually exclusive with `:click` (parser warns, drops `:click`).
+
 ## Canvas API (Fennel/Lua)
 
 ### Drawing from scripting (no binary changes needed)

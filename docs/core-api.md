@@ -214,9 +214,11 @@ If the provider name isn't registered, `canvas.process` silently no-ops (same po
 
 Three universal attributes; all share `[tags {options} ?payload]`:
 
-- `:draggable [tags {options} payload]` — declares "what I am" + how the element behaves while dragged. Required: `:event`. Optional: `:mode` (`:preview` (default) | `:none`), `:aspect`, `:animate`.
+- `:draggable [tags {options} payload]` — declares "what I am" + how the element behaves while dragged. Required: `:event`. Optional: `:mode` (`:preview` (default) | `:none`), `:aspect`, `:animate`, `:handle` (bool, default `true` — set `false` to disable container-as-grab and require an explicit `:drag-handle` descendant).
 - `:dropable [tags {options} payload]` — declares "what I accept" + the hover aspect. Required: `:event`. Optional: `:aspect`, `:animate`.
 - `:drag-over [tags {options}]` — container-level zone. Optional: `:event` (fires `:phase :enter` / `:leave`), `:aspect`, `:animate`. No payload slot.
+
+A draggable container's whole rect is the grab surface by default. To dedicate the grab to a small sub-region (handy when the row contains selectable text or buttons that would otherwise win the click), set `:handle false` on the draggable and add a child node carrying `:drag-handle true`. The handle binds to the nearest `:draggable` ancestor (no tag repetition needed). `:drag-handle` is supported on `:vbox`, `:hbox`, and `:button`. On `:button`, it is mutually exclusive with `:click` — when both are set, the parser warns and drops `:click`.
 
 Tags are a single keyword (one tag) or a vector of keywords (multi-tag); a draggable and a dropable interact when their tag sets intersect.
 

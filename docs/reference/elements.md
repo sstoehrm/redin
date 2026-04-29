@@ -155,6 +155,7 @@ A clickable element with a text label. Dispatches an event on click.
 | --------- | ---- | ------- | ----- |
 | `click` | keyword | -- | Event dispatched on click. **Required.** |
 | `label` | string | -- | Button text. Can also be passed as a child string. |
+| `drag-handle` | bool | `false` | Marks this button as a grab surface for the nearest `:draggable` ancestor. Mutually exclusive with `click` — if both set, parser warns and drops `click`. |
 
 Visual properties come from `aspect`.
 
@@ -239,6 +240,7 @@ Lays out children in a horizontal row, left to right.
 | --------- | ---- | ------- | ----- |
 | `overflow` | `"scroll-x"` | -- | Clip + horizontal wheel scroll. Children must set `:width`. See Scrolling. |
 | `layout` | anchor keyword (see below) | `"top_left"` | Child alignment along both axes. |
+| `drag-handle` | bool | `false` | Marks this hbox as a grab surface for the nearest `:draggable` ancestor. |
 
 `:layout` takes one of nine two-axis anchors: `top_left`, `top_center`, `top_right`, `center_left`, `center`, `center_right`, `bottom_left`, `bottom_center`, `bottom_right`. For an hbox the horizontal component selects where the children *group* sits on the main axis; the vertical component selects how each child is aligned on the cross axis. For a vbox the roles swap. Unrecognized values log a warning and fall back to `top_left`.
 
