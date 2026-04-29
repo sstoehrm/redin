@@ -70,7 +70,7 @@ extract_listeners :: proc(
 			aspect = n.aspect
 			if d, ok := n.draggable.?; ok && len(d.tags) > 0 && len(d.event) > 0 {
 				append(&listeners, types.Listener(types.DragListener{
-					node_idx = idx, tags = d.tags,
+					node_idx = idx, source_idx = idx, tags = d.tags,
 				}))
 			}
 			if d, ok := n.dropable.?; ok && len(d.tags) > 0 && len(d.event) > 0 {
@@ -87,7 +87,7 @@ extract_listeners :: proc(
 			aspect = n.aspect
 			if d, ok := n.draggable.?; ok && len(d.tags) > 0 && len(d.event) > 0 {
 				append(&listeners, types.Listener(types.DragListener{
-					node_idx = idx, tags = d.tags,
+					node_idx = idx, source_idx = idx, tags = d.tags,
 				}))
 			}
 			if d, ok := n.dropable.?; ok && len(d.tags) > 0 && len(d.event) > 0 {
