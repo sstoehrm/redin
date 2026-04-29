@@ -2018,6 +2018,15 @@ lua_read_draggable :: proc(L: ^Lua_State, attrs_idx: i32) -> Maybe(types.Draggab
 	}
 	lua_pop(L, 1)
 
+	// :handle (optional, default true). Only an explicit `false` disables
+	// container-as-grab-surface; descendants marked :drag-handle become the
+	// only grab targets. Validated later by validate_drag_handles.
+	lua_getfield(L, opts, "handle")
+	if lua_isboolean(L, -1) {
+		if lua_toboolean(L, -1) == 0 do out.handle_off = true
+	}
+	lua_pop(L, 1)
+
 	// :animate (optional, reuse parse_animate_attr against the options table)
 	if dec, ok := parse_animate_attr(L, opts); ok {
 		out.animate = dec
