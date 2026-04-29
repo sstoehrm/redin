@@ -185,7 +185,7 @@ run :: proc(cfg: Config) {
 
 		if b.frame_changed {
 			delete(listeners)
-			bridge.validate_drag_handles(b.nodes[:], b.children_list[:], b.paths[:])
+			bridge.validate_drag_handles(b.nodes[:], b.children_list[:])
 			listeners = input.extract_listeners(b.paths, b.nodes, b.children_list, b.theme)
 		}
 

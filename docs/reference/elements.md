@@ -260,7 +260,7 @@ Lays out children in a vertical column, top to bottom.
 
 **Required attrs:** none
 
-**Optional attrs:** identical to `hbox`. `overflow` is `"scroll-y"` (see Scrolling).
+**Optional attrs:** identical to `hbox` (including `drag-handle`). `overflow` is `"scroll-y"` (see Scrolling).
 
 For a vbox, the horizontal component of `:layout` aligns each child across the row (cross axis), and the vertical component positions the children group within the container's height (main axis).
 

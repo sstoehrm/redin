@@ -128,7 +128,6 @@ check_hotreload :: proc(b: ^Bridge) {
 validate_drag_handles :: proc(
 	nodes: []types.Node,
 	children_list: []types.Children,
-	paths: []types.Path,
 ) {
 	for node, idx in nodes {
 		handle_off := false
@@ -164,6 +163,10 @@ subtree_has_drag_handle :: proc(
 		ci := int(kids.value[i])
 		if ci < 0 || ci >= len(nodes) do continue
 		nested := false
+		// Edge case: a node that is BOTH a draggable container and carries
+		// drag_handle = true counts as a handle for *this* outer draggable
+		// (we report `return true` before checking `nested`). This is exotic;
+		// idiomatic apps don't combine the two on one node.
 		switch n in nodes[ci] {
 		case types.NodeVbox:
 			if _, ok := n.draggable.?; ok do nested = true

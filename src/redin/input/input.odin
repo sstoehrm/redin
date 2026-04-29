@@ -34,6 +34,9 @@ collect_drag_handles_recur :: proc(
 		ci := int(kids.value[i])
 		if ci < 0 || ci >= len(nodes) do continue
 		// Stop descending into nested draggables.
+		// Edge case: a node that is BOTH a draggable container and carries
+		// drag_handle = true is appended as a handle for *this* outer
+		// draggable. Idiomatic apps don't combine the two on one node.
 		nested := false
 		switch n in nodes[ci] {
 		case types.NodeVbox:
