@@ -508,15 +508,33 @@ key_to_string_input :: proc(key: rl.KeyboardKey) -> string {
 	}
 }
 
-// Set the system mouse cursor to I-beam while hovering a selectable text,
-// otherwise DEFAULT. Safe to call every frame; Raylib debounces redundant
-// sets internally.
+// Cursor precedence (highest first):
+//   1. Active or pending drag → RESIZE_ALL ("grabbing"; raylib has no
+//      grab cursor, this is the closest analogue).
+//   2. Mouse over a DragListener (handle or container) → POINTING_HAND.
+//   3. Mouse over a Text_Select_Listener → IBEAM.
+//   4. Otherwise DEFAULT.
 set_hover_cursor :: proc(listeners: []types.Listener, node_rects: []rl.Rectangle) {
+	switch _ in drag {
+	case Drag_Pending, Drag_Active:
+		rl.SetMouseCursor(.RESIZE_ALL)
+		return
+	case Drag_Idle:
+	}
 	mouse := rl.GetMousePosition()
+	for listener in listeners {
+		dl, ok := listener.(types.DragListener)
+		if !ok do continue
+		if dl.node_idx < 0 || dl.node_idx >= len(node_rects) do continue
+		if rl.CheckCollisionPointRec(mouse, node_rects[dl.node_idx]) {
+			rl.SetMouseCursor(.POINTING_HAND)
+			return
+		}
+	}
 	for listener in listeners {
 		tl, ok := listener.(types.Text_Select_Listener)
 		if !ok do continue
-		if tl.node_idx >= len(node_rects) do continue
+		if tl.node_idx < 0 || tl.node_idx >= len(node_rects) do continue
 		if rl.CheckCollisionPointRec(mouse, node_rects[tl.node_idx]) {
 			rl.SetMouseCursor(.IBEAM)
 			return
