@@ -118,6 +118,70 @@ check_hotreload :: proc(b: ^Bridge) {
 	}
 }
 
+// Walk the flat tree once: for each draggable with handle_off, ensure at
+// least one descendant carries drag_handle. Otherwise the draggable is
+// silently ungrabbable. Stops the descendant walk at nested-draggable
+// boundaries (handle binds to nearest draggable ancestor).
+//
+// Logged per-frame in line with the existing parse-warning convention
+// (no dedupe).
+validate_drag_handles :: proc(
+	nodes: []types.Node,
+	children_list: []types.Children,
+	paths: []types.Path,
+) {
+	for node, idx in nodes {
+		handle_off := false
+		switch n in node {
+		case types.NodeVbox:
+			if d, ok := n.draggable.?; ok do handle_off = d.handle_off
+		case types.NodeHbox:
+			if d, ok := n.draggable.?; ok do handle_off = d.handle_off
+		case types.NodeStack, types.NodeCanvas, types.NodeInput,
+		     types.NodeButton, types.NodeText, types.NodeImage,
+		     types.NodePopout, types.NodeModal:
+		}
+		if !handle_off do continue
+		if !subtree_has_drag_handle(idx, nodes, children_list) {
+			fmt.eprintfln(
+				":draggable at idx %d has :handle false but no descendant :drag-handle true — ungrabbable",
+				idx,
+			)
+		}
+	}
+}
+
+// True iff any descendant of `root` carries drag_handle == true.
+// Stops descent at nested-draggable boundaries.
+subtree_has_drag_handle :: proc(
+	root: int,
+	nodes: []types.Node,
+	children_list: []types.Children,
+) -> bool {
+	if root < 0 || root >= len(children_list) do return false
+	kids := children_list[root]
+	for i in 0 ..< int(kids.length) {
+		ci := int(kids.value[i])
+		if ci < 0 || ci >= len(nodes) do continue
+		nested := false
+		switch n in nodes[ci] {
+		case types.NodeVbox:
+			if _, ok := n.draggable.?; ok do nested = true
+			if n.drag_handle do return true
+		case types.NodeHbox:
+			if _, ok := n.draggable.?; ok do nested = true
+			if n.drag_handle do return true
+		case types.NodeButton:
+			if n.drag_handle do return true
+		case types.NodeStack, types.NodeCanvas, types.NodeInput,
+		     types.NodeText, types.NodeImage, types.NodePopout,
+		     types.NodeModal:
+		}
+		if !nested && subtree_has_drag_handle(ci, nodes, children_list) do return true
+	}
+	return false
+}
+
 clear_draggable_attrs :: proc(m: Maybe(types.Draggable_Attrs)) {
 	d, ok := m.?
 	if !ok do return
