@@ -6,6 +6,52 @@ import text_pkg "../text"
 import font "../font"
 import rl "vendor:raylib"
 
+// Collect descendant indices of `root` that carry drag_handle == true.
+// Stops at nested-draggable boundaries — a handle inside an inner
+// draggable belongs to that inner one (nearest-ancestor rule).
+// Allocates with context.temp_allocator; caller does not free.
+collect_drag_handles_in_subtree :: proc(
+	root: int,
+	nodes: [dynamic]types.Node,
+	children_list: [dynamic]types.Children,
+) -> [dynamic]int {
+	out: [dynamic]int
+	out.allocator = context.temp_allocator
+	collect_drag_handles_recur(root, nodes, children_list, &out)
+	return out
+}
+
+@(private="file")
+collect_drag_handles_recur :: proc(
+	root: int,
+	nodes: [dynamic]types.Node,
+	children_list: [dynamic]types.Children,
+	out: ^[dynamic]int,
+) {
+	if root < 0 || root >= len(children_list) do return
+	kids := children_list[root]
+	for i in 0 ..< int(kids.length) {
+		ci := int(kids.value[i])
+		if ci < 0 || ci >= len(nodes) do continue
+		// Stop descending into nested draggables.
+		nested := false
+		switch n in nodes[ci] {
+		case types.NodeVbox:
+			if _, ok := n.draggable.?; ok do nested = true
+			if n.drag_handle do append(out, ci)
+		case types.NodeHbox:
+			if _, ok := n.draggable.?; ok do nested = true
+			if n.drag_handle do append(out, ci)
+		case types.NodeButton:
+			if n.drag_handle do append(out, ci)
+		case types.NodeStack, types.NodeCanvas, types.NodeInput,
+		     types.NodeText, types.NodeImage, types.NodePopout,
+		     types.NodeModal:
+		}
+		if !nested do collect_drag_handles_recur(ci, nodes, children_list, out)
+	}
+}
+
 // Currently focused node index, -1 means none.
 focused_idx: int = -1
 
@@ -43,6 +89,7 @@ deepest_listener_idx :: proc(
 extract_listeners :: proc(
 	paths: [dynamic]types.Path,
 	nodes: [dynamic]types.Node,
+	children_list: [dynamic]types.Children,
 	theme: map[string]types.Theme,
 ) -> [dynamic]types.Listener {
 	listeners: [dynamic]types.Listener
@@ -69,9 +116,17 @@ extract_listeners :: proc(
 		case types.NodeVbox:
 			aspect = n.aspect
 			if d, ok := n.draggable.?; ok && len(d.tags) > 0 && len(d.event) > 0 {
-				append(&listeners, types.Listener(types.DragListener{
-					node_idx = idx, source_idx = idx, tags = d.tags,
-				}))
+				if !d.handle_off {
+					append(&listeners, types.Listener(types.DragListener{
+						node_idx = idx, source_idx = idx, tags = d.tags,
+					}))
+				}
+				handles := collect_drag_handles_in_subtree(idx, nodes, children_list)
+				for h in handles {
+					append(&listeners, types.Listener(types.DragListener{
+						node_idx = h, source_idx = idx, tags = d.tags,
+					}))
+				}
 			}
 			if d, ok := n.dropable.?; ok && len(d.tags) > 0 && len(d.event) > 0 {
 				append(&listeners, types.Listener(types.DropListener{
@@ -86,9 +141,17 @@ extract_listeners :: proc(
 		case types.NodeHbox:
 			aspect = n.aspect
 			if d, ok := n.draggable.?; ok && len(d.tags) > 0 && len(d.event) > 0 {
-				append(&listeners, types.Listener(types.DragListener{
-					node_idx = idx, source_idx = idx, tags = d.tags,
-				}))
+				if !d.handle_off {
+					append(&listeners, types.Listener(types.DragListener{
+						node_idx = idx, source_idx = idx, tags = d.tags,
+					}))
+				}
+				handles := collect_drag_handles_in_subtree(idx, nodes, children_list)
+				for h in handles {
+					append(&listeners, types.Listener(types.DragListener{
+						node_idx = h, source_idx = idx, tags = d.tags,
+					}))
+				}
 			}
 			if d, ok := n.dropable.?; ok && len(d.tags) > 0 && len(d.event) > 0 {
 				append(&listeners, types.Listener(types.DropListener{
