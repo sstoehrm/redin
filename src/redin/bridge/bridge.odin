@@ -1179,6 +1179,9 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 			v.draggable = lua_read_draggable(L, attrs_idx)
 			v.dropable  = lua_read_dropable (L, attrs_idx)
 			v.drag_over = lua_read_drag_over(L, attrs_idx)
+			if dh, exists := lua_get_bool_field_opt(L, attrs_idx, "drag-handle"); exists {
+				v.drag_handle = dh
+			}
 		}
 		return v
 
@@ -1196,6 +1199,9 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 			h.draggable = lua_read_draggable(L, attrs_idx)
 			h.dropable  = lua_read_dropable (L, attrs_idx)
 			h.drag_over = lua_read_drag_over(L, attrs_idx)
+			if dh, exists := lua_get_bool_field_opt(L, attrs_idx, "drag-handle"); exists {
+				h.drag_handle = dh
+			}
 		}
 		return h
 
