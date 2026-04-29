@@ -88,4 +88,18 @@
                              {:event :event/drop
                               :aspect :row-drop-hot}
                              i]}
-           [:text {:id (.. :item- (tostring i)) :aspect :body} item.text]])]])))
+           [:text {:id (.. :item- (tostring i)) :aspect :body} item.text]])]
+       [:vbox {:id :handle-row-demo :aspect :muted}
+        [:hbox {:id :handle-row
+                :aspect :muted :height 42
+                :draggable [:demo
+                            {:mode :preview
+                             :handle false
+                             :event :event/drag
+                             :aspect :row-dragging} 99]}
+         [:vbox {:id :handle-grip
+                 :width 24 :height 24
+                 :aspect :muted
+                 :drag-handle true}]
+         [:text {:id :handle-row-text :aspect :body} "drag me by the grip"]]]
+       ])))
