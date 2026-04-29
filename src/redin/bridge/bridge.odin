@@ -1227,6 +1227,18 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 			btn.click_ctx = lua_get_event_ctx(L, attrs_idx, "click")
 			btn.width = lua_get_size_f32(L, attrs_idx, "width")
 			btn.height = lua_get_size_f32(L, attrs_idx, "height")
+			if dh, exists := lua_get_bool_field_opt(L, attrs_idx, "drag-handle"); exists {
+				btn.drag_handle = dh
+			}
+			if btn.drag_handle && len(btn.click) > 0 {
+				fmt.eprintln(":button: :drag-handle conflicts with :click — dropping :click")
+				delete(btn.click)
+				btn.click = ""
+				if btn.click_ctx != 0 {
+					luaL_unref(L, LUA_REGISTRYINDEX, btn.click_ctx)
+					btn.click_ctx = 0
+				}
+			}
 		}
 		if len(text_content) > 0 do btn.label = text_content
 		return btn
