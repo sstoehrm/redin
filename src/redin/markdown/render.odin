@@ -137,3 +137,30 @@ free_laid :: proc(laid: []Laid_Block) {
 	}
 	delete(laid)
 }
+
+// Draw a laid-out markdown tree into `rect` using `color` for non-code spans.
+// Code spans get a subtle dark bg fill.
+draw :: proc(laid: []Laid_Block, rect: rl.Rectangle, color: rl.Color, base_font_size: f32, base_font_name: string, line_height_ratio: f32) {
+	lh := text_pkg.line_height(base_font_size, line_height_ratio)
+	code_bg := rl.Color{60, 60, 70, 255}
+
+	block_y_offset: f32 = 0
+	for blk, blk_idx in laid {
+		for span in blk.spans {
+			x := rect.x + span.x
+			y := rect.y + block_y_offset + span.y
+			fnt := font_for(span.style, base_font_name)
+
+			if span.style == .Code {
+				rl.DrawRectangleRec(rl.Rectangle{x, y, span.width, lh}, code_bg)
+			}
+
+			cstr := strings.clone_to_cstring(span.text, context.temp_allocator)
+			rl.DrawTextEx(fnt, cstr, rl.Vector2{x, y}, base_font_size, 0, color)
+		}
+		block_y_offset += blk.total_height
+		if blk_idx + 1 < len(laid) {
+			block_y_offset += lh  // paragraph spacing
+		}
+	}
+}
