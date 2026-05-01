@@ -22,9 +22,22 @@ These docs are the source of truth. When implementing, follow them exactly.
 
 ## Building
 
+Default build:
+
 ```bash
 odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit -out:build/redin
 ```
+
+With the agent channel feature:
+
+```bash
+odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit \
+    -define:REDIN_AGENT=true -out:build/redin
+```
+
+When `REDIN_AGENT` is set, the dev-server listener starts in any run
+(not just `--dev`) and exposes the `/agent/*` endpoints. Default
+release builds carry zero agent code.
 
 ## Running
 
@@ -108,6 +121,9 @@ Available when running with `--dev`. Listens on port 8800 by default; walks upwa
 | `POST` | `/input/mouse/down` | Press a button (`{button:"left\|right\|middle"}`). Requires takeover. |
 | `POST` | `/input/mouse/up` | Release a button (`{button:...}`). Requires takeover. |
 | `POST` | `/input/key` | Synthesise one KeyEvent (`{key, mods?}`). Does not require takeover. |
+| `GET`  | `/agent/nodes` | List `:agent`-tagged nodes (REDIN_AGENT only). |
+| `GET`  | `/agent/content/<id>` | Read content (REDIN_AGENT only). |
+| `PUT`  | `/agent/content/<id>` | Write content; node must be `:agent :edit` (REDIN_AGENT only). |
 
 Example:
 

@@ -606,3 +606,66 @@ polling.
 ### CORS
 
 The dev server emits no `Access-Control-*` headers and serves `OPTIONS` with a `405 Method Not Allowed`. CORS preflight is intentionally not supported: the server is for local tools (curl, Claude, IDE extensions), not browser-origin code, and admitting browser callers would weaken the same-origin protection that already comes for free with the auth-token requirement.
+
+### Agent channel (test only)
+
+The agent channel lets an external agent read and write content of redin
+nodes by `:id`. It is gated behind a compile-time flag:
+
+```bash
+odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit \
+    -define:REDIN_AGENT=true -out:build/redin
+```
+
+Default release builds carry zero agent code. When the flag is set,
+the dev-server listener starts even without `--dev` and exposes the
+`/agent/*` endpoints.
+
+The `/frames` endpoint shape is unchanged when `REDIN_AGENT` is on.
+
+#### `:agent` attribute
+
+Any node type except `:canvas` accepts an `:agent` attribute with
+either `:read` or `:edit`. Combine with `:id` to make the node
+addressable.
+
+```fennel
+[:text  {:id :reply :agent :edit} "…"]    ;; agent writes content here
+[:input {:id :user-input :agent :read}]   ;; agent observes the live value
+```
+
+When the agent writes to an `:edit` node, the framework swaps the
+node's content for the agent's value at view-render time. App authors
+can also subscribe via `(subscribe [:agent <id>])`.
+
+Per-node-type semantics:
+
+| Tag | `:read` returns | `:edit` accepts |
+|---|---|---|
+| `:text` | text string | string → replaces text |
+| `:input` | current value (live) | string → sets value |
+| `:button` | label string | string → sets label |
+| `:image` | source path | string → sets source |
+| `:vbox` `:hbox` `:stack` `:popout` `:modal` | children list as JSON array | JSON array → replaces children |
+
+#### Endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/agent/nodes` | List all `:agent`-tagged nodes: `[{id, mode, type}, ...]`. |
+| `GET` | `/agent/content/<id>` | Returns `{"content": <string-or-array>}`. 404 if id missing. |
+| `PUT` | `/agent/content/<id>` | Body: `{"content": <string-or-array>}`. Dispatches `:event/agent-edit`. 404/403/400 on the respective error paths. |
+
+Example (write a markdown reply):
+
+```bash
+PORT=$(cat .redin-port); TOKEN=$(cat .redin-token)
+curl -H "Authorization: Bearer $TOKEN" \
+     -X PUT -d '{"content":"**Answer:** 4"}' \
+     http://localhost:$PORT/agent/content/reply
+```
+
+The framework dispatches `:event/agent-edit {id "reply" content "**Answer:** 4"}`,
+the Fennel handler stores it in `db.agent.reply`, and the next render
+shows it in the `:reply` text node. Markdown rendering is tracked in
+issue #100.

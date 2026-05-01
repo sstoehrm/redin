@@ -16,7 +16,8 @@
     (dataflow.flush)
     (let [view-fn _G.main_view]
       (when view-fn
-        (let [result (view-fn)]
+        (let [result (view-fn)
+              result (let [agent (require :agent)] (agent.apply-overrides result))]
           (when result
             (let [flattened (frame.flatten result)]
               (set last-push flattened)

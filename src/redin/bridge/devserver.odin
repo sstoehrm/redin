@@ -569,6 +569,16 @@ process_request :: proc(ds: ^Dev_Server, req: ^Pending_Request) {
 	ch := req.response
 	switch req.method {
 	case "GET":
+		when REDIN_AGENT {
+			if req.path == "/agent/nodes" {
+				handle_get_agent_nodes(ds, ch)
+				return
+			}
+			if strings.has_prefix(req.path, "/agent/content/") {
+				handle_get_agent_content(ds, ch, req.path[len("/agent/content/"):])
+				return
+			}
+		}
 		if req.path == "/frames" {
 			handle_get_frames(ds, ch)
 		} else if req.path == "/state" {
@@ -620,6 +630,12 @@ process_request :: proc(ds: ^Dev_Server, req: ^Pending_Request) {
 			respond_text(ch, 404, "Not found")
 		}
 	case "PUT":
+		when REDIN_AGENT {
+			if strings.has_prefix(req.path, "/agent/content/") {
+				handle_put_agent_content(ds, ch, req.path[len("/agent/content/"):], req.body)
+				return
+			}
+		}
 		if req.path == "/aspects" {
 			handle_put_aspects(ds, ch, req.body)
 		} else {
@@ -791,6 +807,377 @@ frame_value_to_json :: proc(
 	}
 	strings.write_string(b, "]")
 }
+
+when REDIN_AGENT {
+
+// Walks a Fennel-shaped frame tree DFS and emits a JSON array of
+// {id, mode, type} for every node whose attrs include both :agent and :id.
+// Skips :canvas tag.
+agent_nodes_walker :: proc(b: ^strings.Builder, L: ^Lua_State, index: i32, first: ^bool) {
+	idx := index < 0 ? lua_gettop(L) + index + 1 : index
+	if !lua_istable(L, idx) do return
+
+	// Detect frame node: [tag-string, attrs-table, ...children]
+	lua_rawgeti(L, idx, 1)
+	is_node := lua_isstring(L, -1)
+	tag := ""
+	if is_node {
+		tag = string(lua_tostring_raw(L, -1))
+		if len(tag) == 0 do is_node = false
+	}
+	lua_pop(L, 1)
+	if !is_node do return
+
+	// attrs at slot 2
+	lua_rawgeti(L, idx, 2)
+	if lua_istable(L, -1) {
+		attrs_idx := lua_gettop(L)
+		// :agent
+		lua_getfield(L, attrs_idx, "agent")
+		mode := ""
+		if lua_isstring(L, -1) {
+			s := string(lua_tostring_raw(L, -1))
+			if s == "read" || s == ":read" do mode = "read"
+			if s == "edit" || s == ":edit" do mode = "edit"
+		}
+		lua_pop(L, 1)
+		// :id
+		lua_getfield(L, attrs_idx, "id")
+		id := ""
+		if lua_isstring(L, -1) {
+			id = string(lua_tostring_raw(L, -1))
+		}
+		lua_pop(L, 1)
+		if len(mode) > 0 && len(id) > 0 && tag != "canvas" {
+			if !first^ do strings.write_string(b, ",")
+			first^ = false
+			fmt.sbprintf(b, `{{"id":"%s","mode":"%s","type":"%s"}}`, id, mode, tag)
+		}
+	}
+	lua_pop(L, 1)
+
+	// Recurse into children at slots 3..n
+	n := lua_objlen(L, idx)
+	for i in 3..=n {
+		lua_rawgeti(L, idx, i32(i))
+		agent_nodes_walker(b, L, -1, first)
+		lua_pop(L, 1)
+	}
+}
+
+handle_get_agent_nodes :: proc(ds: ^Dev_Server, ch: ^Response_Channel) {
+	L := ds.bridge.L
+	lua_getglobal(L, "require")
+	lua_pushstring(L, "view")
+	if lua_pcall(L, 1, 1, 0) != 0 {
+		lua_pop(L, 1)
+		respond_json_error(ch, 500, `{"error":"lua error"}`)
+		return
+	}
+	lua_getfield(L, -1, "get-last-push")
+	lua_remove(L, -2)
+	if lua_pcall(L, 0, 1, 0) != 0 {
+		lua_pop(L, 1)
+		respond_json_error(ch, 500, `{"error":"lua error"}`)
+		return
+	}
+	b := strings.builder_make()
+	defer strings.builder_destroy(&b)
+	strings.write_string(&b, "[")
+	first := true
+	agent_nodes_walker(&b, L, -1, &first)
+	strings.write_string(&b, "]")
+	lua_pop(L, 1)
+	respond_json(ch, strings.to_string(b))
+}
+
+// Walk the frame tree, push the matching [tag attrs ...children] table
+// onto the Lua stack at -1 if found and return true. Otherwise leaves
+// the stack unchanged and returns false. Caller must lua_pop(L, 1) on success.
+agent_find_by_id :: proc(L: ^Lua_State, index: i32, target_id: string) -> bool {
+	idx := index < 0 ? lua_gettop(L) + index + 1 : index
+	if !lua_istable(L, idx) do return false
+
+	// Inspect tag and id attr.
+	lua_rawgeti(L, idx, 1)
+	is_node := lua_isstring(L, -1)
+	lua_pop(L, 1)
+	if is_node {
+		lua_rawgeti(L, idx, 2)
+		if lua_istable(L, -1) {
+			lua_getfield(L, -1, "id")
+			id := ""
+			if lua_isstring(L, -1) do id = string(lua_tostring_raw(L, -1))
+			lua_pop(L, 1)
+			lua_pop(L, 1) // attrs
+			if id == target_id {
+				lua_pushvalue(L, idx)
+				return true
+			}
+		} else {
+			lua_pop(L, 1)
+		}
+	}
+
+	// Recurse into children.
+	n := lua_objlen(L, idx)
+	for i in 3..=n {
+		lua_rawgeti(L, idx, i32(i))
+		if agent_find_by_id(L, -1, target_id) {
+			// Move the found node up by 1 (replacing the child we pushed).
+			lua_remove(L, -2)
+			return true
+		}
+		lua_pop(L, 1)
+	}
+	return false
+}
+
+// Reads attr field from a node table at -1 and returns its string value.
+// Returns a temp-allocator slice -- valid only for the current frame.
+agent_node_attr_string :: proc(L: ^Lua_State, attr: cstring) -> string {
+	if !lua_istable(L, -1) do return ""
+	lua_rawgeti(L, -1, 2)
+	defer lua_pop(L, 1)
+	if !lua_istable(L, -1) do return ""
+	lua_getfield(L, -1, attr)
+	defer lua_pop(L, 1)
+	if !lua_isstring(L, -1) do return ""
+	return strings.clone(string(lua_tostring_raw(L, -1)), context.temp_allocator)
+}
+
+agent_node_tag :: proc(L: ^Lua_State) -> string {
+	if !lua_istable(L, -1) do return ""
+	lua_rawgeti(L, -1, 1)
+	defer lua_pop(L, 1)
+	if !lua_isstring(L, -1) do return ""
+	return strings.clone(string(lua_tostring_raw(L, -1)), context.temp_allocator)
+}
+
+agent_escape_json :: proc(s: string) -> string {
+	b := strings.builder_make(context.temp_allocator)
+	for r in s {
+		switch r {
+		case '"':  strings.write_string(&b, `\"`)
+		case '\\': strings.write_string(&b, `\\`)
+		case '\n': strings.write_string(&b, `\n`)
+		case '\t': strings.write_string(&b, `\t`)
+		case:      strings.write_rune(&b, r)
+		}
+	}
+	return strings.to_string(b)
+}
+
+// Emits {"content": ...} JSON for the node at -1 based on its tag.
+emit_agent_content :: proc(b: ^strings.Builder, L: ^Lua_State, tag: string) {
+	strings.write_string(b, `{"content":`)
+	switch tag {
+	case "input":
+		val := agent_node_attr_string(L, "value")
+		fmt.sbprintf(b, `"%s"`, agent_escape_json(val))
+	case "image":
+		val := agent_node_attr_string(L, "src")
+		fmt.sbprintf(b, `"%s"`, agent_escape_json(val))
+	case "vbox", "hbox", "stack", "popout", "modal":
+		strings.write_string(b, "[")
+		n := lua_objlen(L, -1)
+		first := true
+		for i in 3..=n {
+			lua_rawgeti(L, -1, i32(i))
+			if !first do strings.write_string(b, ",")
+			first = false
+			lua_value_to_json(b, L, -1)
+			lua_pop(L, 1)
+		}
+		strings.write_string(b, "]")
+	case:
+		// Default: leaf-text-like (text, button). Content is slot [3].
+		lua_rawgeti(L, -1, 3)
+		val := ""
+		if lua_isstring(L, -1) do val = string(lua_tostring_raw(L, -1))
+		lua_pop(L, 1)
+		fmt.sbprintf(b, `"%s"`, agent_escape_json(val))
+	}
+	strings.write_string(b, "}")
+}
+
+handle_get_agent_content :: proc(ds: ^Dev_Server, ch: ^Response_Channel, id: string) {
+	L := ds.bridge.L
+	lua_getglobal(L, "require")
+	lua_pushstring(L, "view")
+	if lua_pcall(L, 1, 1, 0) != 0 {
+		lua_pop(L, 1)
+		respond_json_error(ch, 500, `{"error":"lua error"}`)
+		return
+	}
+	lua_getfield(L, -1, "get-last-push")
+	lua_remove(L, -2)
+	if lua_pcall(L, 0, 1, 0) != 0 {
+		lua_pop(L, 1)
+		respond_json_error(ch, 500, `{"error":"lua error"}`)
+		return
+	}
+	defer lua_pop(L, 1) // last-push table
+
+	if !agent_find_by_id(L, -1, id) {
+		respond_json_error(ch, 404, `{"error":"id not found"}`)
+		return
+	}
+	defer lua_pop(L, 1) // found node
+
+	tag := agent_node_tag(L)
+	b := strings.builder_make()
+	defer strings.builder_destroy(&b)
+	emit_agent_content(&b, L, tag)
+	respond_json(ch, strings.to_string(b))
+}
+
+handle_put_agent_content :: proc(ds: ^Dev_Server, ch: ^Response_Channel, id: string, body: string) {
+	L := ds.bridge.L
+
+	// 1. Decode body. Expect {"content": <string-or-array>}.
+	pos := 0
+	if !json_decode_value(L, body, &pos) {
+		respond_json_error(ch, 400, `{"error":"invalid JSON"}`)
+		return
+	}
+	// Stack: [body_parent]
+	if !lua_istable(L, -1) {
+		lua_pop(L, 1)
+		respond_json_error(ch, 400, `{"error":"body must be an object with content"}`)
+		return
+	}
+	lua_getfield(L, -1, "content")
+	// Stack: [body_parent, content]
+	if lua_isnil(L, -1) {
+		lua_pop(L, 1) // content (nil)
+		lua_pop(L, 1) // body_parent
+		respond_json_error(ch, 400, `{"error":"missing content field"}`)
+		return
+	}
+	body_idx := lua_gettop(L) // absolute index of content field
+	// Stack: [body_parent, content]  (body_idx == absolute index of content)
+
+	// 2. Find target node and validate — get last-push frame.
+	lua_getglobal(L, "require")
+	lua_pushstring(L, "view")
+	if lua_pcall(L, 1, 1, 0) != 0 {
+		lua_pop(L, 1) // error msg
+		lua_pop(L, 1) // content
+		lua_pop(L, 1) // body_parent
+		respond_json_error(ch, 500, `{"error":"lua error"}`)
+		return
+	}
+	lua_getfield(L, -1, "get-last-push")
+	lua_remove(L, -2) // remove view module, keep get-last-push fn
+	if lua_pcall(L, 0, 1, 0) != 0 {
+		lua_pop(L, 1) // error msg
+		lua_pop(L, 1) // content
+		lua_pop(L, 1) // body_parent
+		respond_json_error(ch, 500, `{"error":"lua error"}`)
+		return
+	}
+	// Stack: [body_parent, content, last_push]
+	last_push_idx := lua_gettop(L)
+
+	if !agent_find_by_id(L, last_push_idx, id) {
+		lua_pop(L, 1) // last_push
+		lua_pop(L, 1) // content
+		lua_pop(L, 1) // body_parent
+		respond_json_error(ch, 404, `{"error":"id not found"}`)
+		return
+	}
+	// Stack: [body_parent, content, last_push, found_node]
+
+	// 3. Read mode + tag from the found node.
+	tag := agent_node_tag(L)
+	mode := agent_node_attr_string(L, "agent")
+	if mode != "edit" && mode != ":edit" {
+		lua_pop(L, 1) // found node
+		lua_pop(L, 1) // last_push
+		lua_pop(L, 1) // content
+		lua_pop(L, 1) // body_parent
+		respond_json_error(ch, 403, `{"error":"node is not :agent :edit"}`)
+		return
+	}
+
+	// 4. Validate body shape against tag.
+	is_container := tag == "vbox" || tag == "hbox" || tag == "stack" ||
+	                tag == "popout" || tag == "modal"
+	body_is_table  := lua_istable(L, body_idx)
+	body_is_string := lua_isstring(L, body_idx)
+	if is_container {
+		if !body_is_table {
+			lua_pop(L, 1) // found node
+			lua_pop(L, 1) // last_push
+			lua_pop(L, 1) // content
+			lua_pop(L, 1) // body_parent
+			respond_json_error(ch, 400, `{"error":"container content must be an array"}`)
+			return
+		}
+	} else {
+		if !body_is_string {
+			lua_pop(L, 1) // found node
+			lua_pop(L, 1) // last_push
+			lua_pop(L, 1) // content
+			lua_pop(L, 1) // body_parent
+			respond_json_error(ch, 400, `{"error":"leaf content must be a string"}`)
+			return
+		}
+	}
+
+	// 5. Done with found_node and last_push.
+	lua_pop(L, 1) // found_node
+	lua_pop(L, 1) // last_push
+	// Stack: [body_parent, content]
+
+	// 6. Build and dispatch [:event/agent-edit {:id id :content <content>}].
+	lua_getglobal(L, "require")
+	lua_pushstring(L, "dataflow")
+	if lua_pcall(L, 1, 1, 0) != 0 {
+		lua_pop(L, 1) // error msg
+		lua_pop(L, 1) // content
+		lua_pop(L, 1) // body_parent
+		respond_json_error(ch, 500, `{"error":"lua error: dataflow"}`)
+		return
+	}
+	// Stack: [body_parent, content, dataflow]
+	lua_getfield(L, -1, "dispatch")
+	lua_remove(L, -2) // remove dataflow module, keep dispatch fn
+	// Stack: [body_parent, content, dispatch_fn]
+
+	// Build the event vector [event-name, payload-table] as a Lua table.
+	lua_createtable(L, 2, 0)
+	ev_idx := lua_gettop(L)
+	// Stack: [body_parent, content, dispatch_fn, ev_table]
+	lua_pushstring(L, "event/agent-edit")
+	lua_rawseti(L, ev_idx, 1)
+
+	lua_createtable(L, 0, 2)
+	payload_idx := lua_gettop(L)
+	// Stack: [body_parent, content, dispatch_fn, ev_table, payload_table]
+	lua_pushlstring(L, cstring(raw_data(id)), uint(len(id)))
+	lua_setfield(L, payload_idx, "id")
+	lua_pushvalue(L, body_idx) // copy of decoded content
+	lua_setfield(L, payload_idx, "content")
+	lua_rawseti(L, ev_idx, 2) // payload into ev_table[2]; pops payload_table
+	// Stack: [body_parent, content, dispatch_fn, ev_table]
+
+	// dispatch(ev_table) — pcall pops dispatch_fn + ev_table (1 arg), pushes 0 results on success.
+	if lua_pcall(L, 1, 0, 0) != 0 {
+		lua_pop(L, 1) // error msg
+		lua_pop(L, 1) // content
+		lua_pop(L, 1) // body_parent
+		respond_json_error(ch, 500, `{"error":"dispatch failed"}`)
+		return
+	}
+	// Stack: [body_parent, content]
+	lua_pop(L, 1) // content
+	lua_pop(L, 1) // body_parent
+	respond_json_ok(ch)
+}
+
+} // when REDIN_AGENT
 
 handle_get_state :: proc(ds: ^Dev_Server, ch: ^Response_Channel) {
 	L := ds.bridge.L

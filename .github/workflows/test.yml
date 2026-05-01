@@ -37,3 +37,38 @@ jobs:
         run: |
           mkdir -p build
           odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit -out:build/redin
+
+  test-agent:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y luajit libssl-dev xvfb \
+            libgl1-mesa-dev libx11-dev libxrandr-dev libxi-dev \
+            libxcursor-dev libxinerama-dev
+
+      - name: Install Babashka
+        run: curl -sL https://raw.githubusercontent.com/babashka/babashka/master/install | sudo bash
+
+      - name: Install Odin
+        uses: laytan/setup-odin@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run Fennel tests
+        run: luajit test/lua/runner.lua test/lua/test_*.fnl
+
+      - name: Build redin (REDIN_AGENT=true)
+        run: |
+          mkdir -p build
+          odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit \
+            -define:REDIN_AGENT=true -out:build/redin
+
+      - name: Run UI tests under xvfb (includes agent suite)
+        run: bash test/ui/run-all.sh --headless

@@ -234,6 +234,54 @@ curl -sH "$H" -X POST http://localhost:$PORT/input/release
 
 ---
 
+## Agent channel (REDIN_AGENT only)
+
+These endpoints are compiled in only when the binary is built with
+`-define:REDIN_AGENT=true`. Without that flag the routes return 404.
+When the flag is set, the dev-server listener starts even without
+`--dev`.
+
+```bash
+odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit \
+    -define:REDIN_AGENT=true -out:build/redin
+```
+
+### `GET /agent/nodes` -- list agent-tagged nodes
+
+```bash
+curl -H "$AUTH" http://localhost:$PORT/agent/nodes
+```
+
+Response: JSON array of `{id, mode, type}` objects for every node
+whose attributes include both `:agent` (`:read` or `:edit`) and `:id`.
+Canvas nodes are silently excluded.
+
+### `GET /agent/content/<id>` -- read node content
+
+```bash
+curl -H "$AUTH" http://localhost:$PORT/agent/content/reply
+```
+
+Response: `{"content": <string-or-array>}`. Returns `404` if no
+agent-tagged node with the given id exists in the last pushed frame.
+
+### `PUT /agent/content/<id>` -- write node content
+
+Body: `{"content": <string-or-array>}`.
+
+```bash
+PORT=$(cat .redin-port); TOKEN=$(cat .redin-token)
+curl -H "Authorization: Bearer $TOKEN" \
+     -X PUT -d '{"content":"**Answer:** 4"}' \
+     http://localhost:$PORT/agent/content/reply
+```
+
+Response: `{"ok": true}`. Dispatches `:event/agent-edit {id "<id>" content <value>}` into the Fennel event queue. The framework stores the value in `db.agent[id]`; the next render swaps the node's content with the stored value.
+
+Error codes: `404` — id not found; `403` — node is `:agent :read` (not editable); `400` — malformed body.
+
+---
+
 ## Not implemented
 
 The following endpoints from the previous design are **not** present:
