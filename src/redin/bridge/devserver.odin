@@ -569,6 +569,12 @@ process_request :: proc(ds: ^Dev_Server, req: ^Pending_Request) {
 	ch := req.response
 	switch req.method {
 	case "GET":
+		when REDIN_AGENT {
+			if req.path == "/agent/nodes" {
+				handle_get_agent_nodes(ds, ch)
+				return
+			}
+		}
 		if req.path == "/frames" {
 			handle_get_frames(ds, ch)
 		} else if req.path == "/state" {
@@ -791,6 +797,91 @@ frame_value_to_json :: proc(
 	}
 	strings.write_string(b, "]")
 }
+
+when REDIN_AGENT {
+
+// Walks a Fennel-shaped frame tree DFS and emits a JSON array of
+// {id, mode, type} for every node whose attrs include both :agent and :id.
+// Skips :canvas tag.
+agent_nodes_walker :: proc(b: ^strings.Builder, L: ^Lua_State, index: i32, first: ^bool) {
+	idx := index < 0 ? lua_gettop(L) + index + 1 : index
+	if !lua_istable(L, idx) do return
+
+	// Detect frame node: [tag-string, attrs-table, ...children]
+	lua_rawgeti(L, idx, 1)
+	is_node := lua_isstring(L, -1)
+	tag := ""
+	if is_node {
+		tag = string(lua_tostring_raw(L, -1))
+		if len(tag) == 0 do is_node = false
+	}
+	lua_pop(L, 1)
+	if !is_node do return
+
+	// attrs at slot 2
+	lua_rawgeti(L, idx, 2)
+	if lua_istable(L, -1) {
+		attrs_idx := lua_gettop(L)
+		// :agent
+		lua_getfield(L, attrs_idx, "agent")
+		mode := ""
+		if lua_isstring(L, -1) {
+			s := string(lua_tostring_raw(L, -1))
+			if s == "read" || s == ":read" do mode = "read"
+			if s == "edit" || s == ":edit" do mode = "edit"
+		}
+		lua_pop(L, 1)
+		// :id
+		lua_getfield(L, attrs_idx, "id")
+		id := ""
+		if lua_isstring(L, -1) {
+			id = string(lua_tostring_raw(L, -1))
+		}
+		lua_pop(L, 1)
+		if len(mode) > 0 && len(id) > 0 && tag != "canvas" {
+			if !first^ do strings.write_string(b, ",")
+			first^ = false
+			fmt.sbprintf(b, `{{"id":"%s","mode":"%s","type":"%s"}}`, id, mode, tag)
+		}
+	}
+	lua_pop(L, 1)
+
+	// Recurse into children at slots 3..n
+	n := lua_objlen(L, idx)
+	for i in 3..=n {
+		lua_rawgeti(L, idx, i32(i))
+		agent_nodes_walker(b, L, -1, first)
+		lua_pop(L, 1)
+	}
+}
+
+handle_get_agent_nodes :: proc(ds: ^Dev_Server, ch: ^Response_Channel) {
+	L := ds.bridge.L
+	lua_getglobal(L, "require")
+	lua_pushstring(L, "view")
+	if lua_pcall(L, 1, 1, 0) != 0 {
+		lua_pop(L, 1)
+		respond_json_error(ch, 500, `{"error":"lua error"}`)
+		return
+	}
+	lua_getfield(L, -1, "get-last-push")
+	lua_remove(L, -2)
+	if lua_pcall(L, 0, 1, 0) != 0 {
+		lua_pop(L, 1)
+		respond_json_error(ch, 500, `{"error":"lua error"}`)
+		return
+	}
+	b := strings.builder_make()
+	defer strings.builder_destroy(&b)
+	strings.write_string(&b, "[")
+	first := true
+	agent_nodes_walker(&b, L, -1, &first)
+	strings.write_string(&b, "]")
+	lua_pop(L, 1)
+	respond_json(ch, strings.to_string(b))
+}
+
+} // when REDIN_AGENT
 
 handle_get_state :: proc(ds: ^Dev_Server, ch: ^Response_Channel) {
 	L := ds.bridge.L
