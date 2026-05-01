@@ -88,6 +88,7 @@ Renders a string of text. The text content is the last positional argument, not 
 | --------- | ---- | ------- | ----- |
 | `wrap` | `"word"` \| `"char"` \| `"none"` | `"word"` | Line-wrapping strategy. |
 | `selectable` | boolean | `true` | Set to `false` to opt the node out of mouse-selection. |
+| `:agent` | `:read \| :edit` | -- | Optional. Pairs with `:id` to expose the node to the agent channel (REDIN_AGENT only). |
 
 Typography (`font-size`, `weight`, `color`) comes from `aspect`.
 
@@ -110,6 +111,7 @@ Renders a texture loaded from a file path.
 | Attribute | Type | Default | Notes |
 | --------- | ---- | ------- | ----- |
 | `src` | string | -- | File path to the image. **Required.** |
+| `:agent` | `:read \| :edit` | -- | Optional. Pairs with `:id` to expose the node to the agent channel (REDIN_AGENT only). |
 
 ```fennel
 [:image {:src "assets/logo.png" :width 120 :height 40}]
@@ -131,6 +133,7 @@ An editable text field. Drives its displayed value from the `value` attribute.
 | `change` | keyword | -- | Event dispatched when the value changes. |
 | `key` | keyword | -- | Event dispatched on key press (e.g. enter). |
 | `placeholder` | string | `""` | Hint text shown when value is empty. |
+| `:agent` | `:read \| :edit` | -- | Optional. Pairs with `:id` to expose the node to the agent channel (REDIN_AGENT only). |
 
 Visual properties (`bg`, `color`, `border`, `radius`, `border-width`, `opacity`) come from `aspect`.
 
@@ -156,6 +159,7 @@ A clickable element with a text label. Dispatches an event on click.
 | `click` | keyword | -- | Event dispatched on click. **Required.** |
 | `label` | string | -- | Button text. Can also be passed as a child string. |
 | `drag-handle` | bool | `false` | Marks this button as a grab surface for the nearest `:draggable` ancestor. Mutually exclusive with `click` — if both set, parser warns and drops `click`. |
+| `:agent` | `:read \| :edit` | -- | Optional. Pairs with `:id` to expose the node to the agent channel (REDIN_AGENT only). |
 
 Visual properties come from `aspect`.
 
@@ -178,6 +182,7 @@ An independent render region managed by a registered canvas provider. The provid
 | Attribute | Type | Default | Notes |
 | --------- | ---- | ------- | ----- |
 | `provider` | keyword | -- | Name of a registered canvas provider. **Required.** |
+| `:agent` | (rejected) | -- | Not supported on `:canvas` — silently ignored at parse time. |
 
 The element's `width` and `height` define the render texture size. See the [canvas provider docs](canvas.md) for registration and lifecycle details.
 
@@ -204,6 +209,7 @@ All children receive the full available space and overlap. Use for layering (e.g
 | Attribute | Type | Default | Notes |
 | --------- | ---- | ------- | ----- |
 | `viewport` | `[[x y w h] ...]` | -- | Array of rects, one per child. Positions children absolutely relative to the window. |
+| `:agent` | `:read \| :edit` | -- | Optional. Pairs with `:id` to expose the node to the agent channel (REDIN_AGENT only). |
 
 Each viewport value can be:
 - **px number** -- fixed pixels (e.g. `42`, `250`)
@@ -241,6 +247,7 @@ Lays out children in a horizontal row, left to right.
 | `overflow` | `"scroll-x"` | -- | Clip + horizontal wheel scroll. Children must set `:width`. See Scrolling. |
 | `layout` | anchor keyword (see below) | `"top_left"` | Child alignment along both axes. |
 | `drag-handle` | bool | `false` | Marks this hbox as a grab surface for the nearest `:draggable` ancestor. |
+| `:agent` | `:read \| :edit` | -- | Optional. Pairs with `:id` to expose the node to the agent channel (REDIN_AGENT only). |
 
 `:layout` takes one of nine two-axis anchors: `top_left`, `top_center`, `top_right`, `center_left`, `center`, `center_right`, `bottom_left`, `bottom_center`, `bottom_right`. For an hbox the horizontal component selects where the children *group* sits on the main axis; the vertical component selects how each child is aligned on the cross axis. For a vbox the roles swap. Unrecognized values log a warning and fall back to `top_left`.
 
@@ -260,7 +267,7 @@ Lays out children in a vertical column, top to bottom.
 
 **Required attrs:** none
 
-**Optional attrs:** identical to `hbox` (including `drag-handle`). `overflow` is `"scroll-y"` (see Scrolling).
+**Optional attrs:** identical to `hbox` (including `drag-handle` and `:agent`). `overflow` is `"scroll-y"` (see Scrolling).
 
 For a vbox, the horizontal component of `:layout` aligns each child across the row (cross axis), and the vertical component positions the children group within the container's height (main axis).
 
@@ -279,7 +286,12 @@ For a vbox, the horizontal component of `:layout` aligns each child across the r
 A full-screen overlay that blocks all interaction with content behind it.
 
 **Required attrs:** none
-**Optional attrs:** none beyond the common set.
+
+**Optional attrs:**
+
+| Attribute | Type | Default | Notes |
+| --------- | ---- | ------- | ----- |
+| `:agent` | `:read \| :edit` | -- | Optional. Pairs with `:id` to expose the node to the agent channel (REDIN_AGENT only). |
 
 Background color and opacity come from `aspect`.
 
@@ -312,6 +324,7 @@ A container anchored to its parent that escapes parent clipping. Rendered in the
 | `mode` | `"mouse"` \| `"fixed"` | `"mouse"` | Positioning mode. |
 | `x` | number | -- | Fixed x position (when mode is `"fixed"`). |
 | `y` | number | -- | Fixed y position (when mode is `"fixed"`). |
+| `:agent` | `:read \| :edit` | -- | Optional. Pairs with `:id` to expose the node to the agent channel (REDIN_AGENT only). |
 
 Visual properties come from `aspect`.
 

@@ -252,6 +252,18 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:$PORT/state
 | POST | /input/mouse/down | Press a button (`{"button":"left\|right\|middle"}`). Requires takeover. Returns 409 if already down. |
 | POST | /input/mouse/up | Release a button (`{"button":...}`). Requires takeover. Returns 409 if already up. |
 | POST | /input/key | Synthesise one KeyEvent (`{"key":"...", "mods"?}`). Does not require takeover. |
+| GET | /agent/nodes | List `:agent`-tagged nodes: `[{id, mode, type}, ...]` (REDIN_AGENT only). |
+| GET | /agent/content/<id> | Read node content: `{"content": <string-or-array>}` (REDIN_AGENT only). |
+| PUT | /agent/content/<id> | Write node content; node must be `:agent :edit` (REDIN_AGENT only). |
+
+### Agent channel (`REDIN_AGENT`)
+
+The agent channel is compiled in only when the binary is built with `-define:REDIN_AGENT=true`. Default release builds carry zero agent code. When the flag is set, the dev-server listener starts even without `--dev` and the `/agent/*` endpoints are active. Any node type except `:canvas` accepts an `:agent :read` or `:agent :edit` attribute (combined with `:id`) to make it addressable. Writes dispatch `:event/agent-edit {id "<id>" content <value>}` into the Fennel event queue; the runtime stores the value in `db.agent[id]` and applies overrides at view-render time. App code can also subscribe via `(subscribe [:agent <id>])`.
+
+```bash
+odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit \
+    -define:REDIN_AGENT=true -out:build/redin
+```
 
 ## Testing
 

@@ -135,6 +135,20 @@ If a contract was described incorrectly (not just incompletely), fix the doc eve
 | `src/redin/canvas/` | Yes | - | Yes (canvas) | - |
 | `src/cmd/redin/` (CLI flags, --track-mem) | Yes | - | - | Yes |
 
+## Agent channel build
+
+The agent channel feature is gated by `-define:REDIN_AGENT=true`. To
+run its UI test suite, build with the flag:
+
+```bash
+odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit \
+    -define:REDIN_AGENT=true -out:build/redin
+bash test/ui/run-all.sh --headless
+```
+
+Without the flag, `test/ui/test_agent.bb` skips itself. CI runs both
+flavors via the `test:` and `test-agent:` jobs in `.github/workflows/test.yml`.
+
 ## Cutting a release
 
 Releases are built by the `release.yml` GitHub Actions workflow (manual dispatch). It builds the binary, AOT-compiles the Fennel runtime, packages docs + the `redin-dev` skill into a tarball, and creates a GitHub release.
