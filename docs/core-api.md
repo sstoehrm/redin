@@ -524,7 +524,7 @@ Runs on `localhost:8800` when started with `--dev` flag. All responses are JSON 
 | ------ | --------- | ---- | ------------------------------------ |
 | GET    | `/frames` | --   | Full frame tree (from last `redin.push`) |
 
-Calls into Lua (`view.get-last-push`) to retrieve the last pushed frame.
+Calls into Lua (`view.get-last-push`) to retrieve the last pushed frame. Each node's attrs object includes `:rect [x y w h]` from the most recent layout. Tests use this to resolve element coordinates without hard-coding positions.
 
 ### State
 
@@ -574,6 +574,32 @@ Click injects a `MouseEvent` into the input queue, which is processed on the nex
 | POST   | `/shutdown` | --   | `{"ok": true}`  |
 
 Requests graceful shutdown of the application.
+
+### Mouse takeover (test only)
+
+The dev server exposes mouse-state takeover so UI tests can drive the
+real input pipeline. The takeover lifecycle is explicit:
+
+- `POST /input/takeover` — flips a flag so subsequent raylib mouse
+  polls are ignored; mouse position and button states come from the
+  override instead.
+- `POST /input/release` — restores raylib polling.
+
+Once takeover is active, three endpoints feed the override state:
+
+- `POST /input/mouse/move` with `{"x":N,"y":N}` — set position.
+- `POST /input/mouse/down` with `{"button":"left|right|middle"}` —
+  flip the held-state and synthesise a press edge.
+- `POST /input/mouse/up` with `{"button":...}` — flip held-state and
+  synthesise a release edge.
+
+Double-acquire (`/input/takeover` while already active), double-press
+(`/input/mouse/down` for an already-down button), and the symmetric
+double-release cases all return 409.
+
+`POST /input/key` synthesises a single KeyEvent (`{"key":"escape", ...}`).
+It does not require takeover — keys are event-driven, not continuous
+polling.
 
 ### CORS
 

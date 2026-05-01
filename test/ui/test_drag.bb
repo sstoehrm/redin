@@ -1,4 +1,5 @@
-(require '[redin-test :refer :all])
+(require '[redin-test :refer :all]
+         '[clojure.java.io :as io])
 
 ;; -- Frame structure --
 
@@ -88,3 +89,56 @@
   (wait-ms 200)
   (assert-state "last-drop.from" #(= % 1) "from preserved")
   (assert-state "last-drop.to"   #(= % 4) "to preserved"))
+
+;; ---------------------------------------------------------------------------
+;; End-to-end via input pipeline (real press/move/release through dev server)
+;; ---------------------------------------------------------------------------
+
+(defn- ensure-artifacts-dir []
+  (let [d (io/file "test/ui/artifacts")]
+    (when-not (.exists d) (.mkdirs d))))
+
+(deftest drag-preview-pops-out
+  (dispatch ["event/reset"])
+  (wait-ms 100)
+  (ensure-artifacts-dir)
+  (let [src (rect-of (find-element {:id :row-1}))
+        dst (rect-of (find-element {:id :row-3}))]
+    (assert src "row-1 must have a :rect from /frames")
+    (assert dst "row-3 must have a :rect from /frames")
+    (let [sx (+ (:x src) 10) sy (+ (:y src) 2)   ; y+2 stays in row top-padding, above the text node
+          dx (+ (:x dst) 10) dy (+ (:y dst) 2)]
+      (input-takeover)
+      (try
+        (input-mouse-move sx sy)
+        (input-mouse-down :left)
+        (input-mouse-move (+ sx 20) sy)           ; cross 4px threshold (stay in same row padding row)
+        (wait-for (state= "last-drag" 1) {:timeout 2000})
+        (input-mouse-move dx dy)                  ; preview now over drop target
+        (wait-ms 100)                             ; let render catch up
+        (screenshot "test/ui/artifacts/drag_preview.png")
+        (input-mouse-up :left)
+        (wait-for (state= "last-drop.from" 1) {:timeout 2000})
+        (assert-state "last-drop.to" #(= % 3) "drop target should be row-3")
+        (finally
+          (input-release))))))
+
+(deftest drag-esc-cancels
+  (dispatch ["event/reset"])
+  (wait-ms 100)
+  (let [src (rect-of (find-element {:id :row-1}))]
+    (assert src "row-1 must have a :rect from /frames")
+    (let [sx (+ (:x src) 10) sy (+ (:y src) 2)]   ; y+2 stays in row top-padding, above the text node
+      (input-takeover)
+      (try
+        (input-mouse-move sx sy)
+        (input-mouse-down :left)
+        (input-mouse-move (+ sx 20) sy)
+        (wait-for (state= "last-drag" 1) {:timeout 2000})
+        (input-key :escape)
+        (wait-ms 150)
+        (input-mouse-up :left)
+        (wait-ms 150)
+        (assert-state "last-drop" nil? "Esc should cancel the drag — no drop fires")
+        (finally
+          (input-release))))))

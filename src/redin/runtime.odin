@@ -204,7 +204,7 @@ run :: proc(cfg: Config) {
 
 		// --- Devserver: drain pending HTTP requests ---
 		s_ds := profile.begin(.Devserver)
-		bridge.poll_devserver(&b, &input_events)
+		bridge.poll_devserver(&b, &input_events, node_rects[:])
 		profile.end(s_ds)
 
 		// --- Bridge: all Lua-side work ---

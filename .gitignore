@@ -28,3 +28,6 @@ test/integration/testapp/
 .nrepl-port
 docs/superpowers
 .worktrees/
+
+# UI test screenshot artifacts
+test/ui/artifacts/
