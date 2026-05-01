@@ -220,7 +220,7 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:$PORT/state
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | /frames | Last pushed frame tree |
+| GET | /frames | Last pushed frame tree (each node's attrs include `"rect":[x,y,w,h]` from last layout) |
 | GET | /state | Full app state |
 | GET | /state/path.to.value | Nested state lookup |
 | GET | /aspects | Current theme |
@@ -230,6 +230,12 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:$PORT/state
 | POST | /click | Inject click (JSON: `{"x":N,"y":N}`) |
 | POST | /shutdown | Graceful shutdown |
 | PUT | /aspects | Replace theme |
+| POST | /input/takeover | Take over mouse polling for tests. Required before `/input/mouse/*`. Returns 409 if already active. |
+| POST | /input/release | Restore raylib mouse polling. |
+| POST | /input/mouse/move | Set override mouse position (`{"x":N,"y":N}`). Requires takeover. |
+| POST | /input/mouse/down | Press a button (`{"button":"left\|right\|middle"}`). Requires takeover. Returns 409 if already down. |
+| POST | /input/mouse/up | Release a button (`{"button":...}`). Requires takeover. Returns 409 if already up. |
+| POST | /input/key | Synthesise one KeyEvent (`{"key":"...", "mods"?}`). Does not require takeover. |
 
 ## Testing
 

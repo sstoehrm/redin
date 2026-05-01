@@ -58,6 +58,14 @@ Every non-OPTIONS request to the dev server needs `Authorization: Bearer <token>
 
 `smoke`, `input`, `button`, `canvas`, `drag`, `image`, `line_height`, `modal`, `multiline`, `popout`, `resize`, `scroll`, `scroll_x`, `shadow`, `text_select`, `viewport`, `animate`
 
+### Drag tests and the mouse-takeover pipeline
+
+Drag tests exercise the real input pipeline through the `/input/takeover` / `/input/mouse/*` dev-server endpoints rather than the older synthetic `/click`. The takeover lifecycle: `POST /input/takeover` to acquire, then `POST /input/mouse/move` / `down` / `up` to feed override state, then `POST /input/release` to restore raylib polling. This lets tests drive hover, drag-threshold, and drop events end-to-end without mocking the input layer.
+
+`test/ui/artifacts/` is gitignored and created lazily by tests that write screenshots; no manual setup required.
+
+`odin test src/redin/input` requires `-define:ODIN_TEST_THREADS=1` to avoid races on package-global state. This applies to `override_test.odin`'s tests and to pre-existing races in `state_test.odin`; always pass the flag when running the input package tests.
+
 ## Memory leak detection
 
 Add `--track-mem` to enable the tracking allocator:
