@@ -24,8 +24,9 @@ ChangeListener :: struct {
 }
 
 DragListener :: struct {
-	node_idx: int,
-	tags:     []string, // borrowed from node; lives until next clear_frame
+	node_idx:   int,    // hit-test surface (handle if present, else container)
+	source_idx: int,    // the draggable container; equals node_idx for container-grabs
+	tags:       []string, // borrowed from node; lives until next clear_frame
 }
 
 DropListener :: struct {

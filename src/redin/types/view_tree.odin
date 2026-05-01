@@ -53,12 +53,13 @@ Drag_Mode :: enum u8 {
 
 // :draggable — declares "what I am" + how I behave while dragged.
 Draggable_Attrs :: struct {
-	tags:    []string,                  // owned slice of cloned strings
-	event:   string,                    // owned, freed by clear_node_strings
-	mode:    Drag_Mode,                 // zero = .Preview
-	aspect:  string,                    // owned
-	animate: Maybe(Animate_Decoration), // owned provider string inside
-	ctx:     i32,                       // Lua registry ref (0 = none)
+	tags:       []string,                  // owned slice of cloned strings
+	event:      string,                    // owned, freed by clear_node_strings
+	mode:       Drag_Mode,                 // zero = .Preview
+	aspect:     string,                    // owned
+	animate:    Maybe(Animate_Decoration), // owned provider string inside
+	ctx:        i32,                       // Lua registry ref (0 = none)
+	handle_off: bool,                      // zero-value = container is a grab surface
 }
 
 // :dropable — declares "what I accept" + how it looks on hover.
@@ -120,6 +121,7 @@ NodeVbox :: struct {
 	draggable:  Maybe(Draggable_Attrs),
 	dropable:   Maybe(Dropable_Attrs),
 	drag_over:  Maybe(Drag_Over_Attrs),
+	drag_handle: bool,
 }
 
 NodeHbox :: struct {
@@ -137,6 +139,7 @@ NodeHbox :: struct {
 	draggable:  Maybe(Draggable_Attrs),
 	dropable:   Maybe(Dropable_Attrs),
 	drag_over:  Maybe(Drag_Over_Attrs),
+	drag_handle: bool,
 }
 
 NodeInput :: struct {
@@ -169,6 +172,7 @@ NodeButton :: struct {
 	},
 	label:     string,
 	aspect:    string,
+	drag_handle: bool,
 }
 
 NodeText :: struct {

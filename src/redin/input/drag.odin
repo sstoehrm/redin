@@ -178,27 +178,32 @@ process_drag :: proc(
 			winner := deepest_listener_idx(listeners, node_rects, pt)
 			if winner < 0 do continue
 
-			// Confirm the deepest listener winner is actually a DragListener.
+			// Confirm the deepest listener winner is actually a DragListener,
+			// and capture its source_idx (the draggable container — same as
+			// node_idx for container-grab listeners, the parent draggable for
+			// handle listeners).
 			has_drag := false
+			src_idx := -1
 			tags: []string
 			for listener in listeners {
 				dl, ok := listener.(types.DragListener)
 				if !ok do continue
 				if dl.node_idx == winner {
 					has_drag = true
+					src_idx = dl.source_idx
 					tags = dl.tags
 					break
 				}
 			}
 			if !has_drag do continue
 
-			// Read drag attrs from the source node (vbox / hbox only).
+			// Read drag attrs from the source node (the draggable container).
 			cap := Drag_Captured{
-				src_idx   = winner,
+				src_idx   = src_idx,
 				start_pos = pt,
 				src_tags  = clone_string_slice(tags),
 			}
-			switch n in nodes[winner] {
+			switch n in nodes[src_idx] {
 			case types.NodeVbox:
 				if d, ok := n.draggable.?; ok {
 					cap.src_event   = strings.clone(d.event)

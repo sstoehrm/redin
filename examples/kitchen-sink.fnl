@@ -80,6 +80,7 @@
                       :muted-armed {:font-size 13
                                     :color [76 86 106]
                                     :bg [54 60 72]}
+                      :drag-handle {:bg [66 66 86]}
                       :input {:bg [59 66 82]
                               :color [236 239 244]
                               :border [76 86 106]
@@ -226,6 +227,7 @@
                               :height 42
                               :draggable [:row-drag
                                           {:mode :preview
+                                           :handle false
                                            :event :event/drag
                                            :aspect :row-dragging
                                            :animate {:provider :pulse-dot
@@ -236,6 +238,9 @@
                                          {:event :event/drop
                                           :aspect :row-drop-hot}
                                          i]}
+                             [:vbox {:width 24
+                                     :aspect :drag-handle
+                                     :drag-handle true}]
                              [:text {:aspect :body} item.text]
                              [:button
                               {:width 250

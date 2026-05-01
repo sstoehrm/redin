@@ -106,6 +106,10 @@ lua_isnumber :: #force_inline proc "contextless" (L: ^Lua_State, index: i32) -> 
 	return lua_type(L, index) == LUA_TNUMBER
 }
 
+lua_isboolean :: #force_inline proc "contextless" (L: ^Lua_State, index: i32) -> bool {
+	return lua_type(L, index) == LUA_TBOOLEAN
+}
+
 // Lua 5.1 / LuaJIT: upvalue indices are encoded as offsets from
 // LUA_GLOBALSINDEX. Used by closure-based cfuncs to access values
 // captured at lua_pushcclosure time.

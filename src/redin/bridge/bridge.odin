@@ -121,6 +121,73 @@ check_hotreload :: proc(b: ^Bridge) {
 	}
 }
 
+// Walk the flat tree once: for each draggable with handle_off, ensure at
+// least one descendant carries drag_handle. Otherwise the draggable is
+// silently ungrabbable. Stops the descendant walk at nested-draggable
+// boundaries (handle binds to nearest draggable ancestor).
+//
+// Logged per-frame in line with the existing parse-warning convention
+// (no dedupe).
+validate_drag_handles :: proc(
+	nodes: []types.Node,
+	children_list: []types.Children,
+) {
+	for node, idx in nodes {
+		handle_off := false
+		switch n in node {
+		case types.NodeVbox:
+			if d, ok := n.draggable.?; ok do handle_off = d.handle_off
+		case types.NodeHbox:
+			if d, ok := n.draggable.?; ok do handle_off = d.handle_off
+		case types.NodeStack, types.NodeCanvas, types.NodeInput,
+		     types.NodeButton, types.NodeText, types.NodeImage,
+		     types.NodePopout, types.NodeModal:
+		}
+		if !handle_off do continue
+		if !subtree_has_drag_handle(idx, nodes, children_list) {
+			fmt.eprintfln(
+				":draggable at idx %d has :handle false but no descendant :drag-handle true — ungrabbable",
+				idx,
+			)
+		}
+	}
+}
+
+// True iff any descendant of `root` carries drag_handle == true.
+// Stops descent at nested-draggable boundaries.
+subtree_has_drag_handle :: proc(
+	root: int,
+	nodes: []types.Node,
+	children_list: []types.Children,
+) -> bool {
+	if root < 0 || root >= len(children_list) do return false
+	kids := children_list[root]
+	for i in 0 ..< int(kids.length) {
+		ci := int(kids.value[i])
+		if ci < 0 || ci >= len(nodes) do continue
+		nested := false
+		// Edge case: a node that is BOTH a draggable container and carries
+		// drag_handle = true counts as a handle for *this* outer draggable
+		// (we report `return true` before checking `nested`). This is exotic;
+		// idiomatic apps don't combine the two on one node.
+		switch n in nodes[ci] {
+		case types.NodeVbox:
+			if _, ok := n.draggable.?; ok do nested = true
+			if n.drag_handle do return true
+		case types.NodeHbox:
+			if _, ok := n.draggable.?; ok do nested = true
+			if n.drag_handle do return true
+		case types.NodeButton:
+			if n.drag_handle do return true
+		case types.NodeStack, types.NodeCanvas, types.NodeInput,
+		     types.NodeText, types.NodeImage, types.NodePopout,
+		     types.NodeModal:
+		}
+		if !nested && subtree_has_drag_handle(ci, nodes, children_list) do return true
+	}
+	return false
+}
+
 clear_draggable_attrs :: proc(m: Maybe(types.Draggable_Attrs)) {
 	d, ok := m.?
 	if !ok do return
@@ -1196,6 +1263,9 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 			v.draggable = lua_read_draggable(L, attrs_idx)
 			v.dropable  = lua_read_dropable (L, attrs_idx)
 			v.drag_over = lua_read_drag_over(L, attrs_idx)
+			if dh, exists := lua_get_bool_field_opt(L, attrs_idx, "drag-handle"); exists {
+				v.drag_handle = dh
+			}
 		}
 		return v
 
@@ -1213,6 +1283,9 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 			h.draggable = lua_read_draggable(L, attrs_idx)
 			h.dropable  = lua_read_dropable (L, attrs_idx)
 			h.drag_over = lua_read_drag_over(L, attrs_idx)
+			if dh, exists := lua_get_bool_field_opt(L, attrs_idx, "drag-handle"); exists {
+				h.drag_handle = dh
+			}
 		}
 		return h
 
@@ -1238,6 +1311,18 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 			btn.click_ctx = lua_get_event_ctx(L, attrs_idx, "click")
 			btn.width = lua_get_size_f32(L, attrs_idx, "width")
 			btn.height = lua_get_size_f32(L, attrs_idx, "height")
+			if dh, exists := lua_get_bool_field_opt(L, attrs_idx, "drag-handle"); exists {
+				btn.drag_handle = dh
+			}
+			if btn.drag_handle && len(btn.click) > 0 {
+				fmt.eprintln(":button: :drag-handle conflicts with :click — dropping :click")
+				delete(btn.click)
+				btn.click = ""
+				if btn.click_ctx != 0 {
+					luaL_unref(L, LUA_REGISTRYINDEX, btn.click_ctx)
+					btn.click_ctx = 0
+				}
+			}
 		}
 		if len(text_content) > 0 do btn.label = text_content
 		return btn
@@ -2032,6 +2117,15 @@ lua_read_draggable :: proc(L: ^Lua_State, attrs_idx: i32) -> Maybe(types.Draggab
 	lua_getfield(L, opts, "aspect")
 	if lua_isstring(L, -1) {
 		out.aspect = strings.clone_from_cstring(lua_tostring_raw(L, -1))
+	}
+	lua_pop(L, 1)
+
+	// :handle (optional, default true). Only an explicit `false` disables
+	// container-as-grab-surface; descendants marked :drag-handle become the
+	// only grab targets. Validated later by validate_drag_handles.
+	lua_getfield(L, opts, "handle")
+	if lua_isboolean(L, -1) {
+		if lua_toboolean(L, -1) == 0 do out.handle_off = true
 	}
 	lua_pop(L, 1)
 

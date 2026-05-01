@@ -6,6 +6,55 @@ import text_pkg "../text"
 import font "../font"
 import rl "vendor:raylib"
 
+// Collect descendant indices of `root` that carry drag_handle == true.
+// Stops at nested-draggable boundaries — a handle inside an inner
+// draggable belongs to that inner one (nearest-ancestor rule).
+// Allocates with context.temp_allocator; caller does not free.
+collect_drag_handles_in_subtree :: proc(
+	root: int,
+	nodes: [dynamic]types.Node,
+	children_list: [dynamic]types.Children,
+) -> [dynamic]int {
+	out: [dynamic]int
+	out.allocator = context.temp_allocator
+	collect_drag_handles_recur(root, nodes, children_list, &out)
+	return out
+}
+
+@(private="file")
+collect_drag_handles_recur :: proc(
+	root: int,
+	nodes: [dynamic]types.Node,
+	children_list: [dynamic]types.Children,
+	out: ^[dynamic]int,
+) {
+	if root < 0 || root >= len(children_list) do return
+	kids := children_list[root]
+	for i in 0 ..< int(kids.length) {
+		ci := int(kids.value[i])
+		if ci < 0 || ci >= len(nodes) do continue
+		// Stop descending into nested draggables.
+		// Edge case: a node that is BOTH a draggable container and carries
+		// drag_handle = true is appended as a handle for *this* outer
+		// draggable. Idiomatic apps don't combine the two on one node.
+		nested := false
+		switch n in nodes[ci] {
+		case types.NodeVbox:
+			if _, ok := n.draggable.?; ok do nested = true
+			if n.drag_handle do append(out, ci)
+		case types.NodeHbox:
+			if _, ok := n.draggable.?; ok do nested = true
+			if n.drag_handle do append(out, ci)
+		case types.NodeButton:
+			if n.drag_handle do append(out, ci)
+		case types.NodeStack, types.NodeCanvas, types.NodeInput,
+		     types.NodeText, types.NodeImage, types.NodePopout,
+		     types.NodeModal:
+		}
+		if !nested do collect_drag_handles_recur(ci, nodes, children_list, out)
+	}
+}
+
 // Currently focused node index, -1 means none.
 focused_idx: int = -1
 
@@ -43,6 +92,7 @@ deepest_listener_idx :: proc(
 extract_listeners :: proc(
 	paths: [dynamic]types.Path,
 	nodes: [dynamic]types.Node,
+	children_list: [dynamic]types.Children,
 	theme: map[string]types.Theme,
 ) -> [dynamic]types.Listener {
 	listeners: [dynamic]types.Listener
@@ -69,9 +119,17 @@ extract_listeners :: proc(
 		case types.NodeVbox:
 			aspect = n.aspect
 			if d, ok := n.draggable.?; ok && len(d.tags) > 0 && len(d.event) > 0 {
-				append(&listeners, types.Listener(types.DragListener{
-					node_idx = idx, tags = d.tags,
-				}))
+				if !d.handle_off {
+					append(&listeners, types.Listener(types.DragListener{
+						node_idx = idx, source_idx = idx, tags = d.tags,
+					}))
+				}
+				handles := collect_drag_handles_in_subtree(idx, nodes, children_list)
+				for h in handles {
+					append(&listeners, types.Listener(types.DragListener{
+						node_idx = h, source_idx = idx, tags = d.tags,
+					}))
+				}
 			}
 			if d, ok := n.dropable.?; ok && len(d.tags) > 0 && len(d.event) > 0 {
 				append(&listeners, types.Listener(types.DropListener{
@@ -86,9 +144,17 @@ extract_listeners :: proc(
 		case types.NodeHbox:
 			aspect = n.aspect
 			if d, ok := n.draggable.?; ok && len(d.tags) > 0 && len(d.event) > 0 {
-				append(&listeners, types.Listener(types.DragListener{
-					node_idx = idx, tags = d.tags,
-				}))
+				if !d.handle_off {
+					append(&listeners, types.Listener(types.DragListener{
+						node_idx = idx, source_idx = idx, tags = d.tags,
+					}))
+				}
+				handles := collect_drag_handles_in_subtree(idx, nodes, children_list)
+				for h in handles {
+					append(&listeners, types.Listener(types.DragListener{
+						node_idx = h, source_idx = idx, tags = d.tags,
+					}))
+				}
 			}
 			if d, ok := n.dropable.?; ok && len(d.tags) > 0 && len(d.event) > 0 {
 				append(&listeners, types.Listener(types.DropListener{
@@ -445,15 +511,33 @@ key_to_string_input :: proc(key: rl.KeyboardKey) -> string {
 	}
 }
 
-// Set the system mouse cursor to I-beam while hovering a selectable text,
-// otherwise DEFAULT. Safe to call every frame; Raylib debounces redundant
-// sets internally.
+// Cursor precedence (highest first):
+//   1. Active or pending drag → RESIZE_ALL ("grabbing"; raylib has no
+//      grab cursor, this is the closest analogue).
+//   2. Mouse over a DragListener (handle or container) → POINTING_HAND.
+//   3. Mouse over a Text_Select_Listener → IBEAM.
+//   4. Otherwise DEFAULT.
 set_hover_cursor :: proc(listeners: []types.Listener, node_rects: []rl.Rectangle) {
+	switch _ in drag {
+	case Drag_Pending, Drag_Active:
+		rl.SetMouseCursor(.RESIZE_ALL)
+		return
+	case nil, Drag_Idle:
+	}
 	mouse := mouse_pos()
+	for listener in listeners {
+		dl, ok := listener.(types.DragListener)
+		if !ok do continue
+		if dl.node_idx < 0 || dl.node_idx >= len(node_rects) do continue
+		if rl.CheckCollisionPointRec(mouse, node_rects[dl.node_idx]) {
+			rl.SetMouseCursor(.POINTING_HAND)
+			return
+		}
+	}
 	for listener in listeners {
 		tl, ok := listener.(types.Text_Select_Listener)
 		if !ok do continue
-		if tl.node_idx >= len(node_rects) do continue
+		if tl.node_idx < 0 || tl.node_idx >= len(node_rects) do continue
 		if rl.CheckCollisionPointRec(mouse, node_rects[tl.node_idx]) {
 			rl.SetMouseCursor(.IBEAM)
 			return

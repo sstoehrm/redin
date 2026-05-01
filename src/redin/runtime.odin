@@ -185,7 +185,8 @@ run :: proc(cfg: Config) {
 
 		if b.frame_changed {
 			delete(listeners)
-			listeners = input.extract_listeners(b.paths, b.nodes, b.theme)
+			bridge.validate_drag_handles(b.nodes[:], b.children_list[:])
+			listeners = input.extract_listeners(b.paths, b.nodes, b.children_list, b.theme)
 		}
 
 		// --- Input (1/4): raw poll + user filter ---
