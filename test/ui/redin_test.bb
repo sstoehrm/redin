@@ -417,4 +417,41 @@
   [ms]
   (Thread/sleep ms))
 
+;; ---------------------------------------------------------------------------
+;; Agent channel (only meaningful when binary built with -define:REDIN_AGENT=true)
+;; ---------------------------------------------------------------------------
+
+(defn agent-supported?
+  "Returns true if the binary exposes the agent endpoints (REDIN_AGENT compiled in)."
+  []
+  (try
+    (let [resp (http/get (str (base-url) "/agent/nodes")
+                         {:headers (auth-headers)
+                          :throw false})]
+      (= 200 (:status resp)))
+    (catch Exception _ false)))
+
+(defn agent-nodes
+  "GET /agent/nodes -> seq of {:id :mode :type} maps."
+  []
+  (get-json "/agent/nodes"))
+
+(defn agent-get-content
+  "GET /agent/content/<id> -> map with :content key."
+  [id]
+  (get-json (str "/agent/content/" (name id))))
+
+(defn agent-put-content
+  "PUT /agent/content/<id>. body is {:content <string-or-vector>}.
+   Returns {:status :body} so tests can assert on status code directly."
+  [id body]
+  (let [resp (http/put (str (base-url) "/agent/content/" (name id))
+                       {:headers (merge {"Content-Type" "application/json"}
+                                        (auth-headers))
+                        :body (json/generate-string body)
+                        :throw false})]
+    {:status (:status resp)
+     :body (try (json/parse-string (:body resp) true)
+                (catch Exception _ (:body resp)))}))
+
 (println "redin-test library loaded")
