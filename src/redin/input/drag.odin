@@ -128,7 +128,7 @@ process_drag :: proc(
 	node_rects: []rl.Rectangle,
 ) -> [dynamic]types.Dispatch_Event {
 	dispatch: [dynamic]types.Dispatch_Event
-	mouse := rl.GetMousePosition()
+	mouse := mouse_pos()
 
 	// Escape cancels any in-flight drag (Pending or Active). When cancelling
 	// from Active with an entered :drag-over zone, fire a final :phase :leave
@@ -221,7 +221,7 @@ process_drag :: proc(
 		}
 
 	case Drag_Pending:
-		if rl.IsMouseButtonDown(.LEFT) {
+		if is_mouse_button_down(.LEFT) {
 			dx := mouse.x - s.start_pos.x
 			dy := mouse.y - s.start_pos.y
 			if dx*dx + dy*dy >= DRAG_THRESHOLD * DRAG_THRESHOLD {
@@ -280,7 +280,7 @@ process_drag :: proc(
 		}
 		s.over_drop_idx = new_drop
 
-		if !rl.IsMouseButtonDown(.LEFT) {
+		if !is_mouse_button_down(.LEFT) {
 			// Drop dispatch.
 			if new_drop >= 0 {
 				drop_event := ""

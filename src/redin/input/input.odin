@@ -145,7 +145,7 @@ poll :: proc() -> [dynamic]types.InputEvent {
 		super = rl.IsKeyDown(.LEFT_SUPER) || rl.IsKeyDown(.RIGHT_SUPER),
 	}
 
-	mouse := rl.GetMousePosition()
+	mouse := mouse_pos()
 
 	key := rl.GetKeyPressed()
 	for key != .KEY_NULL {
@@ -181,7 +181,7 @@ poll :: proc() -> [dynamic]types.InputEvent {
 
 	buttons := [?]rl.MouseButton{.LEFT, .RIGHT, .MIDDLE}
 	for btn in buttons {
-		if rl.IsMouseButtonPressed(btn) {
+		if is_mouse_button_pressed(btn) {
 			append(
 				&events,
 				types.InputEvent(
@@ -449,7 +449,7 @@ key_to_string_input :: proc(key: rl.KeyboardKey) -> string {
 // otherwise DEFAULT. Safe to call every frame; Raylib debounces redundant
 // sets internally.
 set_hover_cursor :: proc(listeners: []types.Listener, node_rects: []rl.Rectangle) {
-	mouse := rl.GetMousePosition()
+	mouse := mouse_pos()
 	for listener in listeners {
 		tl, ok := listener.(types.Text_Select_Listener)
 		if !ok do continue
