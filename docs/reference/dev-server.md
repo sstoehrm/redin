@@ -46,7 +46,7 @@ AUTH="Authorization: Bearer $TOKEN"
 curl -H "$AUTH" http://localhost:$PORT/frames
 ```
 
-Response: the full frame tree as JSON. Calls `view.get-last-push` in Lua to retrieve the last rendered frame.
+Response: the full frame tree as JSON. Calls `view.get-last-push` in Lua to retrieve the last rendered frame. Each node's attrs object includes a `"rect":[x,y,w,h]` field from the most recent layout pass. Tests use this to resolve element coordinates without hard-coding positions.
 
 ### `GET /state` -- full app-db
 
@@ -160,6 +160,77 @@ curl -X PUT -H "$AUTH" http://localhost:$PORT/aspects \
 Response: `{"ok": true}`
 
 Decodes the JSON body and calls `theme.set-theme` in Lua, replacing the entire theme.
+
+### `POST /input/takeover` -- take over mouse polling
+
+```bash
+curl -X POST -H "$AUTH" http://localhost:$PORT/input/takeover
+```
+
+Response: `{"ok": true}`. Flips a flag so raylib mouse polls are ignored; position and button states come from the override instead. Returns `409` if takeover is already active.
+
+### `POST /input/release` -- restore raylib mouse polling
+
+```bash
+curl -X POST -H "$AUTH" http://localhost:$PORT/input/release
+```
+
+Response: `{"ok": true}`. Restores raylib polling and clears all override state.
+
+### `POST /input/mouse/move` -- set override position
+
+Requires takeover to be active.
+
+```bash
+curl -X POST -H "$AUTH" -d '{"x":50,"y":80}' http://localhost:$PORT/input/mouse/move
+```
+
+Response: `{"ok": true}`.
+
+### `POST /input/mouse/down` -- press a mouse button
+
+Requires takeover. Flips the held-state and synthesises a press edge for the next input poll.
+
+```bash
+curl -X POST -H "$AUTH" -d '{"button":"left"}' http://localhost:$PORT/input/mouse/down
+```
+
+`button` is one of `"left"`, `"right"`, `"middle"`. Returns `409` if that button is already down.
+
+### `POST /input/mouse/up` -- release a mouse button
+
+Requires takeover. Flips the held-state and synthesises a release edge.
+
+```bash
+curl -X POST -H "$AUTH" -d '{"button":"left"}' http://localhost:$PORT/input/mouse/up
+```
+
+Returns `409` if that button is already up.
+
+### `POST /input/key` -- synthesise a key event
+
+Does **not** require takeover — keys are event-driven, not continuous polling.
+
+```bash
+curl -X POST -H "$AUTH" -d '{"key":"escape"}' http://localhost:$PORT/input/key
+```
+
+Body: `{"key": "<name>", "mods": [...]}`. Synthesises a single `KeyEvent` delivered on the next input poll.
+
+---
+
+### Worked example: drive a drag from a test
+
+```bash
+PORT=$(cat .redin-port); TOKEN=$(cat .redin-token)
+H="Authorization: Bearer $TOKEN"
+curl -sH "$H" -X POST http://localhost:$PORT/input/takeover
+curl -sH "$H" -X POST -d '{"x":50,"y":50}'   http://localhost:$PORT/input/mouse/move
+curl -sH "$H" -X POST -d '{"button":"left"}' http://localhost:$PORT/input/mouse/down
+curl -sH "$H" -X POST -d '{"x":80,"y":50}'   http://localhost:$PORT/input/mouse/move
+curl -sH "$H" -X POST -d '{"button":"left"}' http://localhost:$PORT/input/mouse/up
+curl -sH "$H" -X POST http://localhost:$PORT/input/release
+```
 
 ---
 

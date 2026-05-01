@@ -134,14 +134,14 @@ process_text_selection :: proc(
 	}
 
 	// Phase B: drag extension while LMB is held.
-	if gesture.active_drag && rl.IsMouseButtonDown(.LEFT) {
+	if gesture.active_drag && is_mouse_button_down(.LEFT) {
 		idx := find_node_by_path(paths, gesture.anchor_path[:])
 		if idx < 0 || idx >= len(node_rects) {
 			gesture.active_drag = false
 		} else {
 			text_node, is_text := nodes[idx].(types.NodeText)
 			if is_text {
-				mouse := rl.GetMousePosition()
+				mouse := mouse_pos()
 				rect := node_rects[idx]
 				offset := node_byte_offset_at(idx, text_node, rect, mouse, theme)
 				if offset == gesture.anchor_offset {
@@ -160,7 +160,7 @@ process_text_selection :: proc(
 	}
 
 	// Phase C: mouse released — stop tracking drags.
-	if gesture.active_drag && !rl.IsMouseButtonDown(.LEFT) {
+	if gesture.active_drag && !is_mouse_button_down(.LEFT) {
 		gesture.active_drag = false
 	}
 }

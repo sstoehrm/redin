@@ -9,6 +9,7 @@ import "core:time"
 import "core:unicode/utf8"
 import "base:runtime"
 import "../font"
+import "../input"
 import text_pkg "../text"
 import "../types"
 import rl "vendor:raylib"
@@ -100,10 +101,12 @@ destroy :: proc(b: ^Bridge) {
 	lua_close(b.L)
 }
 
-poll_devserver :: proc(b: ^Bridge, events: ^[dynamic]types.InputEvent) {
+poll_devserver :: proc(b: ^Bridge, events: ^[dynamic]types.InputEvent, node_rects: []rl.Rectangle) {
 	if !b.dev_mode do return
+	b.dev_server.current_rects = node_rects
 	devserver_poll(&b.dev_server)
 	devserver_drain_events(&b.dev_server, events)
+	b.dev_server.current_rects = nil
 }
 
 is_shutdown_requested :: proc(b: ^Bridge) -> bool {
@@ -193,7 +196,21 @@ clear_draggable_attrs :: proc(m: Maybe(types.Draggable_Attrs)) {
 	if len(d.event) > 0 do delete(d.event)
 	if len(d.aspect) > 0 do delete(d.aspect)
 	if dec, ok2 := d.animate.?; ok2 && len(dec.provider) > 0 do delete(dec.provider)
-	if d.ctx != 0 do luaL_unref(g_bridge.L, LUA_REGISTRYINDEX, d.ctx)
+	if d.ctx != 0 {
+		// Don't unref the Lua registry slot while a drag is in flight and
+		// the captured ctx_ref refers to this very slot. The node may be
+		// re-rendered (and its ctx unreffed) before the drop fires, which
+		// would free the slot prematurely and deliver nil to the drop handler.
+		active_ref: i32 = 0
+		switch s in input.drag {
+		case input.Drag_Pending: active_ref = s.src_ctx_ref
+		case input.Drag_Active:  active_ref = s.src_ctx_ref
+		case nil, input.Drag_Idle:
+		}
+		if d.ctx != active_ref {
+			luaL_unref(g_bridge.L, LUA_REGISTRYINDEX, d.ctx)
+		}
+	}
 }
 
 clear_dropable_attrs :: proc(m: Maybe(types.Dropable_Attrs)) {
@@ -528,7 +545,7 @@ read_number_field :: proc(L: ^Lua_State, idx: i32, field: cstring) -> f32 {
 // ---------------------------------------------------------------------------
 
 // Push a {left=bool, right=bool, middle=bool} table for a mouse button query
-push_mouse_buttons :: proc(L: ^Lua_State, parent_idx: i32, field: cstring, query: proc "c" (button: rl.MouseButton) -> bool) {
+push_mouse_buttons :: proc(L: ^Lua_State, parent_idx: i32, field: cstring, query: proc(button: rl.MouseButton) -> bool) {
 	lua_createtable(L, 0, 3)
 	btn_idx := lua_gettop(L)
 	lua_pushboolean(L, query(.LEFT) ? 1 : 0)
@@ -545,20 +562,20 @@ push_canvas_input_state :: proc(L: ^Lua_State, rect: rl.Rectangle) {
 	lua_createtable(L, 0, 6)
 	input_idx := lua_gettop(L)
 
-	mouse_pos := rl.GetMousePosition()
-	lua_pushnumber(L, f64(mouse_pos.x - rect.x))
+	m := input.mouse_pos()
+	lua_pushnumber(L, f64(m.x - rect.x))
 	lua_setfield(L, input_idx, "mouse-x")
-	lua_pushnumber(L, f64(mouse_pos.y - rect.y))
+	lua_pushnumber(L, f64(m.y - rect.y))
 	lua_setfield(L, input_idx, "mouse-y")
 
-	mouse_in := mouse_pos.x >= rect.x && mouse_pos.x <= rect.x + rect.width &&
-	            mouse_pos.y >= rect.y && mouse_pos.y <= rect.y + rect.height
+	mouse_in := m.x >= rect.x && m.x <= rect.x + rect.width &&
+	            m.y >= rect.y && m.y <= rect.y + rect.height
 	lua_pushboolean(L, mouse_in ? 1 : 0)
 	lua_setfield(L, input_idx, "mouse-in")
 
-	push_mouse_buttons(L, input_idx, "mouse-down", rl.IsMouseButtonDown)
-	push_mouse_buttons(L, input_idx, "mouse-pressed", rl.IsMouseButtonPressed)
-	push_mouse_buttons(L, input_idx, "mouse-released", rl.IsMouseButtonReleased)
+	push_mouse_buttons(L, input_idx, "mouse-down", input.is_mouse_button_down)
+	push_mouse_buttons(L, input_idx, "mouse-pressed", input.is_mouse_button_pressed)
+	push_mouse_buttons(L, input_idx, "mouse-released", input.is_mouse_button_released)
 }
 
 // ---------------------------------------------------------------------------

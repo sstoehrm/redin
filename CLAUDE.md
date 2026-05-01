@@ -92,7 +92,7 @@ Available when running with `--dev`. Listens on port 8800 by default; walks upwa
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/frames` | Last pushed frame (view tree as JSON) |
+| `GET` | `/frames` | Last pushed frame (view tree as JSON). Each node's attrs include `"rect":[x,y,w,h]` from the most recent layout. |
 | `GET` | `/state` | Full app state |
 | `GET` | `/state/<dot.path>` | Nested state lookup (e.g. `/state/form.name`) |
 | `GET` | `/aspects` | Current theme map |
@@ -102,6 +102,12 @@ Available when running with `--dev`. Listens on port 8800 by default; walks upwa
 | `POST` | `/click` | Inject a mouse click (JSON body: `{"x":N,"y":N}`) |
 | `POST` | `/shutdown` | Request graceful shutdown |
 | `PUT` | `/aspects` | Replace the theme map (JSON body) |
+| `POST` | `/input/takeover` | Take over mouse polling for tests. Required before `/input/mouse/*`. |
+| `POST` | `/input/release` | Restore raylib mouse polling. |
+| `POST` | `/input/mouse/move` | Set override mouse position (`{x,y}`). Requires takeover. |
+| `POST` | `/input/mouse/down` | Press a button (`{button:"left\|right\|middle"}`). Requires takeover. |
+| `POST` | `/input/mouse/up` | Release a button (`{button:...}`). Requires takeover. |
+| `POST` | `/input/key` | Synthesise one KeyEvent (`{key, mods?}`). Does not require takeover. |
 
 Example:
 

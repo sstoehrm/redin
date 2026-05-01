@@ -70,7 +70,12 @@ Drag_Active :: struct {
 
 Drag_State :: union { Drag_Idle, Drag_Pending, Drag_Active }
 
-drag: Drag_State = Drag_Idle{}
+// NOTE: Drag_Idle is an empty struct. In Odin's union representation, an
+// empty-struct variant is indistinguishable from nil (both use tag 0). The
+// package-level `drag` variable therefore starts as nil, and `case Drag_Idle:`
+// never matches at runtime. The idle condition is `drag == nil`. All
+// transitions back to "idle" assign `drag = nil` (not `drag = Drag_Idle{}`).
+drag: Drag_State
 
 // True iff src and target share at least one tag.
 drag_matches :: proc(src, target: []string) -> bool {
@@ -128,7 +133,7 @@ process_drag :: proc(
 	node_rects: []rl.Rectangle,
 ) -> [dynamic]types.Dispatch_Event {
 	dispatch: [dynamic]types.Dispatch_Event
-	mouse := rl.GetMousePosition()
+	mouse := mouse_pos()
 
 	// Escape cancels any in-flight drag (Pending or Active). When cancelling
 	// from Active with an entered :drag-over zone, fire a final :phase :leave
@@ -142,11 +147,11 @@ process_drag :: proc(
 	}
 	if esc_pressed {
 		switch &s in drag {
-		case Drag_Idle:
+		case nil, Drag_Idle:
 			// Nothing to cancel.
 		case Drag_Pending:
 			free_captured(s.captured)
-			drag = Drag_Idle{}
+			drag = nil
 		case Drag_Active:
 			if s.over_zone_idx >= 0 && s.over_zone_idx < len(nodes) {
 				if ev := node_over_event(nodes[s.over_zone_idx]); len(ev) > 0 {
@@ -157,13 +162,13 @@ process_drag :: proc(
 				}
 			}
 			free_captured(s.captured)
-			drag = Drag_Idle{}
+			drag = nil
 		}
 		return dispatch
 	}
 
 	switch &s in drag {
-	case Drag_Idle:
+	case nil, Drag_Idle:
 		// Mouse-down on a DragListener → Pending.
 		for event in input_events {
 			me, is_mouse := event.(types.MouseEvent)
@@ -226,7 +231,7 @@ process_drag :: proc(
 		}
 
 	case Drag_Pending:
-		if rl.IsMouseButtonDown(.LEFT) {
+		if is_mouse_button_down(.LEFT) {
 			dx := mouse.x - s.start_pos.x
 			dy := mouse.y - s.start_pos.y
 			if dx*dx + dy*dy >= DRAG_THRESHOLD * DRAG_THRESHOLD {
@@ -244,7 +249,7 @@ process_drag :: proc(
 			}
 		} else {
 			free_captured(s.captured)
-			drag = Drag_Idle{}
+			drag = nil
 		}
 
 	case Drag_Active:
@@ -252,7 +257,7 @@ process_drag :: proc(
 		// with our tags, cancel.
 		if s.src_idx < 0 || s.src_idx >= len(nodes) {
 			free_captured(s.captured)
-			drag = Drag_Idle{}
+			drag = nil
 			return dispatch
 		}
 		// Stale zone/drop indices from a previous frame's layout — clear before use.
@@ -285,7 +290,7 @@ process_drag :: proc(
 		}
 		s.over_drop_idx = new_drop
 
-		if !rl.IsMouseButtonDown(.LEFT) {
+		if !is_mouse_button_down(.LEFT) {
 			// Drop dispatch.
 			if new_drop >= 0 {
 				drop_event := ""
@@ -325,7 +330,7 @@ process_drag :: proc(
 			}
 
 			free_captured(s.captured)
-			drag = Drag_Idle{}
+			drag = nil
 		}
 	}
 
@@ -349,7 +354,7 @@ node_over_event :: proc(n: types.Node) -> string {
 is_dragging :: proc() -> bool {
 	switch _ in drag {
 	case Drag_Pending, Drag_Active: return true
-	case Drag_Idle:                 return false
+	case nil, Drag_Idle:            return false
 	}
 	return false
 }

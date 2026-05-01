@@ -14,7 +14,7 @@ get_user_events :: proc(
 		focused_idx = -1
 	}
 
-	mouse := rl.GetMousePosition()
+	mouse := mouse_pos()
 
 	for listener in listeners {
 		if hl, ok := listener.(types.HoverListener); ok {

@@ -234,6 +234,34 @@
    (first (find-elements frame criteria))))
 
 ;; ---------------------------------------------------------------------------
+;; Mouse takeover (test-only — drives input.override via dev server)
+;; ---------------------------------------------------------------------------
+
+(defn input-takeover [] (post-json "/input/takeover" {}))
+(defn input-release  [] (post-json "/input/release"  {}))
+
+(defn input-mouse-move [x y]
+  (post-json "/input/mouse/move" {:x x :y y}))
+
+(defn input-mouse-down [btn]
+  (post-json "/input/mouse/down" {:button (name btn)}))
+
+(defn input-mouse-up [btn]
+  (post-json "/input/mouse/up" {:button (name btn)}))
+
+(defn input-key
+  ([k]      (post-json "/input/key" {:key (name k)}))
+  ([k mods] (post-json "/input/key" {:key (name k) :mods mods})))
+
+(defn rect-of
+  "Read the :rect attr from a frame node and return {:x :y :w :h}.
+   Returns nil if the node has no :rect (e.g. layout not yet computed)."
+  [node]
+  (when-let [r (get (frame-attrs node) :rect)]
+    (let [[x y w h] r]
+      {:x x :y y :w w :h h})))
+
+;; ---------------------------------------------------------------------------
 ;; Assertions
 ;; ---------------------------------------------------------------------------
 

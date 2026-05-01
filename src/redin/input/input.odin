@@ -211,7 +211,7 @@ poll :: proc() -> [dynamic]types.InputEvent {
 		super = rl.IsKeyDown(.LEFT_SUPER) || rl.IsKeyDown(.RIGHT_SUPER),
 	}
 
-	mouse := rl.GetMousePosition()
+	mouse := mouse_pos()
 
 	key := rl.GetKeyPressed()
 	for key != .KEY_NULL {
@@ -247,7 +247,7 @@ poll :: proc() -> [dynamic]types.InputEvent {
 
 	buttons := [?]rl.MouseButton{.LEFT, .RIGHT, .MIDDLE}
 	for btn in buttons {
-		if rl.IsMouseButtonPressed(btn) {
+		if is_mouse_button_pressed(btn) {
 			append(
 				&events,
 				types.InputEvent(
@@ -522,9 +522,9 @@ set_hover_cursor :: proc(listeners: []types.Listener, node_rects: []rl.Rectangle
 	case Drag_Pending, Drag_Active:
 		rl.SetMouseCursor(.RESIZE_ALL)
 		return
-	case Drag_Idle:
+	case nil, Drag_Idle:
 	}
-	mouse := rl.GetMousePosition()
+	mouse := mouse_pos()
 	for listener in listeners {
 		dl, ok := listener.(types.DragListener)
 		if !ok do continue

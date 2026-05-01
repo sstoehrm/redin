@@ -50,6 +50,7 @@ Dev_Server :: struct {
 	server_thread:      ^thread.Thread,
 	incoming:           Sync_Queue,
 	event_queue:        [dynamic]types.InputEvent,
+	current_rects:      []rl.Rectangle, // borrowed during a poll cycle, nil otherwise
 	running:            bool,
 	shutdown_requested: bool,
 }
@@ -592,6 +593,18 @@ process_request :: proc(ds: ^Dev_Server, req: ^Pending_Request) {
 			handle_post_events(ds, ch, req.body)
 		} else if req.path == "/click" {
 			handle_post_click(ds, ch, req.body)
+		} else if req.path == "/input/takeover" {
+			handle_post_input_takeover(ds, ch)
+		} else if req.path == "/input/release" {
+			handle_post_input_release(ds, ch)
+		} else if req.path == "/input/mouse/move" {
+			handle_post_input_mouse_move(ds, ch, req.body)
+		} else if req.path == "/input/mouse/down" {
+			handle_post_input_mouse_down(ds, ch, req.body)
+		} else if req.path == "/input/mouse/up" {
+			handle_post_input_mouse_up(ds, ch, req.body)
+		} else if req.path == "/input/key" {
+			handle_post_input_key(ds, ch, req.body)
 		} else if req.path == "/shutdown" {
 			ds.shutdown_requested = true
 			respond_json_ok(ch)
@@ -679,9 +692,104 @@ handle_get_frames :: proc(ds: ^Dev_Server, ch: ^Response_Channel) {
 	}
 	b := strings.builder_make()
 	defer strings.builder_destroy(&b)
-	lua_value_to_json(&b, L, -1)
+	dfs_idx := 0
+	frame_value_to_json(&b, L, -1, ds.current_rects, &dfs_idx)
 	lua_pop(L, 1)
 	respond_json(ch, strings.to_string(b))
+}
+
+// Walks a Fennel-shaped frame value [tag attrs ...children] DFS, emitting
+// JSON. For each node table, injects "rect":[x,y,w,h] into the attrs
+// object using `dfs_idx` as the lookup into node_rects.
+//
+// For non-frame values (numbers, strings, primitive children inside
+// e.g. canvas attribute tables), defers to lua_value_to_json.
+//
+// Mirrors lua_read_node's flattening order. dfs_idx must be incremented
+// exactly once per node (vector with a tag at slot 1).
+frame_value_to_json :: proc(
+	b: ^strings.Builder, L: ^Lua_State, index: i32,
+	rects: []rl.Rectangle, dfs_idx: ^int,
+) {
+	// Normalise to absolute so the index stays valid as we push values.
+	idx := index < 0 ? lua_gettop(L) + index + 1 : index
+	if !lua_istable(L, idx) {
+		lua_value_to_json(b, L, idx)
+		return
+	}
+	// Detect a frame node: table whose [1] is a non-empty string.
+	// Frame tags are plain strings like "vbox", "hbox", "text", etc.
+	lua_rawgeti(L, idx, 1)
+	is_node := lua_isstring(L, -1)
+	tag := ""
+	if is_node {
+		tag = string(lua_tostring_raw(L, -1))
+		if len(tag) == 0 do is_node = false
+	}
+	lua_pop(L, 1)
+	if !is_node {
+		lua_value_to_json(b, L, idx)
+		return
+	}
+
+	// Capture rect now (before recursing into children, which would advance dfs_idx).
+	my_idx := dfs_idx^
+	dfs_idx^ += 1
+	rect_str := ""
+	if my_idx >= 0 && my_idx < len(rects) {
+		r := rects[my_idx]
+		rect_str = fmt.tprintf(`,"rect":[%g,%g,%g,%g]`, r.x, r.y, r.width, r.height)
+	} else {
+		rect_str = `,"rect":null`
+	}
+
+	// Emit ["tag", attrs-with-rect, ...children-recursed]
+	strings.write_string(b, "[")
+	// tag
+	strings.write_string(b, `"`)
+	strings.write_string(b, tag)
+	strings.write_string(b, `"`)
+	// attrs at slot [2]
+	lua_rawgeti(L, idx, 2)
+	strings.write_string(b, ",")
+	if lua_istable(L, -1) {
+		// Re-emit attrs as object via lua_value_to_json into a temp builder,
+		// then splice in the rect: rewind one byte ("}"), append rect_str, append "}".
+		tmp := strings.builder_make()
+		defer strings.builder_destroy(&tmp)
+		lua_value_to_json(&tmp, L, -1)
+		s := strings.to_string(tmp)
+		if len(s) >= 2 && s[len(s)-1] == '}' {
+			if s == "{}" {
+				strings.write_string(b, "{")
+				// rect_str starts with ','; strip the leading comma.
+				strings.write_string(b, rect_str[1:])
+				strings.write_string(b, "}")
+			} else {
+				strings.write_string(b, s[:len(s)-1])
+				strings.write_string(b, rect_str)
+				strings.write_string(b, "}")
+			}
+		} else {
+			// Defensive: emit as-is.
+			strings.write_string(b, s)
+		}
+	} else {
+		// No attrs table — synthesise {rect}.
+		strings.write_string(b, "{")
+		strings.write_string(b, rect_str[1:])
+		strings.write_string(b, "}")
+	}
+	lua_pop(L, 1)
+	// children at slots 3..n
+	n := lua_objlen(L, idx)
+	for i in 3..=n {
+		strings.write_string(b, ",")
+		lua_rawgeti(L, idx, i32(i))
+		frame_value_to_json(b, L, -1, rects, dfs_idx)
+		lua_pop(L, 1)
+	}
+	strings.write_string(b, "]")
 }
 
 handle_get_state :: proc(ds: ^Dev_Server, ch: ^Response_Channel) {
@@ -1012,6 +1120,238 @@ handle_post_click :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string) 
 		return
 	}
 	append(&ds.event_queue, types.InputEvent(types.MouseEvent{x = x, y = y, button = .LEFT}))
+	respond_json_ok(ch)
+}
+
+handle_post_input_takeover :: proc(ds: ^Dev_Server, ch: ^Response_Channel) {
+	if input.override.active {
+		respond_json_error(ch, 409, `{"error":"takeover already active"}`)
+		return
+	}
+	input.override = input.Mouse_Override{active = true}
+	respond_json_ok(ch)
+}
+
+handle_post_input_release :: proc(ds: ^Dev_Server, ch: ^Response_Channel) {
+	if !input.override.active {
+		respond_json_error(ch, 409, `{"error":"takeover not active"}`)
+		return
+	}
+	input.override = input.Mouse_Override{}
+	respond_json_ok(ch)
+}
+
+// Decode {"button":"left|right|middle"} from a Lua-staged table at -1.
+read_mouse_button :: proc(L: ^Lua_State) -> (rl.MouseButton, bool) {
+	lua_getfield(L, -1, "button")
+	defer lua_pop(L, 1)
+	if !lua_isstring(L, -1) do return .LEFT, false
+	s := string(lua_tostring_raw(L, -1))
+	switch s {
+	case "left":   return .LEFT,   true
+	case "right":  return .RIGHT,  true
+	case "middle": return .MIDDLE, true
+	}
+	return .LEFT, false
+}
+
+handle_post_input_mouse_move :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string) {
+	if !input.override.active {
+		respond_json_error(ch, 409, `{"error":"takeover not active"}`)
+		return
+	}
+	L := ds.bridge.L
+	pos := 0
+	if !json_decode_value(L, body, &pos) {
+		respond_json_error(ch, 400, `{"error":"invalid JSON"}`)
+		return
+	}
+	defer lua_pop(L, 1)
+	if !lua_istable(L, -1) {
+		respond_json_error(ch, 400, `{"error":"body must be an object"}`)
+		return
+	}
+	lua_getfield(L, -1, "x")
+	x := f32(lua_tonumber(L, -1))
+	lua_pop(L, 1)
+	lua_getfield(L, -1, "y")
+	y := f32(lua_tonumber(L, -1))
+	lua_pop(L, 1)
+	if math.is_nan(x) || math.is_nan(y) || math.is_inf(x) || math.is_inf(y) {
+		respond_json_error(ch, 400, `{"error":"x,y must be finite"}`)
+		return
+	}
+	input.override.pos = rl.Vector2{x, y}
+	respond_json_ok(ch)
+}
+
+handle_post_input_mouse_down :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string) {
+	if !input.override.active {
+		respond_json_error(ch, 409, `{"error":"takeover not active"}`)
+		return
+	}
+	L := ds.bridge.L
+	pos := 0
+	if !json_decode_value(L, body, &pos) {
+		respond_json_error(ch, 400, `{"error":"invalid JSON"}`)
+		return
+	}
+	defer lua_pop(L, 1)
+	if !lua_istable(L, -1) {
+		respond_json_error(ch, 400, `{"error":"body must be an object"}`)
+		return
+	}
+	btn, ok := read_mouse_button(L)
+	if !ok {
+		respond_json_error(ch, 400, `{"error":"button must be left|right|middle"}`)
+		return
+	}
+	already_down := false
+	switch btn {
+	case .LEFT:
+		already_down = input.override.button_left
+		if !already_down {
+			input.override.button_left = true
+			input.override.pending_press_left = true
+		}
+	case .RIGHT:
+		already_down = input.override.button_right
+		if !already_down {
+			input.override.button_right = true
+			input.override.pending_press_right = true
+		}
+	case .MIDDLE:
+		already_down = input.override.button_middle
+		if !already_down {
+			input.override.button_middle = true
+			input.override.pending_press_middle = true
+		}
+	case .SIDE, .EXTRA, .FORWARD, .BACK:
+	}
+	if already_down {
+		respond_json_error(ch, 409, `{"error":"button already down"}`)
+		return
+	}
+	respond_json_ok(ch)
+}
+
+handle_post_input_mouse_up :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string) {
+	if !input.override.active {
+		respond_json_error(ch, 409, `{"error":"takeover not active"}`)
+		return
+	}
+	L := ds.bridge.L
+	pos := 0
+	if !json_decode_value(L, body, &pos) {
+		respond_json_error(ch, 400, `{"error":"invalid JSON"}`)
+		return
+	}
+	defer lua_pop(L, 1)
+	if !lua_istable(L, -1) {
+		respond_json_error(ch, 400, `{"error":"body must be an object"}`)
+		return
+	}
+	btn, ok := read_mouse_button(L)
+	if !ok {
+		respond_json_error(ch, 400, `{"error":"button must be left|right|middle"}`)
+		return
+	}
+	already_up := false
+	switch btn {
+	case .LEFT:
+		already_up = !input.override.button_left
+		if !already_up {
+			input.override.button_left = false
+			input.override.pending_release_left = true
+		}
+	case .RIGHT:
+		already_up = !input.override.button_right
+		if !already_up {
+			input.override.button_right = false
+			input.override.pending_release_right = true
+		}
+	case .MIDDLE:
+		already_up = !input.override.button_middle
+		if !already_up {
+			input.override.button_middle = false
+			input.override.pending_release_middle = true
+		}
+	case .SIDE, .EXTRA, .FORWARD, .BACK:
+	}
+	if already_up {
+		respond_json_error(ch, 409, `{"error":"button already up"}`)
+		return
+	}
+	respond_json_ok(ch)
+}
+
+// Inverse of input.key_to_string_input: maps the same string names back
+// to raylib KeyboardKey enum values for /input/key synthesis.
+key_string_to_raylib :: proc(s: string) -> (rl.KeyboardKey, bool) {
+	switch s {
+	case "enter":     return .ENTER,     true
+	case "escape":    return .ESCAPE,    true
+	case "backspace": return .BACKSPACE, true
+	case "tab":       return .TAB,       true
+	case "space":     return .SPACE,     true
+	case "up":        return .UP,        true
+	case "down":      return .DOWN,      true
+	case "left":      return .LEFT,      true
+	case "right":     return .RIGHT,     true
+	case "delete":    return .DELETE,    true
+	case "home":      return .HOME,      true
+	case "end":       return .END,       true
+	case "pageup":    return .PAGE_UP,   true
+	case "pagedown":  return .PAGE_DOWN, true
+	}
+	if len(s) == 1 {
+		c := s[0]
+		if c >= 'a' && c <= 'z' do return rl.KeyboardKey(int(rl.KeyboardKey.A) + int(c - 'a')), true
+		if c >= 'A' && c <= 'Z' do return rl.KeyboardKey(int(rl.KeyboardKey.A) + int(c - 'A')), true
+		if c >= '0' && c <= '9' do return rl.KeyboardKey(int(rl.KeyboardKey.ZERO) + int(c - '0')), true
+	}
+	return .KEY_NULL, false
+}
+
+handle_post_input_key :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string) {
+	L := ds.bridge.L
+	pos := 0
+	if !json_decode_value(L, body, &pos) {
+		respond_json_error(ch, 400, `{"error":"invalid JSON"}`)
+		return
+	}
+	defer lua_pop(L, 1)
+	if !lua_istable(L, -1) {
+		respond_json_error(ch, 400, `{"error":"body must be an object"}`)
+		return
+	}
+	lua_getfield(L, -1, "key")
+	key_str := ""
+	if lua_isstring(L, -1) do key_str = string(lua_tostring_raw(L, -1))
+	lua_pop(L, 1)
+	key, ok := key_string_to_raylib(key_str)
+	if !ok {
+		respond_json_error(ch, 400, `{"error":"unknown key"}`)
+		return
+	}
+	mods := types.KeyMods{}
+	lua_getfield(L, -1, "mods")
+	if lua_istable(L, -1) {
+		read_bool :: proc(L: ^Lua_State, key: cstring) -> bool {
+			lua_getfield(L, -1, key)
+			defer lua_pop(L, 1)
+			return lua_toboolean(L, -1) != 0
+		}
+		mods.shift = read_bool(L, "shift")
+		mods.ctrl  = read_bool(L, "ctrl")
+		mods.alt   = read_bool(L, "alt")
+		mods.super = read_bool(L, "super")
+	}
+	lua_pop(L, 1)
+	m := input.mouse_pos()
+	append(&ds.event_queue, types.InputEvent(types.KeyEvent{
+		x = m.x, y = m.y, key = key, mods = mods,
+	}))
 	respond_json_ok(ch)
 }
 
