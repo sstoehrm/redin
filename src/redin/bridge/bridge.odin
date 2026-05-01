@@ -1,5 +1,11 @@
 package bridge
 
+// Compile-time flag enabling the agent channel feature. Default is false;
+// set with `odin build ... -define:REDIN_AGENT=true`. When false, the
+// agent endpoints, walker, and listener-gate widening all compile out
+// to zero bytes.
+REDIN_AGENT :: #config(REDIN_AGENT, false)
+
 import "core:fmt"
 import "core:math"
 import "core:os"
