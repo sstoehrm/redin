@@ -596,6 +596,12 @@ process_request :: proc(ds: ^Dev_Server, req: ^Pending_Request) {
 			handle_post_input_takeover(ds, ch)
 		} else if req.path == "/input/release" {
 			handle_post_input_release(ds, ch)
+		} else if req.path == "/input/mouse/move" {
+			handle_post_input_mouse_move(ds, ch, req.body)
+		} else if req.path == "/input/mouse/down" {
+			handle_post_input_mouse_down(ds, ch, req.body)
+		} else if req.path == "/input/mouse/up" {
+			handle_post_input_mouse_up(ds, ch, req.body)
 		} else if req.path == "/shutdown" {
 			ds.shutdown_requested = true
 			respond_json_ok(ch)
@@ -1034,6 +1040,150 @@ handle_post_input_release :: proc(ds: ^Dev_Server, ch: ^Response_Channel) {
 		return
 	}
 	input.override = input.Mouse_Override{}
+	respond_json_ok(ch)
+}
+
+// Decode {"button":"left|right|middle"} from a Lua-staged table at -1.
+read_mouse_button :: proc(L: ^Lua_State) -> (rl.MouseButton, bool) {
+	lua_getfield(L, -1, "button")
+	defer lua_pop(L, 1)
+	if !lua_isstring(L, -1) do return .LEFT, false
+	s := string(lua_tostring_raw(L, -1))
+	switch s {
+	case "left":   return .LEFT,   true
+	case "right":  return .RIGHT,  true
+	case "middle": return .MIDDLE, true
+	}
+	return .LEFT, false
+}
+
+handle_post_input_mouse_move :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string) {
+	if !input.override.active {
+		respond_json_error(ch, 409, `{"error":"takeover not active"}`)
+		return
+	}
+	L := ds.bridge.L
+	pos := 0
+	if !json_decode_value(L, body, &pos) {
+		respond_json_error(ch, 400, `{"error":"invalid JSON"}`)
+		return
+	}
+	defer lua_pop(L, 1)
+	if !lua_istable(L, -1) {
+		respond_json_error(ch, 400, `{"error":"body must be an object"}`)
+		return
+	}
+	lua_getfield(L, -1, "x")
+	x := f32(lua_tonumber(L, -1))
+	lua_pop(L, 1)
+	lua_getfield(L, -1, "y")
+	y := f32(lua_tonumber(L, -1))
+	lua_pop(L, 1)
+	if math.is_nan(x) || math.is_nan(y) || math.is_inf(x) || math.is_inf(y) {
+		respond_json_error(ch, 400, `{"error":"x,y must be finite"}`)
+		return
+	}
+	input.override.pos = rl.Vector2{x, y}
+	respond_json_ok(ch)
+}
+
+handle_post_input_mouse_down :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string) {
+	if !input.override.active {
+		respond_json_error(ch, 409, `{"error":"takeover not active"}`)
+		return
+	}
+	L := ds.bridge.L
+	pos := 0
+	if !json_decode_value(L, body, &pos) {
+		respond_json_error(ch, 400, `{"error":"invalid JSON"}`)
+		return
+	}
+	defer lua_pop(L, 1)
+	if !lua_istable(L, -1) {
+		respond_json_error(ch, 400, `{"error":"body must be an object"}`)
+		return
+	}
+	btn, ok := read_mouse_button(L)
+	if !ok {
+		respond_json_error(ch, 400, `{"error":"button must be left|right|middle"}`)
+		return
+	}
+	already_down := false
+	switch btn {
+	case .LEFT:
+		already_down = input.override.button_left
+		if !already_down {
+			input.override.button_left = true
+			input.override.pending_press_left = true
+		}
+	case .RIGHT:
+		already_down = input.override.button_right
+		if !already_down {
+			input.override.button_right = true
+			input.override.pending_press_right = true
+		}
+	case .MIDDLE:
+		already_down = input.override.button_middle
+		if !already_down {
+			input.override.button_middle = true
+			input.override.pending_press_middle = true
+		}
+	case .SIDE, .EXTRA, .FORWARD, .BACK:
+	}
+	if already_down {
+		respond_json_error(ch, 409, `{"error":"button already down"}`)
+		return
+	}
+	respond_json_ok(ch)
+}
+
+handle_post_input_mouse_up :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string) {
+	if !input.override.active {
+		respond_json_error(ch, 409, `{"error":"takeover not active"}`)
+		return
+	}
+	L := ds.bridge.L
+	pos := 0
+	if !json_decode_value(L, body, &pos) {
+		respond_json_error(ch, 400, `{"error":"invalid JSON"}`)
+		return
+	}
+	defer lua_pop(L, 1)
+	if !lua_istable(L, -1) {
+		respond_json_error(ch, 400, `{"error":"body must be an object"}`)
+		return
+	}
+	btn, ok := read_mouse_button(L)
+	if !ok {
+		respond_json_error(ch, 400, `{"error":"button must be left|right|middle"}`)
+		return
+	}
+	already_up := false
+	switch btn {
+	case .LEFT:
+		already_up = !input.override.button_left
+		if !already_up {
+			input.override.button_left = false
+			input.override.pending_release_left = true
+		}
+	case .RIGHT:
+		already_up = !input.override.button_right
+		if !already_up {
+			input.override.button_right = false
+			input.override.pending_release_right = true
+		}
+	case .MIDDLE:
+		already_up = !input.override.button_middle
+		if !already_up {
+			input.override.button_middle = false
+			input.override.pending_release_middle = true
+		}
+	case .SIDE, .EXTRA, .FORWARD, .BACK:
+	}
+	if already_up {
+		respond_json_error(ch, 409, `{"error":"button already up"}`)
+		return
+	}
 	respond_json_ok(ch)
 }
 
