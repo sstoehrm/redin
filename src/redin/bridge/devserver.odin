@@ -592,6 +592,10 @@ process_request :: proc(ds: ^Dev_Server, req: ^Pending_Request) {
 			handle_post_events(ds, ch, req.body)
 		} else if req.path == "/click" {
 			handle_post_click(ds, ch, req.body)
+		} else if req.path == "/input/takeover" {
+			handle_post_input_takeover(ds, ch)
+		} else if req.path == "/input/release" {
+			handle_post_input_release(ds, ch)
 		} else if req.path == "/shutdown" {
 			ds.shutdown_requested = true
 			respond_json_ok(ch)
@@ -1012,6 +1016,24 @@ handle_post_click :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string) 
 		return
 	}
 	append(&ds.event_queue, types.InputEvent(types.MouseEvent{x = x, y = y, button = .LEFT}))
+	respond_json_ok(ch)
+}
+
+handle_post_input_takeover :: proc(ds: ^Dev_Server, ch: ^Response_Channel) {
+	if input.override.active {
+		respond_json_error(ch, 409, `{"error":"takeover already active"}`)
+		return
+	}
+	input.override = input.Mouse_Override{active = true}
+	respond_json_ok(ch)
+}
+
+handle_post_input_release :: proc(ds: ^Dev_Server, ch: ^Response_Channel) {
+	if !input.override.active {
+		respond_json_error(ch, 409, `{"error":"takeover not active"}`)
+		return
+	}
+	input.override = input.Mouse_Override{}
 	respond_json_ok(ch)
 }
 
