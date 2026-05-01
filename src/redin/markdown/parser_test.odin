@@ -98,3 +98,19 @@ test_mixed :: proc(t: ^testing.T) {
 	testing.expect_value(t, blocks[0].spans[2].text, "code")
 	testing.expect_value(t, blocks[0].spans[4].text, "italic")
 }
+
+@(test)
+test_regular_spans_dont_alias :: proc(t: ^testing.T) {
+	// Regression: flush_regular previously returned a slice into a shared
+	// builder buffer; subsequent writes after builder_reset reused the same
+	// memory, corrupting earlier spans.
+	blocks := parse("aaa **B** bbb **C** ccc", context.temp_allocator)
+	testing.expect_value(t, len(blocks), 1)
+	// Expect: Regular "aaa ", Bold "B", Regular " bbb ", Bold "C", Regular " ccc"
+	testing.expect_value(t, len(blocks[0].spans), 5)
+	testing.expect_value(t, blocks[0].spans[0].text, "aaa ")
+	testing.expect_value(t, blocks[0].spans[1].text, "B")
+	testing.expect_value(t, blocks[0].spans[2].text, " bbb ")
+	testing.expect_value(t, blocks[0].spans[3].text, "C")
+	testing.expect_value(t, blocks[0].spans[4].text, " ccc")
+}

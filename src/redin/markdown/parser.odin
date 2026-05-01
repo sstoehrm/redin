@@ -91,7 +91,8 @@ parse_inline :: proc(src: string) -> []Span {
 
 	flush_regular :: proc(out: ^[dynamic]Span, b: ^strings.Builder) {
 		if strings.builder_len(b^) > 0 {
-			append(out, Span{style = .Regular, text = strings.to_string(b^)})
+			cloned := strings.clone(strings.to_string(b^))
+			append(out, Span{style = .Regular, text = cloned})
 			strings.builder_reset(b)
 		}
 	}
