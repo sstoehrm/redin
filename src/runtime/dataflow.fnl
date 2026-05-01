@@ -219,6 +219,8 @@
   (tset _G "__fnl_global__reg_2dhandler" M.reg-handler)
   (tset _G "__fnl_global__reg_2dsub" M.reg-sub))
 
+(fn M.get-state [] raw-db)
+
 (fn M._get-changed-paths [] changed-paths)
 (fn M._get-raw-db [] raw-db)
 

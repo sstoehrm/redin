@@ -16,6 +16,9 @@
 ;; Wire effect handler: dataflow dispatch -> effect execute
 (dataflow.set-effect-handler effect.execute)
 
+;; Install agent event handler
+((. (require :agent) :install))
+
 ;; Bridge-facing globals (called by Odin host each frame)
 (set _G.redin_render_tick view.render-tick)
 (set _G.redin_events view.deliver-events)
