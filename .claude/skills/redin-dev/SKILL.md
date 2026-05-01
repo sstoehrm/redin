@@ -44,6 +44,7 @@ src/runtime/        Fennel runtime (loaded by bridge at startup)
 `NodeStack`, `NodeCanvas`, `NodeVbox`, `NodeHbox`, `NodeInput`, `NodeButton`, `NodeText`, `NodeImage`, `NodePopout`, `NodeModal`
 
 NodeText accepts `:selectable` (boolean, default `true`); set to `false` to opt the node out of mouse-selection.
+NodeText accepts `:markdown` (boolean, default `false`); when `true`, inline markdown is rendered (v1: bold via `**...**`, italic via `_..._` or `*...*`, inline code via backticks, paragraph breaks via blank line, soft line breaks via two-space EOL).
 
 ## Frame format (Fennel)
 

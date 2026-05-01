@@ -88,6 +88,7 @@ Renders a string of text. The text content is the last positional argument, not 
 | --------- | ---- | ------- | ----- |
 | `wrap` | `"word"` \| `"char"` \| `"none"` | `"word"` | Line-wrapping strategy. |
 | `selectable` | boolean | `true` | Set to `false` to opt the node out of mouse-selection. |
+| `markdown` | boolean | `false` | When `true`, render content as inline markdown (bold, italic, inline code, paragraphs, soft breaks). |
 | `:agent` | `:read \| :edit` | -- | Optional. Pairs with `:id` to expose the node to the agent channel (REDIN_AGENT only). |
 
 Typography (`font-size`, `weight`, `color`) comes from `aspect`.
