@@ -574,6 +574,10 @@ process_request :: proc(ds: ^Dev_Server, req: ^Pending_Request) {
 				handle_get_agent_nodes(ds, ch)
 				return
 			}
+			if strings.has_prefix(req.path, "/agent/content/") {
+				handle_get_agent_content(ds, ch, req.path[len("/agent/content/"):])
+				return
+			}
 		}
 		if req.path == "/frames" {
 			handle_get_frames(ds, ch)
@@ -878,6 +882,147 @@ handle_get_agent_nodes :: proc(ds: ^Dev_Server, ch: ^Response_Channel) {
 	agent_nodes_walker(&b, L, -1, &first)
 	strings.write_string(&b, "]")
 	lua_pop(L, 1)
+	respond_json(ch, strings.to_string(b))
+}
+
+// Walk the frame tree, push the matching [tag attrs ...children] table
+// onto the Lua stack at -1 if found and return true. Otherwise leaves
+// the stack unchanged and returns false. Caller must lua_pop(L, 1) on success.
+agent_find_by_id :: proc(L: ^Lua_State, index: i32, target_id: string) -> bool {
+	idx := index < 0 ? lua_gettop(L) + index + 1 : index
+	if !lua_istable(L, idx) do return false
+
+	// Inspect tag and id attr.
+	lua_rawgeti(L, idx, 1)
+	is_node := lua_isstring(L, -1)
+	lua_pop(L, 1)
+	if is_node {
+		lua_rawgeti(L, idx, 2)
+		if lua_istable(L, -1) {
+			lua_getfield(L, -1, "id")
+			id := ""
+			if lua_isstring(L, -1) do id = string(lua_tostring_raw(L, -1))
+			lua_pop(L, 1)
+			lua_pop(L, 1) // attrs
+			if id == target_id {
+				lua_pushvalue(L, idx)
+				return true
+			}
+		} else {
+			lua_pop(L, 1)
+		}
+	}
+
+	// Recurse into children.
+	n := lua_objlen(L, idx)
+	for i in 3..=n {
+		lua_rawgeti(L, idx, i32(i))
+		if agent_find_by_id(L, -1, target_id) {
+			// Move the found node up by 1 (replacing the child we pushed).
+			lua_remove(L, -2)
+			return true
+		}
+		lua_pop(L, 1)
+	}
+	return false
+}
+
+// Reads attr field from a node table at -1 and returns its string value.
+// Returns a temp-allocator slice -- valid only for the current frame.
+agent_node_attr_string :: proc(L: ^Lua_State, attr: cstring) -> string {
+	if !lua_istable(L, -1) do return ""
+	lua_rawgeti(L, -1, 2)
+	defer lua_pop(L, 1)
+	if !lua_istable(L, -1) do return ""
+	lua_getfield(L, -1, attr)
+	defer lua_pop(L, 1)
+	if !lua_isstring(L, -1) do return ""
+	return strings.clone(string(lua_tostring_raw(L, -1)), context.temp_allocator)
+}
+
+agent_node_tag :: proc(L: ^Lua_State) -> string {
+	if !lua_istable(L, -1) do return ""
+	lua_rawgeti(L, -1, 1)
+	defer lua_pop(L, 1)
+	if !lua_isstring(L, -1) do return ""
+	return strings.clone(string(lua_tostring_raw(L, -1)), context.temp_allocator)
+}
+
+agent_escape_json :: proc(s: string) -> string {
+	b := strings.builder_make(context.temp_allocator)
+	for r in s {
+		switch r {
+		case '"':  strings.write_string(&b, `\"`)
+		case '\\': strings.write_string(&b, `\\`)
+		case '\n': strings.write_string(&b, `\n`)
+		case '\t': strings.write_string(&b, `\t`)
+		case:      strings.write_rune(&b, r)
+		}
+	}
+	return strings.to_string(b)
+}
+
+// Emits {"content": ...} JSON for the node at -1 based on its tag.
+emit_agent_content :: proc(b: ^strings.Builder, L: ^Lua_State, tag: string) {
+	strings.write_string(b, `{"content":`)
+	switch tag {
+	case "input":
+		val := agent_node_attr_string(L, "value")
+		fmt.sbprintf(b, `"%s"`, agent_escape_json(val))
+	case "image":
+		val := agent_node_attr_string(L, "src")
+		fmt.sbprintf(b, `"%s"`, agent_escape_json(val))
+	case "vbox", "hbox", "stack", "popout", "modal":
+		strings.write_string(b, "[")
+		n := lua_objlen(L, -1)
+		first := true
+		for i in 3..=n {
+			lua_rawgeti(L, -1, i32(i))
+			if !first do strings.write_string(b, ",")
+			first = false
+			lua_value_to_json(b, L, -1)
+			lua_pop(L, 1)
+		}
+		strings.write_string(b, "]")
+	case:
+		// Default: leaf-text-like (text, button). Content is slot [3].
+		lua_rawgeti(L, -1, 3)
+		val := ""
+		if lua_isstring(L, -1) do val = string(lua_tostring_raw(L, -1))
+		lua_pop(L, 1)
+		fmt.sbprintf(b, `"%s"`, agent_escape_json(val))
+	}
+	strings.write_string(b, "}")
+}
+
+handle_get_agent_content :: proc(ds: ^Dev_Server, ch: ^Response_Channel, id: string) {
+	L := ds.bridge.L
+	lua_getglobal(L, "require")
+	lua_pushstring(L, "view")
+	if lua_pcall(L, 1, 1, 0) != 0 {
+		lua_pop(L, 1)
+		respond_json_error(ch, 500, `{"error":"lua error"}`)
+		return
+	}
+	lua_getfield(L, -1, "get-last-push")
+	lua_remove(L, -2)
+	if lua_pcall(L, 0, 1, 0) != 0 {
+		lua_pop(L, 1)
+		respond_json_error(ch, 500, `{"error":"lua error"}`)
+		return
+	}
+	defer lua_pop(L, 1) // last-push table
+
+	if !agent_find_by_id(L, -1, id) {
+		respond_json_error(ch, 404, `{"error":"id not found"}`)
+		return
+	}
+	defer lua_pop(L, 1) // found node
+
+	tag := agent_node_tag(L)
+	b := strings.builder_make()
+	defer strings.builder_destroy(&b)
+	emit_agent_content(&b, L, tag)
 	respond_json(ch, strings.to_string(b))
 }
 
