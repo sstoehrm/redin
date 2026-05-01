@@ -50,6 +50,7 @@ Dev_Server :: struct {
 	server_thread:      ^thread.Thread,
 	incoming:           Sync_Queue,
 	event_queue:        [dynamic]types.InputEvent,
+	current_rects:      []rl.Rectangle, // borrowed during a poll cycle, nil otherwise
 	running:            bool,
 	shutdown_requested: bool,
 }
@@ -691,9 +692,104 @@ handle_get_frames :: proc(ds: ^Dev_Server, ch: ^Response_Channel) {
 	}
 	b := strings.builder_make()
 	defer strings.builder_destroy(&b)
-	lua_value_to_json(&b, L, -1)
+	dfs_idx := 0
+	frame_value_to_json(&b, L, -1, ds.current_rects, &dfs_idx)
 	lua_pop(L, 1)
 	respond_json(ch, strings.to_string(b))
+}
+
+// Walks a Fennel-shaped frame value [tag attrs ...children] DFS, emitting
+// JSON. For each node table, injects "rect":[x,y,w,h] into the attrs
+// object using `dfs_idx` as the lookup into node_rects.
+//
+// For non-frame values (numbers, strings, primitive children inside
+// e.g. canvas attribute tables), defers to lua_value_to_json.
+//
+// Mirrors lua_read_node's flattening order. dfs_idx must be incremented
+// exactly once per node (vector with a tag at slot 1).
+frame_value_to_json :: proc(
+	b: ^strings.Builder, L: ^Lua_State, index: i32,
+	rects: []rl.Rectangle, dfs_idx: ^int,
+) {
+	// Normalise to absolute so the index stays valid as we push values.
+	idx := index < 0 ? lua_gettop(L) + index + 1 : index
+	if !lua_istable(L, idx) {
+		lua_value_to_json(b, L, idx)
+		return
+	}
+	// Detect a frame node: table whose [1] is a non-empty string.
+	// Frame tags are plain strings like "vbox", "hbox", "text", etc.
+	lua_rawgeti(L, idx, 1)
+	is_node := lua_isstring(L, -1)
+	tag := ""
+	if is_node {
+		tag = string(lua_tostring_raw(L, -1))
+		if len(tag) == 0 do is_node = false
+	}
+	lua_pop(L, 1)
+	if !is_node {
+		lua_value_to_json(b, L, idx)
+		return
+	}
+
+	// Capture rect now (before recursing into children, which would advance dfs_idx).
+	my_idx := dfs_idx^
+	dfs_idx^ += 1
+	rect_str := ""
+	if my_idx >= 0 && my_idx < len(rects) {
+		r := rects[my_idx]
+		rect_str = fmt.tprintf(`,"rect":[%g,%g,%g,%g]`, r.x, r.y, r.width, r.height)
+	} else {
+		rect_str = `,"rect":null`
+	}
+
+	// Emit ["tag", attrs-with-rect, ...children-recursed]
+	strings.write_string(b, "[")
+	// tag
+	strings.write_string(b, `"`)
+	strings.write_string(b, tag)
+	strings.write_string(b, `"`)
+	// attrs at slot [2]
+	lua_rawgeti(L, idx, 2)
+	strings.write_string(b, ",")
+	if lua_istable(L, -1) {
+		// Re-emit attrs as object via lua_value_to_json into a temp builder,
+		// then splice in the rect: rewind one byte ("}"), append rect_str, append "}".
+		tmp := strings.builder_make()
+		defer strings.builder_destroy(&tmp)
+		lua_value_to_json(&tmp, L, -1)
+		s := strings.to_string(tmp)
+		if len(s) >= 2 && s[len(s)-1] == '}' {
+			if s == "{}" {
+				strings.write_string(b, "{")
+				// rect_str starts with ','; strip the leading comma.
+				strings.write_string(b, rect_str[1:])
+				strings.write_string(b, "}")
+			} else {
+				strings.write_string(b, s[:len(s)-1])
+				strings.write_string(b, rect_str)
+				strings.write_string(b, "}")
+			}
+		} else {
+			// Defensive: emit as-is.
+			strings.write_string(b, s)
+		}
+	} else {
+		// No attrs table — synthesise {rect}.
+		strings.write_string(b, "{")
+		strings.write_string(b, rect_str[1:])
+		strings.write_string(b, "}")
+	}
+	lua_pop(L, 1)
+	// children at slots 3..n
+	n := lua_objlen(L, idx)
+	for i in 3..=n {
+		strings.write_string(b, ",")
+		lua_rawgeti(L, idx, i32(i))
+		frame_value_to_json(b, L, -1, rects, dfs_idx)
+		lua_pop(L, 1)
+	}
+	strings.write_string(b, "]")
 }
 
 handle_get_state :: proc(ds: ^Dev_Server, ch: ^Response_Channel) {

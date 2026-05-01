@@ -101,10 +101,12 @@ destroy :: proc(b: ^Bridge) {
 	lua_close(b.L)
 }
 
-poll_devserver :: proc(b: ^Bridge, events: ^[dynamic]types.InputEvent) {
+poll_devserver :: proc(b: ^Bridge, events: ^[dynamic]types.InputEvent, node_rects: []rl.Rectangle) {
 	if !b.dev_mode do return
+	b.dev_server.current_rects = node_rects
 	devserver_poll(&b.dev_server)
 	devserver_drain_events(&b.dev_server, events)
+	b.dev_server.current_rects = nil
 }
 
 is_shutdown_requested :: proc(b: ^Bridge) -> bool {
