@@ -92,6 +92,35 @@ jobs:
           name: redin-${{ steps.version.outputs.tag }}-linux-amd64
           path: redin-${{ steps.version.outputs.tag }}-linux-amd64.tar.gz
 
+      - name: Build agent binary
+        run: |
+          rm -rf dist-agent
+          mkdir -p dist-agent
+          odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit \
+            -define:REDIN_AGENT=true -out:dist-agent/redin -o:speed
+
+      - name: Package agent release
+        env:
+          VERSION: ${{ steps.version.outputs.tag }}
+        run: |
+          # Mirror dist/'s structure but swap in the agent binary.
+          # Other files (runtime, lib, vendor, docs, skills, LICENSE) are
+          # identical to the default build, so we copy them from dist/
+          # rather than re-running the bundling steps.
+          cp -r dist/runtime dist-agent/
+          cp -r dist/lib dist-agent/
+          cp -r dist/vendor dist-agent/
+          cp -r dist/docs dist-agent/
+          cp -r dist/skills dist-agent/
+          [ -f dist/LICENSE ] && cp dist/LICENSE dist-agent/ || true
+          tar czf "redin-${VERSION}-agent-linux-amd64.tar.gz" -C dist-agent .
+
+      - name: Upload agent artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: redin-${{ steps.version.outputs.tag }}-agent-linux-amd64
+          path: redin-${{ steps.version.outputs.tag }}-agent-linux-amd64.tar.gz
+
   release:
     needs: build
     runs-on: ubuntu-latest
