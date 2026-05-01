@@ -129,7 +129,21 @@ clear_draggable_attrs :: proc(m: Maybe(types.Draggable_Attrs)) {
 	if len(d.event) > 0 do delete(d.event)
 	if len(d.aspect) > 0 do delete(d.aspect)
 	if dec, ok2 := d.animate.?; ok2 && len(dec.provider) > 0 do delete(dec.provider)
-	if d.ctx != 0 do luaL_unref(g_bridge.L, LUA_REGISTRYINDEX, d.ctx)
+	if d.ctx != 0 {
+		// Don't unref the Lua registry slot while a drag is in flight and
+		// the captured ctx_ref refers to this very slot. The node may be
+		// re-rendered (and its ctx unreffed) before the drop fires, which
+		// would free the slot prematurely and deliver nil to the drop handler.
+		active_ref: i32 = 0
+		switch s in input.drag {
+		case input.Drag_Pending: active_ref = s.src_ctx_ref
+		case input.Drag_Active:  active_ref = s.src_ctx_ref
+		case nil, input.Drag_Idle:
+		}
+		if d.ctx != active_ref {
+			luaL_unref(g_bridge.L, LUA_REGISTRYINDEX, d.ctx)
+		}
+	}
 }
 
 clear_dropable_attrs :: proc(m: Maybe(types.Dropable_Attrs)) {
