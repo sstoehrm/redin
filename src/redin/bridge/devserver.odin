@@ -602,6 +602,8 @@ process_request :: proc(ds: ^Dev_Server, req: ^Pending_Request) {
 			handle_post_input_mouse_down(ds, ch, req.body)
 		} else if req.path == "/input/mouse/up" {
 			handle_post_input_mouse_up(ds, ch, req.body)
+		} else if req.path == "/input/key" {
+			handle_post_input_key(ds, ch, req.body)
 		} else if req.path == "/shutdown" {
 			ds.shutdown_requested = true
 			respond_json_ok(ch)
@@ -1184,6 +1186,76 @@ handle_post_input_mouse_up :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body:
 		respond_json_error(ch, 409, `{"error":"button already up"}`)
 		return
 	}
+	respond_json_ok(ch)
+}
+
+// Inverse of input.key_to_string_input: maps the same string names back
+// to raylib KeyboardKey enum values for /input/key synthesis.
+key_string_to_raylib :: proc(s: string) -> (rl.KeyboardKey, bool) {
+	switch s {
+	case "enter":     return .ENTER,     true
+	case "escape":    return .ESCAPE,    true
+	case "backspace": return .BACKSPACE, true
+	case "tab":       return .TAB,       true
+	case "space":     return .SPACE,     true
+	case "up":        return .UP,        true
+	case "down":      return .DOWN,      true
+	case "left":      return .LEFT,      true
+	case "right":     return .RIGHT,     true
+	case "delete":    return .DELETE,    true
+	case "home":      return .HOME,      true
+	case "end":       return .END,       true
+	case "pageup":    return .PAGE_UP,   true
+	case "pagedown":  return .PAGE_DOWN, true
+	}
+	if len(s) == 1 {
+		c := s[0]
+		if c >= 'a' && c <= 'z' do return rl.KeyboardKey(int(rl.KeyboardKey.A) + int(c - 'a')), true
+		if c >= 'A' && c <= 'Z' do return rl.KeyboardKey(int(rl.KeyboardKey.A) + int(c - 'A')), true
+		if c >= '0' && c <= '9' do return rl.KeyboardKey(int(rl.KeyboardKey.ZERO) + int(c - '0')), true
+	}
+	return .KEY_NULL, false
+}
+
+handle_post_input_key :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string) {
+	L := ds.bridge.L
+	pos := 0
+	if !json_decode_value(L, body, &pos) {
+		respond_json_error(ch, 400, `{"error":"invalid JSON"}`)
+		return
+	}
+	defer lua_pop(L, 1)
+	if !lua_istable(L, -1) {
+		respond_json_error(ch, 400, `{"error":"body must be an object"}`)
+		return
+	}
+	lua_getfield(L, -1, "key")
+	key_str := ""
+	if lua_isstring(L, -1) do key_str = string(lua_tostring_raw(L, -1))
+	lua_pop(L, 1)
+	key, ok := key_string_to_raylib(key_str)
+	if !ok {
+		respond_json_error(ch, 400, `{"error":"unknown key"}`)
+		return
+	}
+	mods := types.KeyMods{}
+	lua_getfield(L, -1, "mods")
+	if lua_istable(L, -1) {
+		read_bool :: proc(L: ^Lua_State, key: cstring) -> bool {
+			lua_getfield(L, -1, key)
+			defer lua_pop(L, 1)
+			return lua_toboolean(L, -1) != 0
+		}
+		mods.shift = read_bool(L, "shift")
+		mods.ctrl  = read_bool(L, "ctrl")
+		mods.alt   = read_bool(L, "alt")
+		mods.super = read_bool(L, "super")
+	}
+	lua_pop(L, 1)
+	m := input.mouse_pos()
+	append(&ds.event_queue, types.InputEvent(types.KeyEvent{
+		x = m.x, y = m.y, key = key, mods = mods,
+	}))
 	respond_json_ok(ch)
 }
 
