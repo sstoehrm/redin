@@ -630,6 +630,12 @@ process_request :: proc(ds: ^Dev_Server, req: ^Pending_Request) {
 			respond_text(ch, 404, "Not found")
 		}
 	case "PUT":
+		when REDIN_AGENT {
+			if strings.has_prefix(req.path, "/agent/content/") {
+				handle_put_agent_content(ds, ch, req.path[len("/agent/content/"):], req.body)
+				return
+			}
+		}
 		if req.path == "/aspects" {
 			handle_put_aspects(ds, ch, req.body)
 		} else {
@@ -1024,6 +1030,151 @@ handle_get_agent_content :: proc(ds: ^Dev_Server, ch: ^Response_Channel, id: str
 	defer strings.builder_destroy(&b)
 	emit_agent_content(&b, L, tag)
 	respond_json(ch, strings.to_string(b))
+}
+
+handle_put_agent_content :: proc(ds: ^Dev_Server, ch: ^Response_Channel, id: string, body: string) {
+	L := ds.bridge.L
+
+	// 1. Decode body. Expect {"content": <string-or-array>}.
+	pos := 0
+	if !json_decode_value(L, body, &pos) {
+		respond_json_error(ch, 400, `{"error":"invalid JSON"}`)
+		return
+	}
+	// Stack: [body_parent]
+	if !lua_istable(L, -1) {
+		lua_pop(L, 1)
+		respond_json_error(ch, 400, `{"error":"body must be an object with content"}`)
+		return
+	}
+	lua_getfield(L, -1, "content")
+	// Stack: [body_parent, content]
+	if lua_isnil(L, -1) {
+		lua_pop(L, 1) // content (nil)
+		lua_pop(L, 1) // body_parent
+		respond_json_error(ch, 400, `{"error":"missing content field"}`)
+		return
+	}
+	body_idx := lua_gettop(L) // absolute index of content field
+	// Stack: [body_parent, content]  (body_idx == absolute index of content)
+
+	// 2. Find target node and validate — get last-push frame.
+	lua_getglobal(L, "require")
+	lua_pushstring(L, "view")
+	if lua_pcall(L, 1, 1, 0) != 0 {
+		lua_pop(L, 1) // error msg
+		lua_pop(L, 1) // content
+		lua_pop(L, 1) // body_parent
+		respond_json_error(ch, 500, `{"error":"lua error"}`)
+		return
+	}
+	lua_getfield(L, -1, "get-last-push")
+	lua_remove(L, -2) // remove view module, keep get-last-push fn
+	if lua_pcall(L, 0, 1, 0) != 0 {
+		lua_pop(L, 1) // error msg
+		lua_pop(L, 1) // content
+		lua_pop(L, 1) // body_parent
+		respond_json_error(ch, 500, `{"error":"lua error"}`)
+		return
+	}
+	// Stack: [body_parent, content, last_push]
+	last_push_idx := lua_gettop(L)
+
+	if !agent_find_by_id(L, last_push_idx, id) {
+		lua_pop(L, 1) // last_push
+		lua_pop(L, 1) // content
+		lua_pop(L, 1) // body_parent
+		respond_json_error(ch, 404, `{"error":"id not found"}`)
+		return
+	}
+	// Stack: [body_parent, content, last_push, found_node]
+
+	// 3. Read mode + tag from the found node.
+	tag := agent_node_tag(L)
+	mode := agent_node_attr_string(L, "agent")
+	if mode != "edit" && mode != ":edit" {
+		lua_pop(L, 1) // found node
+		lua_pop(L, 1) // last_push
+		lua_pop(L, 1) // content
+		lua_pop(L, 1) // body_parent
+		respond_json_error(ch, 403, `{"error":"node is not :agent :edit"}`)
+		return
+	}
+
+	// 4. Validate body shape against tag.
+	is_container := tag == "vbox" || tag == "hbox" || tag == "stack" ||
+	                tag == "popout" || tag == "modal"
+	body_is_table  := lua_istable(L, body_idx)
+	body_is_string := lua_isstring(L, body_idx)
+	if is_container {
+		if !body_is_table {
+			lua_pop(L, 1) // found node
+			lua_pop(L, 1) // last_push
+			lua_pop(L, 1) // content
+			lua_pop(L, 1) // body_parent
+			respond_json_error(ch, 400, `{"error":"container content must be an array"}`)
+			return
+		}
+	} else {
+		if !body_is_string {
+			lua_pop(L, 1) // found node
+			lua_pop(L, 1) // last_push
+			lua_pop(L, 1) // content
+			lua_pop(L, 1) // body_parent
+			respond_json_error(ch, 400, `{"error":"leaf content must be a string"}`)
+			return
+		}
+	}
+
+	// 5. Done with found_node and last_push.
+	lua_pop(L, 1) // found_node
+	lua_pop(L, 1) // last_push
+	// Stack: [body_parent, content]
+
+	// 6. Build and dispatch [:event/agent-edit {:id id :content <content>}].
+	lua_getglobal(L, "require")
+	lua_pushstring(L, "dataflow")
+	if lua_pcall(L, 1, 1, 0) != 0 {
+		lua_pop(L, 1) // error msg
+		lua_pop(L, 1) // content
+		lua_pop(L, 1) // body_parent
+		respond_json_error(ch, 500, `{"error":"lua error: dataflow"}`)
+		return
+	}
+	// Stack: [body_parent, content, dataflow]
+	lua_getfield(L, -1, "dispatch")
+	lua_remove(L, -2) // remove dataflow module, keep dispatch fn
+	// Stack: [body_parent, content, dispatch_fn]
+
+	// Build the event vector [event-name, payload-table] as a Lua table.
+	lua_createtable(L, 2, 0)
+	ev_idx := lua_gettop(L)
+	// Stack: [body_parent, content, dispatch_fn, ev_table]
+	lua_pushstring(L, "event/agent-edit")
+	lua_rawseti(L, ev_idx, 1)
+
+	lua_createtable(L, 0, 2)
+	payload_idx := lua_gettop(L)
+	// Stack: [body_parent, content, dispatch_fn, ev_table, payload_table]
+	lua_pushlstring(L, cstring(raw_data(id)), uint(len(id)))
+	lua_setfield(L, payload_idx, "id")
+	lua_pushvalue(L, body_idx) // copy of decoded content
+	lua_setfield(L, payload_idx, "content")
+	lua_rawseti(L, ev_idx, 2) // payload into ev_table[2]; pops payload_table
+	// Stack: [body_parent, content, dispatch_fn, ev_table]
+
+	// dispatch(ev_table) — pcall pops dispatch_fn + ev_table (1 arg), pushes 0 results on success.
+	if lua_pcall(L, 1, 0, 0) != 0 {
+		lua_pop(L, 1) // error msg
+		lua_pop(L, 1) // content
+		lua_pop(L, 1) // body_parent
+		respond_json_error(ch, 500, `{"error":"dispatch failed"}`)
+		return
+	}
+	// Stack: [body_parent, content]
+	lua_pop(L, 1) // content
+	lua_pop(L, 1) // body_parent
+	respond_json_ok(ch)
 }
 
 } // when REDIN_AGENT
