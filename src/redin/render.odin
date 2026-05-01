@@ -437,7 +437,7 @@ render_drag_preview :: proc(
 	if a.src_idx >= len(node_rects) do return
 
 	src_rect := node_rects[a.src_idx]
-	mouse    := rl.GetMousePosition()
+	mouse    := input.mouse_pos()
 	delta    := rl.Vector2{
 		mouse.x - src_rect.x - DRAG_PREVIEW_OFFSET,
 		mouse.y - src_rect.y - DRAG_PREVIEW_OFFSET,

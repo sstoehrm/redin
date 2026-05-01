@@ -9,6 +9,7 @@ import "core:time"
 import "core:unicode/utf8"
 import "base:runtime"
 import "../font"
+import "../input"
 import text_pkg "../text"
 import "../types"
 import rl "vendor:raylib"
@@ -461,7 +462,7 @@ read_number_field :: proc(L: ^Lua_State, idx: i32, field: cstring) -> f32 {
 // ---------------------------------------------------------------------------
 
 // Push a {left=bool, right=bool, middle=bool} table for a mouse button query
-push_mouse_buttons :: proc(L: ^Lua_State, parent_idx: i32, field: cstring, query: proc "c" (button: rl.MouseButton) -> bool) {
+push_mouse_buttons :: proc(L: ^Lua_State, parent_idx: i32, field: cstring, query: proc(button: rl.MouseButton) -> bool) {
 	lua_createtable(L, 0, 3)
 	btn_idx := lua_gettop(L)
 	lua_pushboolean(L, query(.LEFT) ? 1 : 0)
@@ -478,20 +479,20 @@ push_canvas_input_state :: proc(L: ^Lua_State, rect: rl.Rectangle) {
 	lua_createtable(L, 0, 6)
 	input_idx := lua_gettop(L)
 
-	mouse_pos := rl.GetMousePosition()
-	lua_pushnumber(L, f64(mouse_pos.x - rect.x))
+	m := input.mouse_pos()
+	lua_pushnumber(L, f64(m.x - rect.x))
 	lua_setfield(L, input_idx, "mouse-x")
-	lua_pushnumber(L, f64(mouse_pos.y - rect.y))
+	lua_pushnumber(L, f64(m.y - rect.y))
 	lua_setfield(L, input_idx, "mouse-y")
 
-	mouse_in := mouse_pos.x >= rect.x && mouse_pos.x <= rect.x + rect.width &&
-	            mouse_pos.y >= rect.y && mouse_pos.y <= rect.y + rect.height
+	mouse_in := m.x >= rect.x && m.x <= rect.x + rect.width &&
+	            m.y >= rect.y && m.y <= rect.y + rect.height
 	lua_pushboolean(L, mouse_in ? 1 : 0)
 	lua_setfield(L, input_idx, "mouse-in")
 
-	push_mouse_buttons(L, input_idx, "mouse-down", rl.IsMouseButtonDown)
-	push_mouse_buttons(L, input_idx, "mouse-pressed", rl.IsMouseButtonPressed)
-	push_mouse_buttons(L, input_idx, "mouse-released", rl.IsMouseButtonReleased)
+	push_mouse_buttons(L, input_idx, "mouse-down", input.is_mouse_button_down)
+	push_mouse_buttons(L, input_idx, "mouse-pressed", input.is_mouse_button_pressed)
+	push_mouse_buttons(L, input_idx, "mouse-released", input.is_mouse_button_released)
 }
 
 // ---------------------------------------------------------------------------
