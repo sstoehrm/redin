@@ -1360,6 +1360,42 @@ build_markdown_params :: proc(
 	return out
 }
 
+// Resolve markdown per-style colors from the host aspect's overrides.
+// Defaults: base_color = the text color the caller already computed;
+// bold/italic/code colors fall back to base_color when not set; code_bg
+// falls back to {60, 60, 70, 255}.
+build_markdown_style :: proc(
+	theme: map[string]types.Theme,
+	host_aspect: string,
+	base_color: rl.Color,
+) -> markdown.Style_Theme {
+	out := markdown.Style_Theme{
+		base_color   = base_color,
+		bold_color   = base_color,
+		italic_color = base_color,
+		code_color   = base_color,
+		code_bg      = rl.Color{60, 60, 70, 255},
+	}
+	host, ok := theme[host_aspect]
+	if !ok do return out
+	if host.bold.set && (host.bold.color != {}) {
+		out.bold_color = rl.Color{host.bold.color[0], host.bold.color[1], host.bold.color[2], 255}
+	}
+	if host.italic.set && (host.italic.color != {}) {
+		out.italic_color = rl.Color{host.italic.color[0], host.italic.color[1], host.italic.color[2], 255}
+	}
+	if host.code.set {
+		if host.code.color != {} {
+			out.code_color = rl.Color{host.code.color[0], host.code.color[1], host.code.color[2], 255}
+		}
+		// {0,0,0,0} → inherit; any non-zero byte → explicit bg.
+		if host.code.bg != {} {
+			out.code_bg = rl.Color{host.code.bg[0], host.code.bg[1], host.code.bg[2], host.code.bg[3]}
+		}
+	}
+	return out
+}
+
 draw_text :: proc(idx: int, rect: rl.Rectangle, n: types.NodeText, theme: map[string]types.Theme) {
 	if len(n.content) == 0 do return
 
@@ -1382,8 +1418,9 @@ draw_text :: proc(idx: int, rect: rl.Rectangle, n: types.NodeText, theme: map[st
 	if n.markdown {
 		blocks := markdown.parse(n.content, context.temp_allocator)
 		params := build_markdown_params(blocks, theme, font_size, lh_ratio, context.temp_allocator)
+		style := build_markdown_style(theme, n.aspect, text_color)
 		laid := markdown.layout(blocks, params, font_name, rect.width, context.temp_allocator)
-		markdown.draw(laid, params, rect, text_color, font_name)
+		markdown.draw(laid, params, rect, style, font_name)
 		return
 	}
 

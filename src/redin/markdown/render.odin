@@ -12,6 +12,16 @@ Block_Params :: struct {
 	line_height: f32,    // ratio
 }
 
+// Resolved per-style colors. Caller fills this from the host aspect's
+// :bold / :italic / :code sub-tables (with parent fallbacks).
+Style_Theme :: struct {
+	base_color:   rl.Color,
+	bold_color:   rl.Color,
+	italic_color: rl.Color,
+	code_color:   rl.Color,
+	code_bg:      rl.Color,
+}
+
 Span_Box :: struct {
 	style:  Span_Style,
 	text:   string,
@@ -146,11 +156,9 @@ free_laid :: proc(laid: []Laid_Block) {
 	delete(laid)
 }
 
-// Draw a laid-out markdown tree into `rect` using `color` for non-code spans.
-// Code spans get a subtle dark bg fill.
-draw :: proc(laid: []Laid_Block, params: []Block_Params, rect: rl.Rectangle, color: rl.Color, base_font_name: string) {
-	code_bg := rl.Color{60, 60, 70, 255}
-
+// Draw a laid-out markdown tree into `rect` using `style` for per-span colors.
+// Code spans get a bg fill from style.code_bg.
+draw :: proc(laid: []Laid_Block, params: []Block_Params, rect: rl.Rectangle, style: Style_Theme, base_font_name: string) {
 	block_y_offset: f32 = 0
 	for blk, blk_idx in laid {
 		bp := params[blk_idx]
@@ -161,11 +169,19 @@ draw :: proc(laid: []Laid_Block, params: []Block_Params, rect: rl.Rectangle, col
 			fnt := font_for(span.style, base_font_name)
 
 			if span.style == .Code {
-				rl.DrawRectangleRec(rl.Rectangle{x, y, span.width, lh}, code_bg)
+				rl.DrawRectangleRec(rl.Rectangle{x, y, span.width, lh}, style.code_bg)
+			}
+
+			span_color: rl.Color
+			switch span.style {
+			case .Regular:                            span_color = style.base_color
+			case .Bold, .Bold_Italic:                 span_color = style.bold_color
+			case .Italic:                             span_color = style.italic_color
+			case .Code:                               span_color = style.code_color
 			}
 
 			cstr := strings.clone_to_cstring(span.text, context.temp_allocator)
-			rl.DrawTextEx(fnt, cstr, rl.Vector2{x, y}, bp.font_size, 0, color)
+			rl.DrawTextEx(fnt, cstr, rl.Vector2{x, y}, bp.font_size, 0, span_color)
 		}
 		block_y_offset += blk.total_height
 		if blk_idx + 1 < len(laid) {
