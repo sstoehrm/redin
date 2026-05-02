@@ -9,26 +9,50 @@ Span :: struct {
 	text:  string,
 }
 
-Block_Kind :: enum u8 { Paragraph }
+Block_Kind :: enum u8 { Paragraph, Heading }
 
 Block :: struct {
 	kind:  Block_Kind,
+	level: u8,        // 1..6 for Heading; 0 for Paragraph
 	spans: []Span,
 }
 
-// Parse markdown source into a list of paragraph blocks. Each block holds
-// inline spans (Regular / Bold / Italic / Code). Allocations come from
-// the supplied allocator.
+// Parse markdown source into a list of blocks. Each block holds inline spans
+// (Regular / Bold / Italic / Code). Allocations come from the supplied allocator.
 parse :: proc(src: string, allocator := context.allocator) -> []Block {
 	context.allocator = allocator
 
 	blocks: [dynamic]Block
 	paragraphs := split_paragraphs(src)
 	for p in paragraphs {
-		spans := parse_inline(p)
-		append(&blocks, Block{kind = .Paragraph, spans = spans})
+		if level, body, is_h := detect_heading(p); is_h {
+			spans := parse_inline(body)
+			append(&blocks, Block{kind = .Heading, level = level, spans = spans})
+		} else {
+			spans := parse_inline(p)
+			append(&blocks, Block{kind = .Paragraph, spans = spans})
+		}
 	}
 	return blocks[:]
+}
+
+// Returns (level, trimmed-body, true) if `p` opens with 1..6 `#` followed
+// by a space. Trailing `#` runs and surrounding whitespace are stripped.
+detect_heading :: proc(p: string) -> (level: u8, body: string, ok: bool) {
+	i := 0
+	for i < len(p) && p[i] == '#' do i += 1
+	if i == 0 || i > 6 do return 0, "", false
+	if i >= len(p) || p[i] != ' ' do return 0, "", false
+	rest := p[i + 1:]
+	// Trim leading whitespace.
+	start := 0
+	for start < len(rest) && (rest[start] == ' ' || rest[start] == '\t') do start += 1
+	// Trim trailing whitespace + a closing run of `#`s + the space before it.
+	end := len(rest)
+	for end > start && (rest[end - 1] == ' ' || rest[end - 1] == '\t') do end -= 1
+	for end > start && rest[end - 1] == '#' do end -= 1
+	for end > start && (rest[end - 1] == ' ' || rest[end - 1] == '\t') do end -= 1
+	return u8(i), rest[start:end], true
 }
 
 split_paragraphs :: proc(src: string) -> []string {
