@@ -21,10 +21,11 @@ Laid_Block :: struct {
 
 font_for :: proc(style: Span_Style, base_name: string) -> rl.Font {
 	switch style {
-	case .Regular: return font.get(base_name, .Regular)
-	case .Bold:    return font.get(base_name, .Bold)
-	case .Italic:  return font.get(base_name, .Italic)
-	case .Code:    return font.get("mono", .Regular)
+	case .Regular:     return font.get(base_name, .Regular)
+	case .Bold:        return font.get(base_name, .Bold)
+	case .Italic:      return font.get(base_name, .Italic)
+	case .Bold_Italic: return font.get(base_name, .Bold_Italic)
+	case .Code:        return font.get("mono", .Regular)
 	}
 	return font.get(base_name, .Regular)
 }

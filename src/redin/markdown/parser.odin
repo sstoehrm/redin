@@ -2,7 +2,7 @@ package markdown
 
 import "core:strings"
 
-Span_Style :: enum u8 { Regular, Bold, Italic, Code }
+Span_Style :: enum u8 { Regular, Bold, Italic, Bold_Italic, Code }
 
 Span :: struct {
 	style: Span_Style,
@@ -110,47 +110,58 @@ process_soft_breaks :: proc(s: string) -> string {
 parse_inline :: proc(src: string) -> []Span {
 	pre := process_soft_breaks(src)
 	out: [dynamic]Span
+	parse_inline_into(&out, pre, .Regular)
+	return out[:]
+}
+
+// Walk `text` emitting spans into `out`, merging each emitted span's style
+// with `outer` per the merge table in the spec. Recurses on emphasis bodies.
+parse_inline_into :: proc(out: ^[dynamic]Span, text: string, outer: Span_Style) {
 	current := strings.builder_make()
+	defer strings.builder_destroy(&current)
 	i := 0
 
-	flush_regular :: proc(out: ^[dynamic]Span, b: ^strings.Builder) {
+	flush_regular :: proc(out: ^[dynamic]Span, b: ^strings.Builder, outer: Span_Style) {
 		if strings.builder_len(b^) > 0 {
 			cloned := strings.clone(strings.to_string(b^))
-			append(out, Span{style = .Regular, text = cloned})
+			append(out, Span{style = outer, text = cloned})
 			strings.builder_reset(b)
 		}
 	}
 
-	for i < len(pre) {
-		c := pre[i]
-		// `**...**` first (greedy).
-		if c == '*' && i + 1 < len(pre) && pre[i+1] == '*' {
-			if close_idx := find_close_double(pre, i + 2, '*'); close_idx >= 0 {
-				flush_regular(&out, &current)
-				append(&out, Span{style = .Bold, text = pre[i+2:close_idx]})
+	for i < len(text) {
+		c := text[i]
+		// `**...**` greedy bold.
+		if c == '*' && i + 1 < len(text) && text[i + 1] == '*' {
+			if close_idx := find_close_double(text, i + 2, '*'); close_idx >= 0 {
+				flush_regular(out, &current, outer)
+				inner := text[i + 2:close_idx]
+				parse_inline_into(out, inner, merge_style(outer, .Bold))
 				i = close_idx + 2
 				continue
 			}
-			// Bold delimiter unmatched — emit both stars as literal text.
 			strings.write_byte(&current, '*')
 			strings.write_byte(&current, '*')
 			i += 2
 			continue
 		}
-		// `*...*` or `_..._` italic.
+		// `*…*` / `_…_` italic.
 		if c == '*' || c == '_' {
-			if close_idx := find_close_single(pre, i + 1, c); close_idx >= 0 {
-				flush_regular(&out, &current)
-				append(&out, Span{style = .Italic, text = pre[i+1:close_idx]})
+			if close_idx := find_close_single(text, i + 1, c); close_idx >= 0 {
+				flush_regular(out, &current, outer)
+				inner := text[i + 1:close_idx]
+				parse_inline_into(out, inner, merge_style(outer, .Italic))
 				i = close_idx + 1
 				continue
 			}
 		}
-		// Backtick code.
+		// Backtick code (leaf).
 		if c == '`' {
-			if close_idx := find_close_single(pre, i + 1, '`'); close_idx >= 0 {
-				flush_regular(&out, &current)
-				append(&out, Span{style = .Code, text = pre[i+1:close_idx]})
+			if close_idx := find_close_single(text, i + 1, '`'); close_idx >= 0 {
+				flush_regular(out, &current, outer)
+				inner := text[i + 1:close_idx]
+				cloned := strings.clone(inner)
+				append(out, Span{style = .Code, text = cloned})
 				i = close_idx + 1
 				continue
 			}
@@ -158,8 +169,23 @@ parse_inline :: proc(src: string) -> []Span {
 		strings.write_byte(&current, c)
 		i += 1
 	}
-	flush_regular(&out, &current)
-	return out[:]
+	flush_regular(out, &current, outer)
+}
+
+// Combine outer + inner per the table in the spec.
+// Code always wins. Bold_Italic absorbs further Bold/Italic.
+merge_style :: proc(outer, inner: Span_Style) -> Span_Style {
+	if inner == .Code do return .Code
+	if outer == .Regular do return inner
+	if inner == .Regular do return outer
+	if outer == inner do return outer
+	if outer == .Bold_Italic do return .Bold_Italic
+	if inner == .Bold_Italic do return .Bold_Italic
+	// Bold ⊕ Italic (in either order) → Bold_Italic.
+	if (outer == .Bold && inner == .Italic) || (outer == .Italic && inner == .Bold) {
+		return .Bold_Italic
+	}
+	return inner
 }
 
 // Find the next occurrence of two consecutive `delim` chars at or after `from`.

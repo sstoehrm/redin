@@ -74,12 +74,16 @@ test_unmatched_delimiter :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_no_nesting_v1 :: proc(t: ^testing.T) {
+test_nesting_bold_outer_italic_inner :: proc(t: ^testing.T) {
+	// With recursive parsing, **outer _inner_** emits two spans:
+	// Bold "outer " and Bold_Italic "inner".
 	blocks := parse("**outer _inner_**", context.temp_allocator)
 	testing.expect_value(t, len(blocks), 1)
-	testing.expect_value(t, len(blocks[0].spans), 1)
+	testing.expect_value(t, len(blocks[0].spans), 2)
 	testing.expect_value(t, blocks[0].spans[0].style, Span_Style.Bold)
-	testing.expect_value(t, blocks[0].spans[0].text, "outer _inner_")
+	testing.expect_value(t, blocks[0].spans[0].text, "outer ")
+	testing.expect_value(t, blocks[0].spans[1].style, Span_Style.Bold_Italic)
+	testing.expect_value(t, blocks[0].spans[1].text, "inner")
 }
 
 @(test)
@@ -162,4 +166,36 @@ test_heading_with_inline_bold :: proc(t: ^testing.T) {
 test_heading_no_space_after_hash :: proc(t: ^testing.T) {
 	blocks := parse("#foo", context.temp_allocator)
 	testing.expect_value(t, blocks[0].kind, Block_Kind.Paragraph)
+}
+
+@(test)
+test_bold_with_inner_italic :: proc(t: ^testing.T) {
+	blocks := parse("**a _b_ c**", context.temp_allocator)
+	testing.expect_value(t, len(blocks[0].spans), 3)
+	testing.expect_value(t, blocks[0].spans[0].style, Span_Style.Bold)
+	testing.expect_value(t, blocks[0].spans[0].text, "a ")
+	testing.expect_value(t, blocks[0].spans[1].style, Span_Style.Bold_Italic)
+	testing.expect_value(t, blocks[0].spans[1].text, "b")
+	testing.expect_value(t, blocks[0].spans[2].style, Span_Style.Bold)
+	testing.expect_value(t, blocks[0].spans[2].text, " c")
+}
+
+@(test)
+test_italic_with_inner_bold :: proc(t: ^testing.T) {
+	blocks := parse("_a **b** c_", context.temp_allocator)
+	testing.expect_value(t, len(blocks[0].spans), 3)
+	testing.expect_value(t, blocks[0].spans[0].style, Span_Style.Italic)
+	testing.expect_value(t, blocks[0].spans[1].style, Span_Style.Bold_Italic)
+	testing.expect_value(t, blocks[0].spans[1].text, "b")
+	testing.expect_value(t, blocks[0].spans[2].style, Span_Style.Italic)
+}
+
+@(test)
+test_bold_with_inner_code :: proc(t: ^testing.T) {
+	blocks := parse("**a `b` c**", context.temp_allocator)
+	testing.expect_value(t, len(blocks[0].spans), 3)
+	testing.expect_value(t, blocks[0].spans[0].style, Span_Style.Bold)
+	testing.expect_value(t, blocks[0].spans[1].style, Span_Style.Code)
+	testing.expect_value(t, blocks[0].spans[1].text, "b")
+	testing.expect_value(t, blocks[0].spans[2].style, Span_Style.Bold)
 }
