@@ -6,6 +6,7 @@ Font_Style :: enum {
 	Regular,
 	Bold,
 	Italic,
+	Bold_Italic,
 }
 
 Font_Key :: struct {
@@ -40,6 +41,12 @@ register :: proc(name: string, style: Font_Style, f: rl.Font) {
 get :: proc(name: string, style: Font_Style) -> rl.Font {
 	if f, ok := fonts[Font_Key{name, style}]; ok {
 		return f
+	}
+	// Bold_Italic falls back to Bold first (closer visual match than Regular).
+	if style == .Bold_Italic {
+		if f, ok := fonts[Font_Key{name, .Bold}]; ok {
+			return f
+		}
 	}
 	if style != .Regular {
 		if f, ok := fonts[Font_Key{name, .Regular}]; ok {

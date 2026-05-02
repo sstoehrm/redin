@@ -17,3 +17,14 @@
   (ensure-artifacts-dir)
   (wait-ms 100)
   (screenshot "test/ui/artifacts/markdown_render.png"))
+
+(deftest md-extended-renders
+  (let [el (find-element {:id :md-extended})]
+    (assert el "md-extended must exist in /frames")
+    (let [r (rect-of el)]
+      (assert r "md-extended must have a :rect")
+      ;; H1 (font-size 40 × line-height 1.5 = 60px) + H2 (32 × 1.5 = 48px)
+      ;; + paragraph (24 × 1.5 = 36px) + paragraph spacing -> >= ~120px.
+      ;; Use a conservative threshold of 80 to allow font-metric variance.
+      (assert (>= (:h r) 80)
+              (str "md-extended rect height should be >= 80, got " (:h r))))))

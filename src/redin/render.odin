@@ -1328,6 +1328,77 @@ draw_button :: proc(rect: rl.Rectangle, n: types.NodeButton, theme: map[string]t
 	}
 }
 
+// Resolve per-block font params for a markdown text node. Headings consult
+// :h1..:h6 aspects; missing aspects use a hardcoded scale table.
+build_markdown_params :: proc(
+	blocks: []markdown.Block,
+	theme: map[string]types.Theme,
+	base_font_size: f32,
+	base_lh: f32,
+	allocator := context.allocator,
+) -> []markdown.Block_Params {
+	context.allocator = allocator
+	heading_scale := [6]f32{2.0, 1.7, 1.4, 1.2, 1.1, 1.0}
+	out := make([]markdown.Block_Params, len(blocks))
+	for blk, idx in blocks {
+		size := base_font_size
+		lh := base_lh
+		if blk.kind == .Heading {
+			level := int(blk.level)
+			if level < 1 do level = 1
+			if level > 6 do level = 6
+			h_key := fmt.tprintf("h%d", level)
+			if h, ok := theme[h_key]; ok {
+				if h.font_size > 0 do size = f32(h.font_size)
+				if h.line_height > 0 do lh = h.line_height
+			} else {
+				size = base_font_size * heading_scale[level - 1]
+			}
+		}
+		out[idx] = markdown.Block_Params{font_size = size, line_height = lh}
+	}
+	return out
+}
+
+// Resolve markdown per-style colors from the host aspect's overrides.
+// Defaults: base_color = the text color the caller already computed;
+// bold/italic/code colors fall back to base_color when not set; code_bg
+// falls back to {60, 60, 70, 255}.
+build_markdown_style :: proc(
+	theme: map[string]types.Theme,
+	host_aspect: string,
+	base_color: rl.Color,
+) -> markdown.Style_Theme {
+	out := markdown.Style_Theme{
+		base_color   = base_color,
+		bold_color   = base_color,
+		italic_color = base_color,
+		code_color   = base_color,
+		code_bg      = rl.Color{60, 60, 70, 255},
+	}
+	host, ok := theme[host_aspect]
+	if !ok do return out
+	// `set` says "the sub-table was provided" but inner fields can still be
+	// absent (e.g. `:bold {}` leaves :color zeroed). For inner field
+	// absence we fall back to the same zero-sentinel convention used
+	// elsewhere in the renderer: zero RGB / RGBA = inherit.
+	if host.bold.set && host.bold.color != {} {
+		out.bold_color = rl.Color{host.bold.color[0], host.bold.color[1], host.bold.color[2], 255}
+	}
+	if host.italic.set && host.italic.color != {} {
+		out.italic_color = rl.Color{host.italic.color[0], host.italic.color[1], host.italic.color[2], 255}
+	}
+	if host.code.set {
+		if host.code.color != {} {
+			out.code_color = rl.Color{host.code.color[0], host.code.color[1], host.code.color[2], 255}
+		}
+		if host.code.bg != {} {
+			out.code_bg = rl.Color{host.code.bg[0], host.code.bg[1], host.code.bg[2], host.code.bg[3]}
+		}
+	}
+	return out
+}
+
 draw_text :: proc(idx: int, rect: rl.Rectangle, n: types.NodeText, theme: map[string]types.Theme) {
 	if len(n.content) == 0 do return
 
@@ -1349,8 +1420,10 @@ draw_text :: proc(idx: int, rect: rl.Rectangle, n: types.NodeText, theme: map[st
 
 	if n.markdown {
 		blocks := markdown.parse(n.content, context.temp_allocator)
-		laid := markdown.layout(blocks, font_name, font_size, lh_ratio, rect.width, context.temp_allocator)
-		markdown.draw(laid, rect, text_color, font_size, font_name, lh_ratio)
+		params := build_markdown_params(blocks, theme, font_size, lh_ratio, context.temp_allocator)
+		style := build_markdown_style(theme, n.aspect, text_color)
+		laid := markdown.layout(blocks, params, font_name, rect.width, context.temp_allocator)
+		markdown.draw(laid, params, rect, style, font_name)
 		return
 	}
 

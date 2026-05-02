@@ -183,7 +183,7 @@ The flattening is a single pass when the frame enters the pipeline. No fragment 
 | `click`    | event vector            | button (dispatched on click) |
 | `change`   | event vector            | input (dispatched on text change) |
 | `key`      | event vector            | input (dispatched on key press) |
-| `markdown` | boolean                 | text (default `false`; when `true`, content is parsed as inline markdown — v1 supports `**bold**`, `_italic_` / `*italic*`, `` `inline code` ``, paragraph breaks via blank line, soft line breaks via two-space EOL; headings, lists, links, images, tables, and code blocks are not supported in v1) |
+| `markdown` | boolean                 | text (default `false`; when `true`, content is parsed as inline markdown — supports `**bold**`, `_italic_` / `*italic*`, `` `inline code` ``, nested emphasis like `**bold _italic_**`, headings (`#`–`######`), paragraph breaks via blank line, and soft line breaks via two-space EOL. Per-aspect `:bold` / `:italic` / `:code` sub-tables and `:h1`–`:h6` aspects control rendering — see [theme reference](reference/theme.md). Lists, links, images, tables, and triple-backtick code blocks are not yet supported) |
 | `mode`     | `"mouse"` `"fixed"`     | popout (positioning mode) |
 | `x`        | number                  | popout (fixed position x) |
 | `y`        | number                  | popout (fixed position y) |
@@ -670,6 +670,6 @@ The framework dispatches `:event/agent-edit {id "reply" content "**Answer:** 4"}
 the Fennel handler stores it in `db.agent.reply`, and the next render
 shows it in the `:reply` text node. Set `:markdown true` on the text node
 to have the content rendered as inline markdown (see `:markdown` in the
-attribute table above; v1 supported syntax: bold, italic, inline code,
-paragraphs, soft breaks). Extended syntax (headings, lists, links, images,
-tables, code blocks) is tracked in issue #100.
+attribute table above; supported syntax: bold, italic, nested emphasis,
+inline code, headings (`#`–`######`), paragraphs, soft breaks). Lists,
+links, images, tables, and triple-backtick code blocks are not yet supported.

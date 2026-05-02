@@ -7,6 +7,17 @@ Shadow :: struct {
 	color: [4]u8,
 }
 
+// Per-style override on a Theme entry. Three independent absence-sentinels:
+//   `set`        false → the sub-table itself was not provided.
+//   `color`      (0,0,0) inside a present sub-table → :color field absent.
+//   `bg`         (0,0,0,0) → :bg field absent (only :code consumes :bg).
+// The renderer treats any absent field as "inherit from the host aspect."
+Style_Override :: struct {
+	color: [3]u8,
+	bg:    [4]u8,
+	set:   bool,
+}
+
 Text_Align :: enum u8 {
 	Auto   = 0, // single-line → Center, multi-line → Top
 	Top    = 1,
@@ -29,4 +40,7 @@ Theme :: struct {
 	opacity:      f32,
 	shadow:       Shadow,
 	selection:    [4]u8,   // RGBA; {0,0,0,0} = unset, use render default
+	bold:         Style_Override,
+	italic:       Style_Override,
+	code:         Style_Override,
 }

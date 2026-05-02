@@ -1504,6 +1504,9 @@ lua_to_theme :: proc(L: ^Lua_State, index: i32) -> map[string]types.Theme {
 			t.opacity = lua_get_number_field(L, props_idx, "opacity")
 			t.shadow = lua_get_shadow_field(L, props_idx, "shadow")
 			t.selection = lua_get_rgba_field(L, props_idx, "selection")
+			t.bold   = lua_get_style_override(L, props_idx, "bold")
+			t.italic = lua_get_style_override(L, props_idx, "italic")
+			t.code   = lua_get_style_override(L, props_idx, "code")
 
 			lua_getfield(L, props_idx, "weight")
 			if lua_isnumber(L, -1) {
@@ -1599,6 +1602,18 @@ lua_get_shadow_field :: proc(L: ^Lua_State, index: i32, field: cstring) -> types
 	}
 	lua_pop(L, 1)
 	return s
+}
+
+lua_get_style_override :: proc(L: ^Lua_State, index: i32, field: cstring) -> types.Style_Override {
+	lua_getfield(L, index, field)
+	defer lua_pop(L, 1)
+	if !lua_istable(L, -1) do return {}
+	abs := lua_gettop(L)
+	out: types.Style_Override
+	out.set = true
+	out.color = lua_get_rgb_field(L, abs, "color")
+	out.bg = lua_get_rgba_field(L, abs, "bg")
+	return out
 }
 
 lua_get_padding_field :: proc(L: ^Lua_State, index: i32, field: cstring) -> [4]u8 {
