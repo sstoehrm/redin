@@ -217,6 +217,17 @@ run :: proc(cfg: Config) {
 		bridge.poll_timers(&b)
 		profile.end(s_br1)
 
+		// render_tick may have re-flattened the view (clear_frame freed the
+		// old node strings). Listener slices captured `tags` pointers into
+		// those strings, so reusing them across the input phases below would
+		// dereference freed memory. Re-extract before any input phase reads
+		// listeners.
+		if b.frame_changed {
+			delete(listeners)
+			bridge.validate_drag_handles(b.nodes[:], b.children_list[:])
+			listeners = input.extract_listeners(b.paths, b.nodes, b.children_list, b.theme)
+		}
+
 		// --- Input (2/4): listener / focus / drag computation ---
 		s_input2a := profile.begin(.Input)
 		user_events := input.get_user_events(input_events, listeners, node_rects[:])
