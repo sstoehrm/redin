@@ -1,13 +1,10 @@
 package markdown
 
 import "core:strings"
+import text_pkg "../text"
 
-Span_Style :: enum u8 { Regular, Bold, Italic, Code }
-
-Span :: struct {
-	style: Span_Style,
-	text:  string,
-}
+Span :: text_pkg.Span
+Span_Style :: text_pkg.Span_Style
 
 Block_Kind :: enum u8 { Paragraph }
 
