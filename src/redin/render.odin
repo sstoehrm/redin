@@ -1378,17 +1378,20 @@ build_markdown_style :: proc(
 	}
 	host, ok := theme[host_aspect]
 	if !ok do return out
-	if host.bold.set && (host.bold.color != {}) {
+	// `set` says "the sub-table was provided" but inner fields can still be
+	// absent (e.g. `:bold {}` leaves :color zeroed). For inner field
+	// absence we fall back to the same zero-sentinel convention used
+	// elsewhere in the renderer: zero RGB / RGBA = inherit.
+	if host.bold.set && host.bold.color != {} {
 		out.bold_color = rl.Color{host.bold.color[0], host.bold.color[1], host.bold.color[2], 255}
 	}
-	if host.italic.set && (host.italic.color != {}) {
+	if host.italic.set && host.italic.color != {} {
 		out.italic_color = rl.Color{host.italic.color[0], host.italic.color[1], host.italic.color[2], 255}
 	}
 	if host.code.set {
 		if host.code.color != {} {
 			out.code_color = rl.Color{host.code.color[0], host.code.color[1], host.code.color[2], 255}
 		}
-		// {0,0,0,0} → inherit; any non-zero byte → explicit bg.
 		if host.code.bg != {} {
 			out.code_bg = rl.Color{host.code.bg[0], host.code.bg[1], host.code.bg[2], host.code.bg[3]}
 		}

@@ -7,10 +7,15 @@ Shadow :: struct {
 	color: [4]u8,
 }
 
+// Per-style override on a Theme entry. Three independent absence-sentinels:
+//   `set`        false → the sub-table itself was not provided.
+//   `color`      (0,0,0) inside a present sub-table → :color field absent.
+//   `bg`         (0,0,0,0) → :bg field absent (only :code consumes :bg).
+// The renderer treats any absent field as "inherit from the host aspect."
 Style_Override :: struct {
-	color: [3]u8,    // (0,0,0) → inherit unless `set` is true
-	bg:    [4]u8,    // (0,0,0,0) → inherit; meaningful only for code
-	set:   bool,     // explicit "this sub-table was provided"
+	color: [3]u8,
+	bg:    [4]u8,
+	set:   bool,
 }
 
 Text_Align :: enum u8 {
