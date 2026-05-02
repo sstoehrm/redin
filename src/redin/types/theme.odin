@@ -7,6 +7,12 @@ Shadow :: struct {
 	color: [4]u8,
 }
 
+Style_Override :: struct {
+	color: [3]u8,    // (0,0,0) → inherit unless `set` is true
+	bg:    [4]u8,    // (0,0,0,0) → inherit; meaningful only for code
+	set:   bool,     // explicit "this sub-table was provided"
+}
+
 Text_Align :: enum u8 {
 	Auto   = 0, // single-line → Center, multi-line → Top
 	Top    = 1,
@@ -29,4 +35,7 @@ Theme :: struct {
 	opacity:      f32,
 	shadow:       Shadow,
 	selection:    [4]u8,   // RGBA; {0,0,0,0} = unset, use render default
+	bold:         Style_Override,
+	italic:       Style_Override,
+	code:         Style_Override,
 }
