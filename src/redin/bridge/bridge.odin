@@ -1368,6 +1368,9 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 			if sel, exists := lua_get_bool_field_opt(L, attrs_idx, "selectable"); exists {
 				t.not_selectable = !sel
 			}
+			if md, exists := lua_get_bool_field_opt(L, attrs_idx, "markdown"); exists {
+				t.markdown = md
+			}
 		}
 		if len(text_content) > 0 do t.content = text_content
 		return t

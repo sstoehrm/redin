@@ -7,6 +7,7 @@ import "core:math"
 import "core:strings"
 import "font"
 import "input"
+import "markdown"
 import text_pkg "text"
 import "types"
 import rl "vendor:raylib"
@@ -1344,6 +1345,13 @@ draw_text :: proc(idx: int, rect: rl.Rectangle, n: types.NodeText, theme: map[st
 			font_weight = t.weight
 			lh_ratio = t.line_height
 		}
+	}
+
+	if n.markdown {
+		blocks := markdown.parse(n.content, context.temp_allocator)
+		laid := markdown.layout(blocks, font_name, font_size, lh_ratio, rect.width, context.temp_allocator)
+		markdown.draw(laid, rect, text_color, font_size, font_name, lh_ratio)
+		return
 	}
 
 	f := font.get(font_name, font.style_from_weight(font.Font_Weight(font_weight)))

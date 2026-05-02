@@ -189,6 +189,7 @@ NodeText :: struct {
 	},
 	overflow:       string,
 	not_selectable: bool,   // zero-value = selectable (default-on)
+	markdown:       bool,
 }
 
 PopoutMode :: enum {
