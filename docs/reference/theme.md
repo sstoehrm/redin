@@ -208,3 +208,36 @@ Validation is implemented in `src/runtime/theme.fnl`. Checks include:
 | Numeric types | `font-size`, `radius`, `border-width`, `line-height`, `scrollbar-width`, `scrollbar-radius` must be numbers |
 | Shadow format | `shadow` must be `[x y blur [r g b a]]` |
 | Padding format | `padding` must be a number, `[v h]`, or `[t r b l]` |
+
+---
+
+## Markdown style overrides
+
+Aspects consumed by `:text {:markdown true}` accept three optional sub-tables that override per-style rendering:
+
+```fennel
+{:body {:font-size 14 :color [216 222 233]
+        :bold   {:color [255 255 255]}
+        :italic {:color [180 180 220]}
+        :code   {:bg [40 40 50] :color [220 220 220]}}}
+```
+
+- `:bold` and `:italic` only honor `:color`.
+- `:code` honors `:color` and `:bg`. The default code background (when unset) is `[60 60 70 255]`.
+- `Bold_Italic` spans (e.g. `**bold _italic_**`) use the `:bold` override; a separate sub-table can be added later if needed.
+
+Sub-tables that aren't provided fall through to the host aspect's `:color`. An unset `:code :bg` keeps the hardcoded fallback.
+
+---
+
+## Heading aspects
+
+Headings rendered from markdown (`# h1`–`###### h6`) look up `:h1`–`:h6` on the theme map. Each entry honors `:font-size` and `:line-height`; non-zero fields override the host aspect, zero fields inherit. Color and weight inherit from the host aspect — `:h<N>` `:color` / `:weight` are not read in v1. When `:h<N>` is absent entirely, the heading font size is the host aspect's `:font-size` × a level scale of `[2.0, 1.7, 1.4, 1.2, 1.1, 1.0]`.
+
+```fennel
+{:body {:font-size 14 :color [216 222 233]}
+ :h1   {:font-size 28}
+ :h2   {:font-size 22}}
+```
+
+In this example, `h1` overrides size; `h2` overrides size; `h3`–`h6` use the scale fallback (`14 × 1.4 = 19.6`, etc.). All four levels use `:body`'s color.
