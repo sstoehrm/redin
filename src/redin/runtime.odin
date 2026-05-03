@@ -153,8 +153,6 @@ run :: proc(cfg: Config) {
 
 	profile.init(cfg.profile)
 
-	canvas.set_dev_mode(cfg.dev)
-
 	b: bridge.Bridge
 	bridge.init(&b, cfg.dev)
 	defer bridge.destroy(&b)
