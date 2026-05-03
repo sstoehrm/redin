@@ -1,4 +1,9 @@
-# redin
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/redin-logo-dark.svg">
+    <img src="docs/assets/redin-logo.svg" width="520" alt="redin: Native desktop UI with the magic intact.">
+  </picture>
+</p>
 
 A re-frame inspired desktop UI framework built on Odin, Raylib, and LuaJIT.
 

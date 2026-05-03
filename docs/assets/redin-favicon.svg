@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">redin favicon</title>
+  <desc id="desc">Native window icon with a red rune mark.</desc>
+  <rect x="10" y="10" width="108" height="108" rx="23" fill="#1d2328"/>
+  <rect x="18" y="18" width="92" height="92" rx="14" fill="#fffdf8"/>
+  <path d="M18 43H110" stroke="#1d2328" stroke-width="6"/>
+  <circle cx="31" cy="31" r="4" fill="#b62827"/>
+  <circle cx="43" cy="31" r="4" fill="#75797c"/>
+  <circle cx="55" cy="31" r="4" fill="#75797c"/>
+  <path d="M56 94V53L91 76L75 88L97 109L78 104L64 87L72 80L64 75V95Z" fill="#b62827"/>
+  <path d="M63 62L82 76L72 84" fill="none" stroke="#d36a66" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" opacity=".42"/>
+</svg>
