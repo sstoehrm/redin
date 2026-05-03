@@ -176,4 +176,22 @@
   (let [result (theme.validate {:card {:shadow [0 2 4 "black"]}})]
     (assert (not result.ok) "shadow with string color fails")))
 
+(fn t.test-default-theme-fallback []
+  ;; Defaults visible when user-theme is empty.
+  (theme.reset)
+  (theme.set-defaults {:foo {:color [1 2 3]}})
+  (let [resolved (theme.resolve :foo [])]
+    (assert (= 1 (. resolved :color 1))))
+
+  ;; User-theme overrides default at the aspect level.
+  (theme.set-theme {:foo {:color [9 9 9]}})
+  (let [resolved (theme.resolve :foo [])]
+    (assert (= 9 (. resolved :color 1))))
+
+  ;; Aspect missing in user-theme falls through to defaults.
+  (theme.set-theme {})
+  (theme.set-defaults {:bar {:color [5 5 5]}})
+  (let [resolved (theme.resolve :bar [])]
+    (assert (= 5 (. resolved :color 1)))))
+
 t

@@ -3,6 +3,7 @@
 (local M {})
 
 (var theme-table {})
+(var default-theme-table {})
 
 (fn M.set-theme [t]
   (set theme-table t)
@@ -11,8 +12,12 @@
     (when (and redin-tbl (rawget redin-tbl :set_theme))
       ((rawget redin-tbl :set_theme) t))))
 
+(fn M.set-defaults [t]
+  (set default-theme-table t))
+
 (fn M.reset []
-  (set theme-table {}))
+  (set theme-table {})
+  (set default-theme-table {}))
 
 (fn shallow-merge [base overlay]
   (let [result {}]
@@ -27,7 +32,9 @@
     (do
       (var props {})
       (each [_ key (ipairs aspect)]
-        (let [base (or (. theme-table key) {})]
+        (let [base (or (. theme-table key)
+                       (. default-theme-table key)
+                       {})]
           (set props (shallow-merge props base))))
       (each [_ key (ipairs aspect)]
         (each [_ state (ipairs states)]
@@ -37,7 +44,9 @@
               (set props (shallow-merge props variant))))))
       props)
     (do
-      (var props (or (. theme-table aspect) {}))
+      (var props (or (. theme-table aspect)
+                     (. default-theme-table aspect)
+                     {}))
       (each [_ state (ipairs states)]
         (let [variant-key (.. aspect "#" state)
               variant (. theme-table variant-key)]
