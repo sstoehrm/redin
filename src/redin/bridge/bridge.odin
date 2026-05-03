@@ -48,16 +48,14 @@ Bridge :: struct {
 	hot_reload:      Hot_Reload,
 	dev_server:      Dev_Server,
 	frame_changed:   bool,
-	dev_mode:        bool,
 }
 
 g_bridge: ^Bridge
 g_context: runtime.Context
 
-init :: proc(b: ^Bridge, dev_mode: bool) {
+init :: proc(b: ^Bridge) {
 	g_bridge = b
 	g_context = context
-	b.dev_mode = dev_mode
 	http_client_init(&b.http_client)
 	shell_client_init(&b.shell_client)
 	b.L = luaL_newstate()
@@ -100,27 +98,19 @@ init :: proc(b: ^Bridge, dev_mode: bool) {
 	load_fennel(b.L)
 	load_runtime(b.L)
 
-	needs_listener := dev_mode
-	when REDIN_AGENT {
-		needs_listener = true
-	}
-	if needs_listener {
+	when REDIN_DEV || REDIN_AGENT {
 		devserver_init(&b.dev_server, b)
 	}
-	if dev_mode {
+	when REDIN_DEV {
 		hotreload_init(&b.hot_reload)
 	}
 }
 
 destroy :: proc(b: ^Bridge) {
-	needs_listener := b.dev_mode
-	when REDIN_AGENT {
-		needs_listener = true
-	}
-	if needs_listener {
+	when REDIN_DEV || REDIN_AGENT {
 		devserver_destroy(&b.dev_server)
 	}
-	if b.dev_mode {
+	when REDIN_DEV {
 		hotreload_destroy(&b.hot_reload)
 	}
 	http_client_destroy(&b.http_client)
@@ -135,11 +125,7 @@ destroy :: proc(b: ^Bridge) {
 }
 
 poll_devserver :: proc(b: ^Bridge, events: ^[dynamic]types.InputEvent, node_rects: []rl.Rectangle) {
-	needs_poll := b.dev_mode
-	when REDIN_AGENT {
-		needs_poll = true
-	}
-	if !needs_poll do return
+	when !(REDIN_DEV || REDIN_AGENT) do return
 	b.dev_server.current_rects = node_rects
 	devserver_poll(&b.dev_server)
 	devserver_drain_events(&b.dev_server, events)
@@ -147,15 +133,14 @@ poll_devserver :: proc(b: ^Bridge, events: ^[dynamic]types.InputEvent, node_rect
 }
 
 is_shutdown_requested :: proc(b: ^Bridge) -> bool {
-	needs_listener := b.dev_mode
-	when REDIN_AGENT {
-		needs_listener = true
+	when REDIN_DEV || REDIN_AGENT {
+		return b.dev_server.shutdown_requested
 	}
-	return needs_listener && b.dev_server.shutdown_requested
+	return false
 }
 
 check_hotreload :: proc(b: ^Bridge) {
-	if !b.dev_mode do return
+	when !REDIN_DEV do return
 	if hotreload_check(&b.hot_reload) {
 		hotreload_execute(b)
 		b.frame_changed = true

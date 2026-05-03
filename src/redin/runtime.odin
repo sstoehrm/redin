@@ -154,7 +154,7 @@ run :: proc(cfg: Config) {
 	profile.init()
 
 	b: bridge.Bridge
-	bridge.init(&b, cfg.dev)
+	bridge.init(&b)
 	defer bridge.destroy(&b)
 	defer canvas.destroy()
 
