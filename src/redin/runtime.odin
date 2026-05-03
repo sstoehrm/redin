@@ -14,9 +14,7 @@ import rl "vendor:raylib"
 // ---------------------------------------------------------------------------
 
 Config :: struct {
-	app:     string,
-	dev:     bool,
-	profile: bool,
+	app: string,
 }
 
 // Hook callback types. Hooks are typed as default-convention `proc()` so
@@ -130,7 +128,8 @@ request_shutdown :: proc() {
 // ---------------------------------------------------------------------------
 
 // Block until the window closes or `request_shutdown` is called. Sets up
-// the window, bridge, and dev server (if cfg.dev), then runs the loop.
+// the window, bridge, and dev server (when built with -define:REDIN_DEV=true),
+// then runs the loop.
 //
 // Per-frame call order:
 //   poll_input -> on_input(filter) -> bridge tick -> on_frame -> render
