@@ -1329,7 +1329,8 @@ draw_button :: proc(rect: rl.Rectangle, n: types.NodeButton, theme: map[string]t
 }
 
 draw_text :: proc(idx: int, rect: rl.Rectangle, n: types.NodeText, theme: map[string]types.Theme) {
-	if len(n.content) == 0 do return
+	// Skip nodes with neither plain content nor inline spans.
+	if len(n.content) == 0 && len(n.inline_spans) == 0 do return
 
 	font_size: f32 = 18
 	text_color := rl.BLACK

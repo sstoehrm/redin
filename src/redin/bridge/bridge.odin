@@ -295,6 +295,10 @@ clear_node_strings :: proc(n: types.Node) {
 		if len(v.content) > 0 do delete(v.content)
 		if len(v.aspect) > 0 do delete(v.aspect)
 		if len(v.overflow) > 0 do delete(v.overflow)
+		if len(v.inline_spans) > 0 {
+			for s in v.inline_spans do if len(s.text) > 0 do delete(s.text)
+			delete(v.inline_spans)
+		}
 	case types.NodeImage:
 		if len(v.aspect) > 0 do delete(v.aspect)
 	case types.NodePopout:
@@ -1128,7 +1132,32 @@ flatten_subtree :: proc(b: ^Bridge, tree: markdown.LoweredTree, parent_flat_idx:
 	// Pass 1: append nodes. DFS order matches lower()'s emission order.
 	for node, i in tree.nodes {
 		local_to_flat[i] = i32(len(b.nodes))
-		append(&b.nodes, node)
+		// Deep-copy temp/literal strings into permanent storage so they
+		// survive past the current frame's temp-allocator reset and so
+		// clear_node_strings's free calls always see heap-owned strings.
+		owned_node := node
+		if t, ok := &owned_node.(types.NodeText); ok {
+			if len(t.aspect)   > 0 do t.aspect   = strings.clone(t.aspect)
+			if len(t.content)  > 0 do t.content  = strings.clone(t.content)
+			if len(t.overflow) > 0 do t.overflow = strings.clone(t.overflow)
+			if len(t.inline_spans) > 0 {
+				perm := make([]text_pkg.Span, len(t.inline_spans))
+				for s, j in t.inline_spans {
+					perm[j] = text_pkg.Span{
+						style = s.style,
+						text  = strings.clone(s.text),
+					}
+				}
+				t.inline_spans = perm
+			}
+		} else if t, ok := &owned_node.(types.NodeVbox); ok {
+			if len(t.aspect)   > 0 do t.aspect   = strings.clone(t.aspect)
+			if len(t.overflow) > 0 do t.overflow = strings.clone(t.overflow)
+		} else if t, ok := &owned_node.(types.NodeHbox); ok {
+			if len(t.aspect)   > 0 do t.aspect   = strings.clone(t.aspect)
+			if len(t.overflow) > 0 do t.overflow = strings.clone(t.overflow)
+		}
+		append(&b.nodes, owned_node)
 		append(&b.node_animations, nil)
 		path_copy := make([]u8, len(cur^))
 		copy(path_copy, cur^[:])

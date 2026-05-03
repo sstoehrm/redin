@@ -5,20 +5,6 @@
 (var theme-table {})
 (var default-theme-table {})
 
-(fn M.set-theme [t]
-  (set theme-table t)
-  ;; Also push to host
-  (let [redin-tbl (rawget _G :redin)]
-    (when (and redin-tbl (rawget redin-tbl :set_theme))
-      ((rawget redin-tbl :set_theme) t))))
-
-(fn M.set-defaults [t]
-  (set default-theme-table t))
-
-(fn M.reset []
-  (set theme-table {})
-  (set default-theme-table {}))
-
 (fn shallow-merge [base overlay]
   (let [result {}]
     (each [k v (pairs base)]
@@ -26,6 +12,21 @@
     (each [k v (pairs overlay)]
       (tset result k v))
     result))
+
+(fn M.set-theme [t]
+  (set theme-table t)
+  ;; Push merged table (defaults + user) to host so Odin-side theme
+  ;; lookup includes default aspects (md/*, etc.) that are never in t.
+  (let [redin-tbl (rawget _G :redin)]
+    (when (and redin-tbl (rawget redin-tbl :set_theme))
+      ((rawget redin-tbl :set_theme) (shallow-merge default-theme-table t)))))
+
+(fn M.set-defaults [t]
+  (set default-theme-table t))
+
+(fn M.reset []
+  (set theme-table {})
+  (set default-theme-table {}))
 
 (fn M.resolve [aspect states]
   (if (= (type aspect) "table")
