@@ -12,7 +12,7 @@ GRAPH_H   :: 30
 
 // Called from main.odin between draw_tree and canvas.end_frame. Toggles on F3.
 draw_overlay :: proc() {
-    if !enabled_flag do return
+    when !REDIN_PROFILE do return
 
     if rl.IsKeyPressed(.F3) {
         visible_flag = !visible_flag

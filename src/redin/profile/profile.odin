@@ -32,7 +32,6 @@ Scope :: struct {
     live:  bool, // zero-valued Scopes from the no-op path are skipped
 }
 
-@(private) enabled_flag: bool
 @(private) visible_flag: bool
 @(private) ring:         Ring
 @(private) snapshot_mu:  sync.Mutex
@@ -43,27 +42,31 @@ Scope :: struct {
 @(private) frame_start:    time.Tick
 @(private) phase_scratch:  [Phase]i64
 
-is_enabled :: proc() -> bool { return enabled_flag }
+is_enabled :: proc() -> bool {
+    when REDIN_PROFILE { return true }
+    return false
+}
 
 overlay_visible :: proc() -> bool { return visible_flag }
 set_overlay_visible :: proc(v: bool) { visible_flag = v }
 
-init :: proc(enabled: bool) {
-    enabled_flag = enabled
-    visible_flag = enabled
-    ring = {}
-    frame_start = {}
-    phase_scratch = {}
+init :: proc() {
+    when REDIN_PROFILE {
+        visible_flag = true
+        ring = {}
+        frame_start = {}
+        phase_scratch = {}
+    }
 }
 
 begin_frame :: proc() {
-    if !enabled_flag do return
+    when !REDIN_PROFILE do return
     frame_start = time.tick_now()
     phase_scratch = {}
 }
 
 end_frame :: proc() {
-    if !enabled_flag do return
+    when !REDIN_PROFILE do return
     total := time.tick_diff(frame_start, time.tick_now())
 
     sync.lock(&snapshot_mu)
@@ -81,17 +84,19 @@ end_frame :: proc() {
 }
 
 begin :: proc(p: Phase) -> Scope {
-    if !enabled_flag do return Scope{}
+    when !REDIN_PROFILE do return Scope{}
     return Scope{phase = p, start = time.tick_now(), live = true}
 }
 
 end :: proc(s: Scope) {
+    when !REDIN_PROFILE do return
     if !s.live do return
     phase_scratch[s.phase] += i64(time.tick_diff(s.start, time.tick_now()))
 }
 
 // Append current ring contents (oldest→newest) to `out`.
 snapshot_into :: proc(out: ^[dynamic]FrameSample) {
+    when !REDIN_PROFILE do return
     sync.lock(&snapshot_mu)
     defer sync.unlock(&snapshot_mu)
 

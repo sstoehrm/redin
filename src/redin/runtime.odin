@@ -151,7 +151,7 @@ run :: proc(cfg: Config) {
 	font.init()
 	defer font.destroy()
 
-	profile.init(cfg.profile)
+	profile.init()
 
 	b: bridge.Bridge
 	bridge.init(&b, cfg.dev)
