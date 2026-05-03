@@ -236,13 +236,15 @@ Then run your Lua app:
 ./build/redin todo.lua
 ```
 
-Dev mode starts the HTTP dev server (picks port 8800 by default; walks upward if busy):
+To enable the dev server, build with `-define:REDIN_DEV=true`:
 
 ```sh
-./build/redin --dev todo.lua
+odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit \
+    -define:REDIN_DEV=true -out:build/redin-dev
+./build/redin-dev todo.lua
 ```
 
-The bound port is written to `./.redin-port` and a per-run bearer token to `./.redin-token`:
+The HTTP dev server picks port 8800 by default (walks upward if busy) and writes the bound port to `./.redin-port` plus a per-run bearer token to `./.redin-token`:
 
 ```sh
 PORT=$(cat .redin-port)

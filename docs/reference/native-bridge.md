@@ -24,7 +24,7 @@ my_signal :: proc(L: ^bridge.Lua_State) -> i32 {
 
 main :: proc() {
     bridge.register_cfunc("my_signal", my_signal)
-    redin.run({app = "main.fnl", dev = true})
+    redin.run({app = "main.fnl"})
 }
 ```
 
@@ -32,7 +32,7 @@ From Fennel: `(redin.my_signal 42)`. From Lua: `redin.my_signal(42)`.
 
 **Timing:** safe before *or* after `bridge.init`. Registrations made before `redin.run` (which is when `bridge.init` runs) are buffered and flushed inside init, after the `redin` Lua global is created.
 
-**Duplicate names:** silent replace. In dev mode (`Config.dev == true`), logs a stderr warning before replacing — same policy as `canvas.register`.
+**Duplicate names:** silent replace. When the binary was built with `-define:REDIN_DEV=true`, logs a stderr warning before replacing — same policy as `canvas.register`.
 
 ### `bridge.register_cfunc_raw(name: cstring, fn: Lua_CFunction)`
 

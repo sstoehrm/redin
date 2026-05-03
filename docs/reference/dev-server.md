@@ -6,7 +6,7 @@ HTTP server for inspecting and driving redin apps from external tools.
 
 ## Overview
 
-Starts when the app is launched with `--dev`. Listens on `localhost:8800` (walks upward if busy).
+Starts when the binary was built with `-define:REDIN_DEV=true` (or `-define:REDIN_AGENT=true`). Listens on `localhost:8800` (walks upward if busy).
 
 Read endpoints reflect the last state pushed to the host. Write endpoints queue events into the main input channel as if they came from real user input.
 
@@ -32,7 +32,7 @@ AUTH="Authorization: Bearer $TOKEN"
 
 ### Runtime caveats
 
-**`--dev` trusts its filesystem.** The hot-reload watcher re-requires `src/runtime/*.fnl` whenever their mtimes advance. Anyone who can write to `src/runtime` gets code execution in the running process on the next tick. Don't run `--dev` from a world-writable directory, and don't leave `--dev` enabled in production.
+**When built with `-define:REDIN_DEV=true`, the framework trusts its filesystem.** The hot-reload watcher re-requires `src/runtime/*.fnl` whenever their mtimes advance. Anyone who can write to `src/runtime` gets code execution in the running process on the next tick. Don't run a dev build from a world-writable directory, and don't ship dev builds in production.
 
 **The bearer token is a capability.** Any holder can dispatch events, which means any app-registered `:shell` or `:http` effect is one authenticated POST away from arbitrary shell execution or network access in the user's context. The token is 0600 and per-run, so this only matters if the token leaks — but plan accordingly when wiring `:shell` handlers.
 
@@ -74,7 +74,7 @@ Response: full theme as JSON object (serialized from host-side `Theme` structs).
 
 ### `GET /profile` -- frame timing ring buffer
 
-Returns frame-timing samples from the ring buffer. Requires `--dev` (for the server) and `--profile` (to enable collection). When the host is started without `--profile`, the route returns `404 "profile not enabled"`.
+Returns frame-timing samples from the ring buffer. Requires the binary to be built with `-define:REDIN_DEV=true` (for the server) and `-define:REDIN_PROFILE=true` (to enable collection). When the binary was built without `-define:REDIN_PROFILE=true`, the route returns `404 "profile not enabled"`.
 
 **Example response:**
 
@@ -99,7 +99,7 @@ Returns frame-timing samples from the ring buffer. Requires `--dev` (for the ser
 
 The sum of `phase_us` may be less than `total_us` because glue code between phases (event bookkeeping, temp_allocator reset, hotreload check) and the Raylib vsync wait inside `EndDrawing` are not attributed to any phase.
 
-**CLI flag:** `--profile` activates collection and the on-screen overlay (top-right corner). Press `F3` at runtime to hide/show the overlay without restarting. The overlay is independent of `--dev` -- you can run `--profile` alone for local eyeballing or `--profile --dev` to expose the endpoint.
+**Build flag:** `-define:REDIN_PROFILE=true` activates collection and the on-screen overlay (top-right corner). Press `F3` at runtime to hide/show the overlay without restarting. The overlay is independent of `-define:REDIN_DEV=true` -- you can build with `-define:REDIN_PROFILE=true` alone for local eyeballing or combine both flags to expose the endpoint.
 
 ### `GET /screenshot` -- PNG capture
 
@@ -238,8 +238,7 @@ curl -sH "$H" -X POST http://localhost:$PORT/input/release
 
 These endpoints are compiled in only when the binary is built with
 `-define:REDIN_AGENT=true`. Without that flag the routes return 404.
-When the flag is set, the dev-server listener starts even without
-`--dev`.
+When the flag is set, the dev-server listener starts automatically.
 
 ```bash
 odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit \
