@@ -88,7 +88,6 @@ Renders a string of text. The text content is the last positional argument, not 
 | --------- | ---- | ------- | ----- |
 | `wrap` | `"word"` \| `"char"` \| `"none"` | `"word"` | Line-wrapping strategy. |
 | `selectable` | boolean | `true` | Set to `false` to opt the node out of mouse-selection. |
-| `markdown` | boolean | `false` | When `true`, render content as inline markdown (bold, italic, inline code, paragraphs, soft breaks). |
 | `:agent` | `:read \| :edit` | -- | Optional. Pairs with `:id` to expose the node to the agent channel (REDIN_AGENT only). |
 
 Typography (`font-size`, `weight`, `color`) comes from `aspect`.
@@ -117,6 +116,44 @@ Renders a texture loaded from a file path.
 ```fennel
 [:image {:src "assets/logo.png" :width 120 :height 40}]
 ```
+
+---
+
+### `markdown`
+
+Renders a string of inline markdown source as a subtree of regular
+nodes (a `:vbox` wrapper with per-block `:text` / `:hbox` children,
+themed with the `md/*` aspect family).
+
+**Required attrs:** none. The source string is the third element of
+the node table.
+
+**Optional attrs:**
+
+| Attribute | Type | Default | Notes |
+| --------- | ---- | ------- | ----- |
+| `:aspect` | keyword | -- | Themes the wrapper vbox. Ordinary user aspect (no `md/` prefix). |
+| `:id` | keyword | -- | Lands on the wrapper for `(find-element {:id …})`. |
+| `:width`, `:height` | size | -- | Sizing of the wrapper. |
+| `:overflow` | keyword | -- | Forwarded to the wrapper. `:scroll-y` for tall blocks. |
+
+```fennel
+[:markdown {:aspect :card :id :reply :width :full :overflow :scroll-y}
+  "# Title
+
+A paragraph with **bold** text.
+
+- first
+- second"]
+```
+
+V1 supports: paragraphs (blank line), soft breaks (two-space EOL),
+inline `**bold**` / `_italic_` / `*italic*` / `` `inline code` ``,
+ATX headings `#`–`######` at column 0, flat unordered (`-`, `*`) and
+ordered (`<digit>+. `) lists at column 0. Nested lists, code blocks,
+links, images, tables, and nested inline emphasis are not supported
+in v1. Defaults for `:md/*` aspects ship with the framework; override
+via `(theme.set-theme {…})`.
 
 ---
 
