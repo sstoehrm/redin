@@ -11,7 +11,7 @@ Use this skill when building redin apps (Fennel or Lua) or extending the framewo
 
 ```
 src/cmd/redin/      Thin CLI entry (package main)
-  main.odin         Arg parsing, --track-mem setup, calls redin.run
+  main.odin         Arg parsing (app file only), tracker setup gated on REDIN_TRACK_MEM, calls redin.run
 src/redin/          Importable framework (package redin)
   runtime.odin      Public API: set_window/set_size/set_title, on_init/
                     on_input/on_frame/on_shutdown hooks, run, request_shutdown
@@ -19,7 +19,7 @@ src/redin/          Importable framework (package redin)
   bridge/           Lua/Fennel bridge
     bridge.odin     Host callbacks, Lua<->Odin conversion, canvas draw execution
     lua_api.odin    LuaJIT FFI bindings
-    devserver.odin  HTTP dev server (--dev mode)
+    devserver.odin  HTTP dev server (gated on REDIN_DEV / REDIN_AGENT)
     hotreload.odin  File watcher for hot reload
     loader.odin     App file loading (.fnl via fennel.dofile, .lua via luaL_dofile)
   canvas/           Canvas provider system
@@ -226,7 +226,7 @@ canvas.register("my-provider", my_provider)
      :dispatch-later {:ms 1000 :dispatch [:event/timeout]}}))
 ```
 
-## Dev server (--dev mode, default port 8800)
+## Dev server (built with `-define:REDIN_DEV=true` or `./build-dev.sh`, default port 8800)
 
 Authenticated: every non-OPTIONS request needs `Authorization: Bearer <token>`, where the token is written to `./.redin-token` on startup (0600, deleted on shutdown). The `Host` header must also be `localhost:<port>` or `127.0.0.1:<port>`. Bound port is in `./.redin-port`.
 
@@ -259,7 +259,7 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:$PORT/state
 
 ### Agent channel (`REDIN_AGENT`)
 
-The agent channel is compiled in only when the binary is built with `-define:REDIN_AGENT=true`. Default release builds carry zero agent code. When the flag is set, the dev-server listener starts even without `--dev` and the `/agent/*` endpoints are active. Any node type except `:canvas` accepts an `:agent :read` or `:agent :edit` attribute (combined with `:id`) to make it addressable. Writes dispatch `:event/agent-edit {id "<id>" content <value>}` into the Fennel event queue; the runtime stores the value in `db.agent[id]` and applies overrides at view-render time. App code can also subscribe via `(subscribe [:agent <id>])`.
+The agent channel is compiled in only when the binary is built with `-define:REDIN_AGENT=true`. Default release builds carry zero agent code. When the flag is set, the dev-server listener starts even without `REDIN_DEV` and the `/agent/*` endpoints are active. Any node type except `:canvas` accepts an `:agent :read` or `:agent :edit` attribute (combined with `:id`) to make it addressable. Writes dispatch `:event/agent-edit {id "<id>" content <value>}` into the Fennel event queue; the runtime stores the value in `db.agent[id]` and applies overrides at view-render time. App code can also subscribe via `(subscribe [:agent <id>])`.
 
 ```bash
 odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit \
@@ -275,9 +275,10 @@ luajit test/lua/runner.lua test/lua/test_*.fnl
 
 Pattern: `(local t {}) (fn t.test-name [] (assert ...)) t`
 
-### UI integration tests (requires --dev mode)
+### UI integration tests (requires dev-mode binary)
 ```bash
-./build/redin --dev test/ui/<component>_app.fnl &
+./build-dev.sh
+./build/redin test/ui/<component>_app.fnl &
 bb test/ui/run.bb test/ui/test_<component>.bb
 
 # Or run the whole suite:
@@ -411,13 +412,8 @@ main :: proc() {
     redin.on_frame(per_frame_tick)
 
     cfg: redin.Config
-    cfg.app = "main.fnl"
     for arg in os.args[1:] {
-        switch arg {
-        case "--dev":     cfg.dev = true
-        case "--profile": cfg.profile = true
-        case:             cfg.app = arg
-        }
+        cfg.app = arg
     }
     redin.run(cfg)
 }
@@ -426,10 +422,9 @@ main :: proc() {
 ### Running
 
 ```bash
-./redinw --dev main.fnl          # dev server + hot reload
-./redinw main.fnl                # normal mode
-./redinw --track-mem main.fnl    # memory leak tracking
-./build.sh                        # (--native only) rebuild after editing app.odin
+./build-dev.sh                    # rebuild with REDIN_DEV=true (dev server enabled)
+./build/redin main.fnl            # built with REDIN_DEV → dev server starts
+./build.sh                        # (--native only) rebuild after editing app.odin (release build)
 ```
 
 ## Key conventions
