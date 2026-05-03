@@ -1195,21 +1195,12 @@ Replace with:
         run: |
           rm -rf dist-agent
           mkdir -p dist-agent
-          ./build-dev.sh -define:REDIN_AGENT=true -o:speed -out:dist-agent/redin
+          odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit \
+            -define:REDIN_DEV=true -define:REDIN_PROFILE=true -define:REDIN_TRACK_MEM=true \
+            -define:REDIN_AGENT=true -out:dist-agent/redin -o:speed
 ```
 
-`./build-dev.sh` accepts a trailing `-out:` because `"$@"` is passed AFTER the script's hard-coded `-out:build/redin`, so the second `-out:` overrides. Verify this assumption by reading the script: `-out:build/redin "$@"` means the second `-out:` from `"$@"` overrides. Test locally:
-
-```bash
-./build-dev.sh -out:build/redin-test
-ls build/redin-test
-```
-
-Expected: `build/redin-test` exists. Delete it:
-
-```bash
-rm build/redin-test
-```
+This step bypasses `./build-dev.sh` because Odin rejects duplicate `-out:` flags — the script already hard-codes `-out:build/redin`, so we can't append a different `-out:` via `"$@"`. The agent release build needs a different output path (`dist-agent/redin`), so we expand the flags inline. The flag set matches what `./build-dev.sh` bakes in plus `-define:REDIN_AGENT=true` and the alternate `-out:`.
 
 - [ ] **Step 6: Update the release-notes "What's included" block**
 
