@@ -1,5 +1,10 @@
 package main
 
+// Compile-time flag enabling the tracking allocator. Default is false;
+// set with `odin build ... -define:REDIN_TRACK_MEM=true`. When false,
+// the tracker setup and leak dump compile out to zero bytes.
+REDIN_TRACK_MEM :: #config(REDIN_TRACK_MEM, false)
+
 import "core:fmt"
 import "core:mem"
 import "core:os"

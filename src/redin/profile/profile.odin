@@ -1,5 +1,11 @@
 package profile
 
+// Compile-time flag enabling frame-timing instrumentation, the F3
+// overlay, and the /profile HTTP endpoint. Default is false; set with
+// `odin build ... -define:REDIN_PROFILE=true`. When false, every public
+// proc body in this package compiles out to zero bytes.
+REDIN_PROFILE :: #config(REDIN_PROFILE, false)
+
 import "core:sync"
 import "core:time"
 

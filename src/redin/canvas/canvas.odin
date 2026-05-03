@@ -1,6 +1,11 @@
 // src/redin/canvas/canvas.odin
 package canvas
 
+// Same compile-time flag declared in bridge — Odin's `#config` reads
+// the same -define value regardless of which package declares it, so
+// this stays in lockstep without a cross-package import.
+REDIN_DEV :: #config(REDIN_DEV, false)
+
 import "core:fmt"
 import rl "vendor:raylib"
 

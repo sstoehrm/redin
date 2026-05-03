@@ -6,6 +6,12 @@ package bridge
 // to zero bytes.
 REDIN_AGENT :: #config(REDIN_AGENT, false)
 
+// Compile-time flag enabling the dev server, hot reload, and dev-only
+// canvas warnings. Default is false; set with `odin build ... -define:REDIN_DEV=true`
+// (or use `./build-dev.sh`). When false, the listener thread, file watcher,
+// port/token files, and dev-only HTTP handlers compile out to zero bytes.
+REDIN_DEV :: #config(REDIN_DEV, false)
+
 import "core:fmt"
 import "core:math"
 import "core:os"
