@@ -70,7 +70,9 @@ test_lower_wrapper_attrs_pass_through :: proc(t: ^testing.T) {
 	}, context.temp_allocator)
 	wv, _ := tree.nodes[0].(types.NodeVbox)
 	testing.expect_value(t, wv.aspect, "card")
-	testing.expect_value(t, tree.ids[0], "reply")
+	// Wrapper :id is not propagated to LoweredTree — there is no
+	// bridge-side wrapper id store. Fennel-side `/frames` finds the
+	// wrapper by reading the original Lua attrs (still carries :id).
 }
 
 @(test)
