@@ -9,11 +9,16 @@ Span_Style :: text_pkg.Span_Style
 Block_Kind :: enum u8 {
 	Paragraph,
 	Heading_1, Heading_2, Heading_3, Heading_4, Heading_5, Heading_6,
+	List_Item,
+	List_Group,
 }
 
 Block :: struct {
-	kind:  Block_Kind,
-	spans: []Span,
+	kind:    Block_Kind,
+	spans:   []Span,    // Paragraph / Heading_N / List_Item: inline content
+	items:   []Block,   // List_Group only: child List_Items in source order
+	ordered: bool,      // List_Group only: true for "1." markers, false for "-"/"*"
+	marker:  string,    // List_Item only: the literal marker text ("•" / "1." / etc.)
 }
 
 // Parse markdown source into a list of paragraph blocks. Each block holds
@@ -38,6 +43,41 @@ parse :: proc(src: string, allocator := context.allocator) -> []Block {
 			case 6: kind = .Heading_6
 			}
 			append(&blocks, Block{kind = kind, spans = spans})
+			continue
+		}
+		// List.
+		first_kind, _, _ := detect_list_item(first_line(p))
+		if first_kind != 0 {
+			items: [dynamic]Block
+			ordered := first_kind == 2
+			lines := split_lines(p)
+			for line in lines {
+				k, _, cs := detect_list_item(line)
+				if k == 0 {
+					// v1 strict: stray non-marker line inside a list — skip.
+					continue
+				}
+				marker_str: string
+				if k == 1 {
+					marker_str = "•"
+				} else {
+					// Take the literal numeric marker including the dot.
+					m_end := 0
+					for m_end < len(line) && line[m_end] >= '0' && line[m_end] <= '9' do m_end += 1
+					marker_str = strings.clone(line[:m_end+1])
+				}
+				spans := parse_inline(line[cs:])
+				append(&items, Block{
+					kind   = .List_Item,
+					spans  = spans,
+					marker = marker_str,
+				})
+			}
+			append(&blocks, Block{
+				kind    = .List_Group,
+				items   = items[:],
+				ordered = ordered,
+			})
 			continue
 		}
 		spans := parse_inline(p)
@@ -150,6 +190,47 @@ parse_inline :: proc(src: string) -> []Span {
 		i += 1
 	}
 	flush_regular(&out, &current)
+	return out[:]
+}
+
+// detect_list_item returns (kind, ordered, content_start) where:
+//   kind == 0: not a list item
+//   kind == 1: unordered ("- " or "* ")
+//   kind == 2: ordered ("<digit>+. ")
+// ordered is meaningful when kind != 0. content_start is the byte
+// index after the marker and the required single space.
+detect_list_item :: proc(s: string) -> (kind: int, ordered: bool, content_start: int) {
+	if len(s) == 0 do return 0, false, 0
+	if s[0] == '-' || s[0] == '*' {
+		if len(s) < 2 || s[1] != ' ' do return 0, false, 0
+		return 1, false, 2
+	}
+	// Ordered: one or more digits, then '.', then ' '.
+	i := 0
+	for i < len(s) && s[i] >= '0' && s[i] <= '9' do i += 1
+	if i == 0 do return 0, false, 0
+	if i+1 >= len(s) do return 0, false, 0
+	if s[i] != '.' || s[i+1] != ' ' do return 0, false, 0
+	return 2, true, i + 2
+}
+
+first_line :: proc(s: string) -> string {
+	for i := 0; i < len(s); i += 1 {
+		if s[i] == '\n' do return s[:i]
+	}
+	return s
+}
+
+split_lines :: proc(s: string) -> []string {
+	out: [dynamic]string
+	start := 0
+	for i := 0; i < len(s); i += 1 {
+		if s[i] == '\n' {
+			append(&out, s[start:i])
+			start = i + 1
+		}
+	}
+	if start < len(s) do append(&out, s[start:])
 	return out[:]
 }
 

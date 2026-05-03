@@ -155,3 +155,62 @@ test_heading_no_space_is_paragraph :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(blocks), 1)
 	testing.expect_value(t, blocks[0].kind, Block_Kind.Paragraph)
 }
+
+@(test)
+test_unordered_list_basic :: proc(t: ^testing.T) {
+	blocks := parse("- one\n- two", context.temp_allocator)
+	testing.expect_value(t, len(blocks), 1)
+	testing.expect_value(t, blocks[0].kind, Block_Kind.List_Group)
+	testing.expect_value(t, blocks[0].ordered, false)
+	testing.expect_value(t, len(blocks[0].items), 2)
+	testing.expect_value(t, blocks[0].items[0].kind, Block_Kind.List_Item)
+	testing.expect_value(t, blocks[0].items[0].spans[0].text, "one")
+	testing.expect_value(t, blocks[0].items[1].spans[0].text, "two")
+}
+
+@(test)
+test_unordered_list_star_marker :: proc(t: ^testing.T) {
+	blocks := parse("* a\n* b", context.temp_allocator)
+	testing.expect_value(t, len(blocks), 1)
+	testing.expect_value(t, blocks[0].kind, Block_Kind.List_Group)
+	testing.expect_value(t, blocks[0].ordered, false)
+	testing.expect_value(t, len(blocks[0].items), 2)
+}
+
+@(test)
+test_ordered_list_basic :: proc(t: ^testing.T) {
+	blocks := parse("1. first\n2. second", context.temp_allocator)
+	testing.expect_value(t, len(blocks), 1)
+	testing.expect_value(t, blocks[0].kind, Block_Kind.List_Group)
+	testing.expect_value(t, blocks[0].ordered, true)
+	testing.expect_value(t, len(blocks[0].items), 2)
+	testing.expect_value(t, blocks[0].items[0].marker, "1.")
+	testing.expect_value(t, blocks[0].items[1].marker, "2.")
+}
+
+@(test)
+test_list_item_inline_emphasis :: proc(t: ^testing.T) {
+	blocks := parse("- foo **bold**", context.temp_allocator)
+	testing.expect_value(t, len(blocks), 1)
+	testing.expect_value(t, blocks[0].kind, Block_Kind.List_Group)
+	testing.expect_value(t, len(blocks[0].items), 1)
+	testing.expect_value(t, len(blocks[0].items[0].spans), 2)
+	testing.expect_value(t, blocks[0].items[0].spans[1].style, Span_Style.Bold)
+}
+
+@(test)
+test_paragraph_after_list :: proc(t: ^testing.T) {
+	blocks := parse("- one\n\nThen a paragraph.", context.temp_allocator)
+	testing.expect_value(t, len(blocks), 2)
+	testing.expect_value(t, blocks[0].kind, Block_Kind.List_Group)
+	testing.expect_value(t, blocks[1].kind, Block_Kind.Paragraph)
+}
+
+@(test)
+test_indented_dash_is_paragraph :: proc(t: ^testing.T) {
+	// v1 strict: list markers must be at column 0. Indented dash is
+	// paragraph text.
+	blocks := parse("  - indented", context.temp_allocator)
+	testing.expect_value(t, len(blocks), 1)
+	testing.expect_value(t, blocks[0].kind, Block_Kind.Paragraph)
+}
