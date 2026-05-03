@@ -20,6 +20,7 @@ import text_pkg "../text"
 import "../types"
 import rl "vendor:raylib"
 import "../canvas"
+import "../markdown"
 
 Bridge :: struct {
 	L:               ^Lua_State,
@@ -1106,24 +1107,122 @@ parse_animate_attr :: proc(L: ^Lua_State, attrs_idx: i32) -> (types.Animate_Deco
 	return types.Animate_Decoration{provider = provider, rect = rect, z = z}, true
 }
 
+// size_f32_to_f16 converts the bridge's size union (f32 variant) to
+// Wrapper_Attrs's size union (f16 variant). SizeValue is shared unchanged.
+size_f32_to_f16 :: proc(v: union {types.SizeValue, f32}) -> union {types.SizeValue, f16} {
+	switch s in v {
+	case types.SizeValue: return s
+	case f32:             return f16(s)
+	}
+	return nil
+}
+
+// flatten_subtree projects a markdown.LoweredTree into the bridge's flat
+// arrays (b.nodes, b.paths, b.parent_indices, b.children_list,
+// b.node_animations) using the same DFS conventions as lua_flatten_node.
+// parent_flat_idx is the flat index of the containing Lua node (-1 if the
+// markdown block sits at the top level).
+flatten_subtree :: proc(b: ^Bridge, tree: markdown.LoweredTree, parent_flat_idx: i32, cur: ^[dynamic]u8) {
+	local_to_flat := make([]i32, len(tree.nodes), context.temp_allocator)
+
+	// Pass 1: append nodes. DFS order matches lower()'s emission order.
+	for node, i in tree.nodes {
+		local_to_flat[i] = i32(len(b.nodes))
+		append(&b.nodes, node)
+		append(&b.node_animations, nil)
+		path_copy := make([]u8, len(cur^))
+		copy(path_copy, cur^[:])
+		append(&b.paths, types.Path{value = path_copy, length = u8(len(path_copy))})
+		// Reserve slots — Pass 2 fills parent_indices and children_list.
+		append(&b.parent_indices, 0)
+		append(&b.children_list, types.Children{})
+	}
+
+	// Pass 2: rewrite parent_indices and accumulate per-parent child lists.
+	per_local: [dynamic][dynamic]i32
+	resize(&per_local, len(tree.nodes))
+	defer {
+		for &c in per_local do delete(c)
+		delete(per_local)
+	}
+
+	for i in 0 ..< len(tree.nodes) {
+		flat_idx := local_to_flat[i]
+		local_parent := tree.parent_indices[i]
+		if local_parent < 0 {
+			b.parent_indices[flat_idx] = int(parent_flat_idx)
+		} else {
+			b.parent_indices[flat_idx] = int(local_to_flat[local_parent])
+			append(&per_local[local_parent], flat_idx)
+		}
+	}
+
+	for i in 0 ..< len(tree.nodes) {
+		bucket := per_local[i][:]
+		if len(bucket) == 0 do continue
+		flat_idx := local_to_flat[i]
+		cv := make([]i32, len(bucket))
+		copy(cv, bucket)
+		b.children_list[flat_idx] = types.Children{value = cv, length = i32(len(bucket))}
+	}
+}
+
 lua_flatten_node :: proc(L: ^Lua_State, index: i32, cur: ^[dynamic]u8, b: ^Bridge, parent_idx: int) {
 	abs_idx := index < 0 ? lua_gettop(L) + index + 1 : index
-	my_idx := len(b.nodes)
 
-	// Store path
-	p := make([]u8, len(cur))
-	copy(p, cur[:])
-	append(&b.paths, types.Path{value = p, length = u8(len(p))})
-	append(&b.parent_indices, parent_idx)
-	append(&b.children_list, types.Children{})
-
-	// Position 1: tag (keyword string)
+	// Position 1: tag (keyword string) — read first so we can dispatch.
 	lua_rawgeti(L, abs_idx, 1)
 	tag: string
 	if lua_isstring(L, -1) {
 		tag = string(lua_tostring_raw(L, -1))
 	}
 	lua_pop(L, 1)
+
+	// Markdown branch: parse + lower + flatten_subtree manage all slot
+	// reservations themselves, so we early-return before the normal
+	// path's slot reservation runs.
+	if tag == "markdown" {
+		// Position 2 — wrapper attrs (optional).
+		attrs_idx: i32 = 0
+		lua_rawgeti(L, abs_idx, 2)
+		if lua_istable(L, -1) {
+			attrs_idx = lua_gettop(L)
+		} else {
+			lua_pop(L, 1)
+		}
+
+		// Position 3 — source string.
+		source: string
+		lua_rawgeti(L, abs_idx, 3)
+		if lua_isstring(L, -1) {
+			source = string(lua_tostring_raw(L, -1))
+		}
+		lua_pop(L, 1)
+
+		attrs: markdown.Wrapper_Attrs
+		if attrs_idx > 0 {
+			attrs.aspect   = lua_get_string_field(L, attrs_idx, "aspect")
+			attrs.id       = lua_get_string_field(L, attrs_idx, "id")
+			attrs.width    = size_f32_to_f16(lua_get_size_f32(L, attrs_idx, "width"))
+			attrs.height   = size_f32_to_f16(lua_get_size_f32(L, attrs_idx, "height"))
+			attrs.overflow = lua_get_string_field(L, attrs_idx, "overflow")
+			lua_pop(L, 1)
+		}
+
+		blocks := markdown.parse(source, context.temp_allocator)
+		tree   := markdown.lower(blocks, attrs, context.temp_allocator)
+		flatten_subtree(b, tree, i32(parent_idx), cur)
+		return
+	}
+
+	// Non-markdown path: reserve our slot at my_idx before doing
+	// anything else, just as before.
+	my_idx := len(b.nodes)
+	p := make([]u8, len(cur))
+	copy(p, cur[:])
+	append(&b.paths, types.Path{value = p, length = u8(len(p))})
+	append(&b.parent_indices, parent_idx)
+	append(&b.children_list, types.Children{})
 
 	// Position 2: attrs (table)
 	attrs_idx: i32 = 0
