@@ -1230,11 +1230,14 @@ lua_flatten_node :: proc(L: ^Lua_State, index: i32, cur: ^[dynamic]u8, b: ^Bridg
 
 		attrs: markdown.Wrapper_Attrs
 		if attrs_idx > 0 {
-			attrs.aspect   = lua_get_string_field(L, attrs_idx, "aspect")
-			attrs.id       = lua_get_string_field(L, attrs_idx, "id")
+			// Read string fields without cloning — flatten_subtree's
+			// Pass 1 deep-copies them into permanent storage. Cloning
+			// here too would leak the first copy.
+			attrs.aspect   = lua_get_string_field_raw(L, attrs_idx, "aspect")
+			attrs.id       = lua_get_string_field_raw(L, attrs_idx, "id")
 			attrs.width    = size_f32_to_f16(lua_get_size_f32(L, attrs_idx, "width"))
 			attrs.height   = size_f32_to_f16(lua_get_size_f32(L, attrs_idx, "height"))
-			attrs.overflow = lua_get_string_field(L, attrs_idx, "overflow")
+			attrs.overflow = lua_get_string_field_raw(L, attrs_idx, "overflow")
 			lua_pop(L, 1)
 		}
 
