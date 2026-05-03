@@ -18,11 +18,17 @@ main :: proc() {
 	}
 
 	track: mem.Tracking_Allocator
+	allocator := context.allocator
 	if track_mem {
 		mem.tracking_allocator_init(&track, context.allocator)
-		context.allocator = mem.tracking_allocator(&track)
 		fmt.eprintln("Memory tracking enabled (--track-mem)")
+		allocator = mem.tracking_allocator(&track)
 	}
+	// Assign at proc scope. Odin's `context` is block-scoped: setting
+	// context.allocator inside an `if` block reverts when the block
+	// ends, so the tracker never reaches `redin.run` and reports zero
+	// activity. Hoisting the assignment out of the conditional fixes it.
+	context.allocator = allocator
 	defer if track_mem {
 		if len(track.allocation_map) > 0 {
 			fmt.eprintf("=== %v allocations not freed: ===\n", len(track.allocation_map))

@@ -20,6 +20,7 @@ import text_pkg "../text"
 import "../types"
 import rl "vendor:raylib"
 import "../canvas"
+import "../markdown"
 
 Bridge :: struct {
 	L:               ^Lua_State,
@@ -28,6 +29,13 @@ Bridge :: struct {
 	parent_indices:  [dynamic]int,
 	children_list:   [dynamic]types.Children,
 	node_animations: [dynamic]Maybe(types.Animate_Decoration),
+	// Side-channel for the /frames walker: every [:markdown] element
+	// expands into N flat-array nodes (wrapper + lowered subtree) but
+	// the walker visits the original Fennel tree where the markdown is
+	// just one node. After visiting a markdown, the walker must skip
+	// past the lowered subtree's flat indices to keep dfs_idx aligned
+	// with siblings. Keyed by the wrapper's flat index, value is N.
+	markdown_skips:  map[i32]i32,
 	theme:           map[string]types.Theme,
 	http_client:     Http_Client,
 	shell_client:    Shell_Client,
@@ -112,6 +120,7 @@ destroy :: proc(b: ^Bridge) {
 	http_client_destroy(&b.http_client)
 	shell_client_destroy(&b.shell_client)
 	clear_frame(b)
+	delete(b.markdown_skips)
 	for k in b.theme {
 		delete(k)
 	}
@@ -294,6 +303,10 @@ clear_node_strings :: proc(n: types.Node) {
 		if len(v.content) > 0 do delete(v.content)
 		if len(v.aspect) > 0 do delete(v.aspect)
 		if len(v.overflow) > 0 do delete(v.overflow)
+		if len(v.inline_spans) > 0 {
+			for s in v.inline_spans do if len(s.text) > 0 do delete(s.text)
+			delete(v.inline_spans)
+		}
 	case types.NodeImage:
 		if len(v.aspect) > 0 do delete(v.aspect)
 	case types.NodePopout:
@@ -332,6 +345,7 @@ clear_frame :: proc(b: ^Bridge) {
 	}
 	delete(b.node_animations)
 	b.node_animations = {}
+	clear(&b.markdown_skips)
 }
 
 // ---------------------------------------------------------------------------
@@ -1106,24 +1120,157 @@ parse_animate_attr :: proc(L: ^Lua_State, attrs_idx: i32) -> (types.Animate_Deco
 	return types.Animate_Decoration{provider = provider, rect = rect, z = z}, true
 }
 
+// size_f32_to_f16 converts the bridge's size union (f32 variant) to
+// Wrapper_Attrs's size union (f16 variant). SizeValue is shared unchanged.
+size_f32_to_f16 :: proc(v: union {types.SizeValue, f32}) -> union {types.SizeValue, f16} {
+	switch s in v {
+	case types.SizeValue: return s
+	case f32:             return f16(s)
+	}
+	return nil
+}
+
+// flatten_subtree projects a markdown.LoweredTree into the bridge's flat
+// arrays (b.nodes, b.paths, b.parent_indices, b.children_list,
+// b.node_animations) using the same DFS conventions as lua_flatten_node.
+// parent_flat_idx is the flat index of the containing Lua node (-1 if the
+// markdown block sits at the top level).
+flatten_subtree :: proc(b: ^Bridge, tree: markdown.LoweredTree, parent_flat_idx: i32, cur: ^[dynamic]u8) {
+	local_to_flat := make([]i32, len(tree.nodes), context.temp_allocator)
+
+	// Record the wrapper's flat index → subtree size so the /frames
+	// walker can skip past the lowered subtree when advancing to the
+	// next sibling. Wrapper is always local index 0.
+	if len(tree.nodes) > 0 {
+		b.markdown_skips[i32(len(b.nodes))] = i32(len(tree.nodes))
+	}
+
+	// Pass 1: append nodes. DFS order matches lower()'s emission order.
+	for node, i in tree.nodes {
+		local_to_flat[i] = i32(len(b.nodes))
+		// Deep-copy temp/literal strings into permanent storage so they
+		// survive past the current frame's temp-allocator reset and so
+		// clear_node_strings's free calls always see heap-owned strings.
+		owned_node := node
+		if t, ok := &owned_node.(types.NodeText); ok {
+			if len(t.aspect)   > 0 do t.aspect   = strings.clone(t.aspect)
+			if len(t.content)  > 0 do t.content  = strings.clone(t.content)
+			if len(t.overflow) > 0 do t.overflow = strings.clone(t.overflow)
+			if len(t.inline_spans) > 0 {
+				perm := make([]text_pkg.Span, len(t.inline_spans))
+				for s, j in t.inline_spans {
+					perm[j] = text_pkg.Span{
+						style = s.style,
+						text  = strings.clone(s.text),
+					}
+				}
+				t.inline_spans = perm
+			}
+		} else if t, ok := &owned_node.(types.NodeVbox); ok {
+			if len(t.aspect)   > 0 do t.aspect   = strings.clone(t.aspect)
+			if len(t.overflow) > 0 do t.overflow = strings.clone(t.overflow)
+		} else if t, ok := &owned_node.(types.NodeHbox); ok {
+			if len(t.aspect)   > 0 do t.aspect   = strings.clone(t.aspect)
+			if len(t.overflow) > 0 do t.overflow = strings.clone(t.overflow)
+		}
+		append(&b.nodes, owned_node)
+		append(&b.node_animations, nil)
+		path_copy := make([]u8, len(cur^))
+		copy(path_copy, cur^[:])
+		append(&b.paths, types.Path{value = path_copy, length = u8(len(path_copy))})
+		// Reserve slots — Pass 2 fills parent_indices and children_list.
+		append(&b.parent_indices, 0)
+		append(&b.children_list, types.Children{})
+	}
+
+	// Pass 2: rewrite parent_indices and accumulate per-parent child lists.
+	per_local: [dynamic][dynamic]i32
+	resize(&per_local, len(tree.nodes))
+	defer {
+		for &c in per_local do delete(c)
+		delete(per_local)
+	}
+
+	for i in 0 ..< len(tree.nodes) {
+		flat_idx := local_to_flat[i]
+		local_parent := tree.parent_indices[i]
+		if local_parent < 0 {
+			b.parent_indices[flat_idx] = int(parent_flat_idx)
+		} else {
+			b.parent_indices[flat_idx] = int(local_to_flat[local_parent])
+			append(&per_local[local_parent], flat_idx)
+		}
+	}
+
+	for i in 0 ..< len(tree.nodes) {
+		bucket := per_local[i][:]
+		if len(bucket) == 0 do continue
+		flat_idx := local_to_flat[i]
+		cv := make([]i32, len(bucket))
+		copy(cv, bucket)
+		b.children_list[flat_idx] = types.Children{value = cv, length = i32(len(bucket))}
+	}
+}
+
 lua_flatten_node :: proc(L: ^Lua_State, index: i32, cur: ^[dynamic]u8, b: ^Bridge, parent_idx: int) {
 	abs_idx := index < 0 ? lua_gettop(L) + index + 1 : index
-	my_idx := len(b.nodes)
 
-	// Store path
-	p := make([]u8, len(cur))
-	copy(p, cur[:])
-	append(&b.paths, types.Path{value = p, length = u8(len(p))})
-	append(&b.parent_indices, parent_idx)
-	append(&b.children_list, types.Children{})
-
-	// Position 1: tag (keyword string)
+	// Position 1: tag (keyword string) — read first so we can dispatch.
 	lua_rawgeti(L, abs_idx, 1)
 	tag: string
 	if lua_isstring(L, -1) {
 		tag = string(lua_tostring_raw(L, -1))
 	}
 	lua_pop(L, 1)
+
+	// Markdown branch: parse + lower + flatten_subtree manage all slot
+	// reservations themselves, so we early-return before the normal
+	// path's slot reservation runs.
+	if tag == "markdown" {
+		// Position 2 — wrapper attrs (optional).
+		attrs_idx: i32 = 0
+		lua_rawgeti(L, abs_idx, 2)
+		if lua_istable(L, -1) {
+			attrs_idx = lua_gettop(L)
+		} else {
+			lua_pop(L, 1)
+		}
+
+		// Position 3 — source string.
+		source: string
+		lua_rawgeti(L, abs_idx, 3)
+		if lua_isstring(L, -1) {
+			source = string(lua_tostring_raw(L, -1))
+		}
+		lua_pop(L, 1)
+
+		attrs: markdown.Wrapper_Attrs
+		if attrs_idx > 0 {
+			// Read string fields without cloning — flatten_subtree's
+			// Pass 1 deep-copies them into permanent storage. Cloning
+			// here too would leak the first copy.
+			attrs.aspect   = lua_get_string_field_raw(L, attrs_idx, "aspect")
+			attrs.id       = lua_get_string_field_raw(L, attrs_idx, "id")
+			attrs.width    = size_f32_to_f16(lua_get_size_f32(L, attrs_idx, "width"))
+			attrs.height   = size_f32_to_f16(lua_get_size_f32(L, attrs_idx, "height"))
+			attrs.overflow = lua_get_string_field_raw(L, attrs_idx, "overflow")
+			lua_pop(L, 1)
+		}
+
+		blocks := markdown.parse(source, context.temp_allocator)
+		tree   := markdown.lower(blocks, attrs, context.temp_allocator)
+		flatten_subtree(b, tree, i32(parent_idx), cur)
+		return
+	}
+
+	// Non-markdown path: reserve our slot at my_idx before doing
+	// anything else, just as before.
+	my_idx := len(b.nodes)
+	p := make([]u8, len(cur))
+	copy(p, cur[:])
+	append(&b.paths, types.Path{value = p, length = u8(len(p))})
+	append(&b.parent_indices, parent_idx)
+	append(&b.children_list, types.Children{})
 
 	// Position 2: attrs (table)
 	attrs_idx: i32 = 0
@@ -1368,9 +1515,7 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 			if sel, exists := lua_get_bool_field_opt(L, attrs_idx, "selectable"); exists {
 				t.not_selectable = !sel
 			}
-			if md, exists := lua_get_bool_field_opt(L, attrs_idx, "markdown"); exists {
-				t.markdown = md
-			}
+
 		}
 		if len(text_content) > 0 do t.content = text_content
 		return t
@@ -1504,9 +1649,6 @@ lua_to_theme :: proc(L: ^Lua_State, index: i32) -> map[string]types.Theme {
 			t.opacity = lua_get_number_field(L, props_idx, "opacity")
 			t.shadow = lua_get_shadow_field(L, props_idx, "shadow")
 			t.selection = lua_get_rgba_field(L, props_idx, "selection")
-			t.bold   = lua_get_style_override(L, props_idx, "bold")
-			t.italic = lua_get_style_override(L, props_idx, "italic")
-			t.code   = lua_get_style_override(L, props_idx, "code")
 
 			lua_getfield(L, props_idx, "weight")
 			if lua_isnumber(L, -1) {
@@ -1602,18 +1744,6 @@ lua_get_shadow_field :: proc(L: ^Lua_State, index: i32, field: cstring) -> types
 	}
 	lua_pop(L, 1)
 	return s
-}
-
-lua_get_style_override :: proc(L: ^Lua_State, index: i32, field: cstring) -> types.Style_Override {
-	lua_getfield(L, index, field)
-	defer lua_pop(L, 1)
-	if !lua_istable(L, -1) do return {}
-	abs := lua_gettop(L)
-	out: types.Style_Override
-	out.set = true
-	out.color = lua_get_rgb_field(L, abs, "color")
-	out.bg = lua_get_rgba_field(L, abs, "bg")
-	return out
 }
 
 lua_get_padding_field :: proc(L: ^Lua_State, index: i32, field: cstring) -> [4]u8 {

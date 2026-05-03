@@ -1,5 +1,7 @@
 package types
 
+import "../text"
+
 SizeValue :: enum {
 	FULL,
 }
@@ -189,7 +191,7 @@ NodeText :: struct {
 	},
 	overflow:       string,
 	not_selectable: bool,   // zero-value = selectable (default-on)
-	markdown:       bool,
+	inline_spans:   []text.Span,   // nil = plain rendering, non-nil = mixed-font wrap
 }
 
 PopoutMode :: enum {

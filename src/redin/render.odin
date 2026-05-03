@@ -7,7 +7,6 @@ import "core:math"
 import "core:strings"
 import "font"
 import "input"
-import "markdown"
 import text_pkg "text"
 import "types"
 import rl "vendor:raylib"
@@ -937,6 +936,15 @@ node_preferred_height :: proc(
 			text_pkg.cache_lines(idx, available_width, lines)
 			return result
 		}
+		// Span-bearing text (markdown lowering): n.content is empty,
+		// the visible text lives in n.inline_spans. Walk the same wrap
+		// logic the draw path uses to get a multi-line height.
+		if available_width > 0 && len(n.inline_spans) > 0 && n.overflow != "scroll-x" {
+			result = text_pkg.span_layout_measure_height(
+				n.inline_spans, available_width,
+				font_name, font_size, lh_ratio, "")
+			if result <= 0 do result = lh
+		}
 		text_pkg.cache_intrinsic(idx, available_width, result)
 		return result
 	case types.NodeImage:
@@ -1328,79 +1336,9 @@ draw_button :: proc(rect: rl.Rectangle, n: types.NodeButton, theme: map[string]t
 	}
 }
 
-// Resolve per-block font params for a markdown text node. Headings consult
-// :h1..:h6 aspects; missing aspects use a hardcoded scale table.
-build_markdown_params :: proc(
-	blocks: []markdown.Block,
-	theme: map[string]types.Theme,
-	base_font_size: f32,
-	base_lh: f32,
-	allocator := context.allocator,
-) -> []markdown.Block_Params {
-	context.allocator = allocator
-	heading_scale := [6]f32{2.0, 1.7, 1.4, 1.2, 1.1, 1.0}
-	out := make([]markdown.Block_Params, len(blocks))
-	for blk, idx in blocks {
-		size := base_font_size
-		lh := base_lh
-		if blk.kind == .Heading {
-			level := int(blk.level)
-			if level < 1 do level = 1
-			if level > 6 do level = 6
-			h_key := fmt.tprintf("h%d", level)
-			if h, ok := theme[h_key]; ok {
-				if h.font_size > 0 do size = f32(h.font_size)
-				if h.line_height > 0 do lh = h.line_height
-			} else {
-				size = base_font_size * heading_scale[level - 1]
-			}
-		}
-		out[idx] = markdown.Block_Params{font_size = size, line_height = lh}
-	}
-	return out
-}
-
-// Resolve markdown per-style colors from the host aspect's overrides.
-// Defaults: base_color = the text color the caller already computed;
-// bold/italic/code colors fall back to base_color when not set; code_bg
-// falls back to {60, 60, 70, 255}.
-build_markdown_style :: proc(
-	theme: map[string]types.Theme,
-	host_aspect: string,
-	base_color: rl.Color,
-) -> markdown.Style_Theme {
-	out := markdown.Style_Theme{
-		base_color   = base_color,
-		bold_color   = base_color,
-		italic_color = base_color,
-		code_color   = base_color,
-		code_bg      = rl.Color{60, 60, 70, 255},
-	}
-	host, ok := theme[host_aspect]
-	if !ok do return out
-	// `set` says "the sub-table was provided" but inner fields can still be
-	// absent (e.g. `:bold {}` leaves :color zeroed). For inner field
-	// absence we fall back to the same zero-sentinel convention used
-	// elsewhere in the renderer: zero RGB / RGBA = inherit.
-	if host.bold.set && host.bold.color != {} {
-		out.bold_color = rl.Color{host.bold.color[0], host.bold.color[1], host.bold.color[2], 255}
-	}
-	if host.italic.set && host.italic.color != {} {
-		out.italic_color = rl.Color{host.italic.color[0], host.italic.color[1], host.italic.color[2], 255}
-	}
-	if host.code.set {
-		if host.code.color != {} {
-			out.code_color = rl.Color{host.code.color[0], host.code.color[1], host.code.color[2], 255}
-		}
-		if host.code.bg != {} {
-			out.code_bg = rl.Color{host.code.bg[0], host.code.bg[1], host.code.bg[2], host.code.bg[3]}
-		}
-	}
-	return out
-}
-
 draw_text :: proc(idx: int, rect: rl.Rectangle, n: types.NodeText, theme: map[string]types.Theme) {
-	if len(n.content) == 0 do return
+	// Skip nodes with neither plain content nor inline spans.
+	if len(n.content) == 0 && len(n.inline_spans) == 0 do return
 
 	font_size: f32 = 18
 	text_color := rl.BLACK
@@ -1418,15 +1356,32 @@ draw_text :: proc(idx: int, rect: rl.Rectangle, n: types.NodeText, theme: map[st
 		}
 	}
 
-	if n.markdown {
-		blocks := markdown.parse(n.content, context.temp_allocator)
-		params := build_markdown_params(blocks, theme, font_size, lh_ratio, context.temp_allocator)
-		style := build_markdown_style(theme, n.aspect, text_color)
-		laid := markdown.layout(blocks, params, font_name, rect.width, context.temp_allocator)
-		markdown.draw(laid, params, rect, style, font_name)
+	if len(n.inline_spans) > 0 {
+		// Resolve :md/code styling once if it's set; otherwise zero
+		// values trigger the function's defaults.
+		code_style: text_pkg.Span_Code_Style
+		if t, ok := theme["md/code"]; ok {
+			if len(t.font) > 0 do code_style.font_name = t.font
+			if t.bg != {} {
+				code_style.bg = t.bg
+				code_style.bg_set = true
+			}
+			if t.color != {} {
+				code_style.color = t.color
+				code_style.color_set = true
+			}
+		}
+		text_pkg.span_layout_and_draw(
+			n.inline_spans,
+			rect,
+			font_name,
+			font_size,
+			lh_ratio,
+			text_color,
+			code_style,
+		)
 		return
 	}
-
 	f := font.get(font_name, font.style_from_weight(font.Font_Weight(font_weight)))
 	spacing: f32 = 0
 	lh := text_pkg.line_height(font_size, lh_ratio)

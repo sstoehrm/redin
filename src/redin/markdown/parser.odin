@@ -1,58 +1,89 @@
 package markdown
 
 import "core:strings"
+import text_pkg "../text"
 
-Span_Style :: enum u8 { Regular, Bold, Italic, Bold_Italic, Code }
+Span :: text_pkg.Span
+Span_Style :: text_pkg.Span_Style
 
-Span :: struct {
-	style: Span_Style,
-	text:  string,
+Block_Kind :: enum u8 {
+	Paragraph,
+	Heading_1, Heading_2, Heading_3, Heading_4, Heading_5, Heading_6,
+	List_Item,
+	List_Group,
 }
-
-Block_Kind :: enum u8 { Paragraph, Heading }
 
 Block :: struct {
-	kind:  Block_Kind,
-	level: u8,        // 1..6 for Heading; 0 for Paragraph
-	spans: []Span,
+	kind:    Block_Kind,
+	spans:   []Span,    // Paragraph / Heading_N / List_Item: inline content
+	items:   []Block,   // List_Group only: child List_Items in source order
+	ordered: bool,      // List_Group only: true for "1." markers, false for "-"/"*"
+	marker:  string,    // List_Item only: the literal marker text ("•" / "1." / etc.)
 }
 
-// Parse markdown source into a list of blocks. Each block holds inline spans
-// (Regular / Bold / Italic / Code). Allocations come from the supplied allocator.
+// Parse markdown source into a list of paragraph blocks. Each block holds
+// inline spans (Regular / Bold / Italic / Code). Allocations come from
+// the supplied allocator.
 parse :: proc(src: string, allocator := context.allocator) -> []Block {
 	context.allocator = allocator
 
 	blocks: [dynamic]Block
 	paragraphs := split_paragraphs(src)
 	for p in paragraphs {
-		if level, body, is_h := detect_heading(p); is_h {
-			spans := parse_inline(body)
-			append(&blocks, Block{kind = .Heading, level = level, spans = spans})
-		} else {
-			spans := parse_inline(p)
-			append(&blocks, Block{kind = .Paragraph, spans = spans})
+		level, content_start := detect_heading(p)
+		if level > 0 {
+			spans := parse_inline(p[content_start:])
+			kind: Block_Kind
+			switch level {
+			case 1: kind = .Heading_1
+			case 2: kind = .Heading_2
+			case 3: kind = .Heading_3
+			case 4: kind = .Heading_4
+			case 5: kind = .Heading_5
+			case 6: kind = .Heading_6
+			}
+			append(&blocks, Block{kind = kind, spans = spans})
+			continue
 		}
+		// List.
+		first_kind, _, _ := detect_list_item(first_line(p))
+		if first_kind != 0 {
+			items: [dynamic]Block
+			ordered := first_kind == 2
+			lines := split_lines(p)
+			for line in lines {
+				k, _, cs := detect_list_item(line)
+				if k == 0 {
+					// v1 strict: stray non-marker line inside a list — skip.
+					continue
+				}
+				marker_str: string
+				if k == 1 {
+					marker_str = "•"
+				} else {
+					// Take the literal numeric marker including the dot.
+					m_end := 0
+					for m_end < len(line) && line[m_end] >= '0' && line[m_end] <= '9' do m_end += 1
+					marker_str = strings.clone(line[:m_end+1])
+				}
+				spans := parse_inline(line[cs:])
+				append(&items, Block{
+					kind   = .List_Item,
+					spans  = spans,
+					marker = marker_str,
+				})
+			}
+			append(&blocks, Block{
+				kind    = .List_Group,
+				items   = items[:],
+				ordered = ordered,
+			})
+			continue
+		}
+		spans := parse_inline(p)
+		append(&blocks, Block{kind = .Paragraph, spans = spans})
 	}
 	return blocks[:]
-}
-
-// Returns (level, trimmed-body, true) if `p` opens with 1..6 `#` followed
-// by a space. Trailing `#` runs and surrounding whitespace are stripped.
-detect_heading :: proc(p: string) -> (level: u8, body: string, ok: bool) {
-	i := 0
-	for i < len(p) && p[i] == '#' do i += 1
-	if i == 0 || i > 6 do return 0, "", false
-	if i >= len(p) || p[i] != ' ' do return 0, "", false
-	rest := p[i + 1:]
-	// Trim leading whitespace.
-	start := 0
-	for start < len(rest) && (rest[start] == ' ' || rest[start] == '\t') do start += 1
-	// Trim trailing whitespace + a closing run of `#`s + the space before it.
-	end := len(rest)
-	for end > start && (rest[end - 1] == ' ' || rest[end - 1] == '\t') do end -= 1
-	for end > start && rest[end - 1] == '#' do end -= 1
-	for end > start && (rest[end - 1] == ' ' || rest[end - 1] == '\t') do end -= 1
-	return u8(i), rest[start:end], true
 }
 
 split_paragraphs :: proc(src: string) -> []string {
@@ -110,58 +141,47 @@ process_soft_breaks :: proc(s: string) -> string {
 parse_inline :: proc(src: string) -> []Span {
 	pre := process_soft_breaks(src)
 	out: [dynamic]Span
-	parse_inline_into(&out, pre, .Regular)
-	return out[:]
-}
-
-// Walk `text` emitting spans into `out`, merging each emitted span's style
-// with `outer` per the merge table in the spec. Recurses on emphasis bodies.
-parse_inline_into :: proc(out: ^[dynamic]Span, text: string, outer: Span_Style) {
 	current := strings.builder_make()
-	defer strings.builder_destroy(&current)
 	i := 0
 
-	flush_regular :: proc(out: ^[dynamic]Span, b: ^strings.Builder, outer: Span_Style) {
+	flush_regular :: proc(out: ^[dynamic]Span, b: ^strings.Builder) {
 		if strings.builder_len(b^) > 0 {
 			cloned := strings.clone(strings.to_string(b^))
-			append(out, Span{style = outer, text = cloned})
+			append(out, Span{style = .Regular, text = cloned})
 			strings.builder_reset(b)
 		}
 	}
 
-	for i < len(text) {
-		c := text[i]
-		// `**...**` greedy bold.
-		if c == '*' && i + 1 < len(text) && text[i + 1] == '*' {
-			if close_idx := find_close_double(text, i + 2, '*'); close_idx >= 0 {
-				flush_regular(out, &current, outer)
-				inner := text[i + 2:close_idx]
-				parse_inline_into(out, inner, merge_style(outer, .Bold))
+	for i < len(pre) {
+		c := pre[i]
+		// `**...**` first (greedy).
+		if c == '*' && i + 1 < len(pre) && pre[i+1] == '*' {
+			if close_idx := find_close_double(pre, i + 2, '*'); close_idx >= 0 {
+				flush_regular(&out, &current)
+				append(&out, Span{style = .Bold, text = pre[i+2:close_idx]})
 				i = close_idx + 2
 				continue
 			}
+			// Bold delimiter unmatched — emit both stars as literal text.
 			strings.write_byte(&current, '*')
 			strings.write_byte(&current, '*')
 			i += 2
 			continue
 		}
-		// `*…*` / `_…_` italic.
+		// `*...*` or `_..._` italic.
 		if c == '*' || c == '_' {
-			if close_idx := find_close_single(text, i + 1, c); close_idx >= 0 {
-				flush_regular(out, &current, outer)
-				inner := text[i + 1:close_idx]
-				parse_inline_into(out, inner, merge_style(outer, .Italic))
+			if close_idx := find_close_single(pre, i + 1, c); close_idx >= 0 {
+				flush_regular(&out, &current)
+				append(&out, Span{style = .Italic, text = pre[i+1:close_idx]})
 				i = close_idx + 1
 				continue
 			}
 		}
-		// Backtick code (leaf).
+		// Backtick code.
 		if c == '`' {
-			if close_idx := find_close_single(text, i + 1, '`'); close_idx >= 0 {
-				flush_regular(out, &current, outer)
-				inner := text[i + 1:close_idx]
-				cloned := strings.clone(inner)
-				append(out, Span{style = .Code, text = cloned})
+			if close_idx := find_close_single(pre, i + 1, '`'); close_idx >= 0 {
+				flush_regular(&out, &current)
+				append(&out, Span{style = .Code, text = pre[i+1:close_idx]})
 				i = close_idx + 1
 				continue
 			}
@@ -169,23 +189,60 @@ parse_inline_into :: proc(out: ^[dynamic]Span, text: string, outer: Span_Style) 
 		strings.write_byte(&current, c)
 		i += 1
 	}
-	flush_regular(out, &current, outer)
+	flush_regular(&out, &current)
+	return out[:]
 }
 
-// Combine outer + inner per the table in the spec.
-// Code always wins. Bold_Italic absorbs further Bold/Italic.
-merge_style :: proc(outer, inner: Span_Style) -> Span_Style {
-	if inner == .Code do return .Code
-	if outer == .Regular do return inner
-	if inner == .Regular do return outer
-	if outer == inner do return outer
-	if outer == .Bold_Italic do return .Bold_Italic
-	if inner == .Bold_Italic do return .Bold_Italic
-	// Bold ⊕ Italic (in either order) → Bold_Italic.
-	if (outer == .Bold && inner == .Italic) || (outer == .Italic && inner == .Bold) {
-		return .Bold_Italic
+// detect_list_item returns (kind, ordered, content_start) where:
+//   kind == 0: not a list item
+//   kind == 1: unordered ("- " or "* ")
+//   kind == 2: ordered ("<digit>+. ")
+// ordered is meaningful when kind != 0. content_start is the byte
+// index after the marker and the required single space.
+detect_list_item :: proc(s: string) -> (kind: int, ordered: bool, content_start: int) {
+	if len(s) == 0 do return 0, false, 0
+	if s[0] == '-' || s[0] == '*' {
+		if len(s) < 2 || s[1] != ' ' do return 0, false, 0
+		return 1, false, 2
 	}
-	return inner
+	// Ordered: one or more digits, then '.', then ' '.
+	i := 0
+	for i < len(s) && s[i] >= '0' && s[i] <= '9' do i += 1
+	if i == 0 do return 0, false, 0
+	if i+1 >= len(s) do return 0, false, 0
+	if s[i] != '.' || s[i+1] != ' ' do return 0, false, 0
+	return 2, true, i + 2
+}
+
+first_line :: proc(s: string) -> string {
+	for i := 0; i < len(s); i += 1 {
+		if s[i] == '\n' do return s[:i]
+	}
+	return s
+}
+
+split_lines :: proc(s: string) -> []string {
+	out: [dynamic]string
+	start := 0
+	for i := 0; i < len(s); i += 1 {
+		if s[i] == '\n' {
+			append(&out, s[start:i])
+			start = i + 1
+		}
+	}
+	if start < len(s) do append(&out, s[start:])
+	return out[:]
+}
+
+// detect_heading returns (level, content_start) where level is
+// 1..6 for `# `..`###### ` and 0 for non-heading. content_start is
+// the byte index after the leading `#`s and the required single space.
+detect_heading :: proc(s: string) -> (level: int, content_start: int) {
+	i := 0
+	for i < len(s) && s[i] == '#' do i += 1
+	if i == 0 || i > 6 do return 0, 0
+	if i >= len(s) || s[i] != ' ' do return 0, 0
+	return i, i + 1
 }
 
 // Find the next occurrence of two consecutive `delim` chars at or after `from`.

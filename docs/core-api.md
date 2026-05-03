@@ -183,12 +183,47 @@ The flattening is a single pass when the frame enters the pipeline. No fragment 
 | `click`    | event vector            | button (dispatched on click) |
 | `change`   | event vector            | input (dispatched on text change) |
 | `key`      | event vector            | input (dispatched on key press) |
-| `markdown` | boolean                 | text (default `false`; when `true`, content is parsed as inline markdown — supports `**bold**`, `_italic_` / `*italic*`, `` `inline code` ``, nested emphasis like `**bold _italic_**`, headings (`#`–`######`), paragraph breaks via blank line, and soft line breaks via two-space EOL. Per-aspect `:bold` / `:italic` / `:code` sub-tables and `:h1`–`:h6` aspects control rendering — see [theme reference](reference/theme.md). Lists, links, images, tables, and triple-backtick code blocks are not yet supported) |
 | `mode`     | `"mouse"` `"fixed"`     | popout (positioning mode) |
 | `x`        | number                  | popout (fixed position x) |
 | `y`        | number                  | popout (fixed position y) |
 
 **Rule:** Visual properties (`bg`, `color`, `border`, `font-size`, `font`, `weight`, `radius`, `border-width`, `opacity`, `shadow`, `line-height`, `padding`) belong in the theme only, never on elements.
+
+### `:markdown`
+
+Renders a string of inline markdown source as a subtree of regular
+nodes. The bridge parses the source into block + inline spans, lowers
+to a `:vbox` wrapping per-block `:text` / `:hbox` nodes, and themes
+them with the `md/*` aspect family.
+
+```fennel
+[:markdown {:aspect :card :id :reply :width :full :overflow :scroll-y}
+  "# Title
+
+A paragraph with **bold** and _italic_ and `code` text.
+
+- first
+- second"]
+```
+
+| Attr | Type | Notes |
+|------|------|-------|
+| `:aspect` | keyword | Themes the wrapper vbox (padding, bg, border). Ordinary user aspect — no `md/` prefix. |
+| `:id` | keyword | Lands on the wrapper. `(find-element {:id ...})` returns it. |
+| `:width`, `:height` | size | Sizing of the wrapper. |
+| `:overflow` | keyword | Forwarded to the wrapper. `:scroll-y` for tall blocks. |
+
+V1 syntax: paragraphs (blank line), soft breaks (two-space EOL),
+inline `**bold**` / `_italic_` / `*italic*` / `` `code` ``,
+ATX headings `#`–`######` at column 0, flat unordered lists (`-`,
+`*` at column 0) and flat ordered lists (`<digit>+. ` at column 0).
+Nested lists, code blocks, links, images, tables, and nested inline
+emphasis are not supported in v1.
+
+The styling of `:md/h1` … `:md/h6`, `:md/body`, `:md/list`,
+`:md/list-item`, `:md/list-marker`, and `:md/code` aspects ships
+with the framework; override individual entries via your normal
+`(theme.set-theme {…})` call.
 
 ### Animation
 
@@ -668,8 +703,21 @@ curl -H "Authorization: Bearer $TOKEN" \
 
 The framework dispatches `:event/agent-edit {id "reply" content "**Answer:** 4"}`,
 the Fennel handler stores it in `db.agent.reply`, and the next render
-shows it in the `:reply` text node. Set `:markdown true` on the text node
-to have the content rendered as inline markdown (see `:markdown` in the
-attribute table above; supported syntax: bold, italic, nested emphasis,
-inline code, headings (`#`–`######`), paragraphs, soft breaks). Lists,
-links, images, tables, and triple-backtick code blocks are not yet supported.
+shows it in the `:reply` text node. To render the content as markdown
+instead of plain text, add a sibling `[:markdown]` element reading the
+same value:
+
+```fennel
+[:vbox {}
+  ;; Writable target — what the agent writes to.
+  [:text {:id :reply :agent :edit
+          :content (subscribe :sub/agent-reply)}]
+  ;; Formatted preview alongside (read-only).
+  [:markdown {:aspect :card} (subscribe :sub/agent-reply)]]
+```
+
+The agent target itself stays a plain `:text` because the agent
+channel addresses content by `:id`, and the `[:markdown]` element
+lowers to a vbox subtree that doesn't carry the original source string
+in a place the channel can read or write. The markdown element is the
+read-side preview; the `:text` is the write-side target.

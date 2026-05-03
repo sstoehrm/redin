@@ -176,4 +176,68 @@
   (let [result (theme.validate {:card {:shadow [0 2 4 "black"]}})]
     (assert (not result.ok) "shadow with string color fails")))
 
+(fn t.test-default-theme-fallback []
+  ;; Defaults visible when user-theme is empty.
+  (theme.reset)
+  (theme.set-defaults {:foo {:color [1 2 3]}})
+  (let [resolved (theme.resolve :foo [])]
+    (assert (= 1 (. resolved :color 1))))
+
+  ;; User-theme overrides default at the aspect level.
+  (theme.set-theme {:foo {:color [9 9 9]}})
+  (let [resolved (theme.resolve :foo [])]
+    (assert (= 9 (. resolved :color 1))))
+
+  ;; Aspect missing in user-theme falls through to defaults.
+  (theme.set-theme {})
+  (theme.set-defaults {:bar {:color [5 5 5]}})
+  (let [resolved (theme.resolve :bar [])]
+    (assert (= 5 (. resolved :color 1)))))
+
+(fn t.test-md-defaults-registered []
+  ;; init.fnl is not loaded by the test runner — install the
+  ;; defaults manually for this test, after a reset that clears them.
+  (theme.reset)
+  ((. (require :markdown) :install))
+  (let [resolved (theme.resolve :md/body [])]
+    (assert resolved.font-size
+            "expected :md/body to have a default :font-size")))
+
+(fn install-mock-host []
+  ;; Stub _G.redin.set_theme so we can capture what theme.fnl pushes
+  ;; without a real bridge. Returns a table whose :last field is the
+  ;; most recently pushed theme map.
+  (let [captured {:last nil :calls 0}]
+    (set _G.redin {:set_theme (fn [t]
+                                (set captured.last t)
+                                (set captured.calls (+ captured.calls 1)))})
+    captured))
+
+(fn t.test-set-defaults-pushes-to-host []
+  ;; Apps that ship :md/* defaults via set-defaults but never call
+  ;; set-theme must still get the defaults applied on the Odin side.
+  ;; Without the host push, theme[:md/h1] lookup misses and headings
+  ;; render at the renderer's hard-coded fallback size.
+  (theme.reset)
+  (let [captured (install-mock-host)]
+    (theme.set-defaults {:md/body {:font-size 18 :color [240 240 240]}})
+    (assert (= 1 captured.calls)
+            (.. "set-defaults must push to host exactly once; calls=" captured.calls))
+    (assert captured.last "host must receive a theme table")
+    (let [body (. captured.last :md/body)]
+      (assert body "pushed theme must include :md/body")
+      (assert (= 18 body.font-size)
+              "pushed :md/body must carry :font-size from defaults"))))
+
+(fn t.test-set-defaults-merges-with-existing-theme []
+  ;; If set-defaults runs after set-theme (unusual but legal), the push
+  ;; must reflect both: defaults as base, user theme on top.
+  (theme.reset)
+  (let [captured (install-mock-host)]
+    (theme.set-theme {:user-aspect {:color [9 9 9]}})
+    (theme.set-defaults {:md/body {:font-size 18}})
+    ;; Last push includes both the user aspect and the defaults.
+    (assert (. captured.last :user-aspect) "user-set aspect must persist")
+    (assert (. captured.last :md/body)     "default aspect must be present")))
+
 t
