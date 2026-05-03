@@ -1347,7 +1347,34 @@ draw_text :: proc(idx: int, rect: rl.Rectangle, n: types.NodeText, theme: map[st
 		}
 	}
 
+	if len(n.inline_spans) > 0 {
+		// Resolve :md/code styling once if it's set; otherwise zero
+		// values trigger the function's defaults.
+		code_style: text_pkg.Span_Code_Style
+		if t, ok := theme["md/code"]; ok {
+			if len(t.font) > 0 do code_style.font_name = t.font
+			if t.bg != {} {
+				code_style.bg = t.bg
+				code_style.bg_set = true
+			}
+			if t.color != {} {
+				code_style.color = t.color
+				code_style.color_set = true
+			}
+		}
+		text_pkg.span_layout_and_draw(
+			n.inline_spans,
+			rect,
+			font_name,
+			font_size,
+			lh_ratio,
+			text_color,
+			code_style,
+		)
+		return
+	}
 	if n.markdown {
+		// Legacy path — kept until Task 13 removes the bool.
 		blocks := markdown.parse(n.content, context.temp_allocator)
 		laid := markdown.layout(blocks, font_name, font_size, lh_ratio, rect.width, context.temp_allocator)
 		markdown.draw(laid, rect, text_color, font_size, font_name, lh_ratio)
