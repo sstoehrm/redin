@@ -936,6 +936,15 @@ node_preferred_height :: proc(
 			text_pkg.cache_lines(idx, available_width, lines)
 			return result
 		}
+		// Span-bearing text (markdown lowering): n.content is empty,
+		// the visible text lives in n.inline_spans. Walk the same wrap
+		// logic the draw path uses to get a multi-line height.
+		if available_width > 0 && len(n.inline_spans) > 0 && n.overflow != "scroll-x" {
+			result = text_pkg.span_layout_measure_height(
+				n.inline_spans, available_width,
+				font_name, font_size, lh_ratio, "")
+			if result <= 0 do result = lh
+		}
 		text_pkg.cache_intrinsic(idx, available_width, result)
 		return result
 	case types.NodeImage:
