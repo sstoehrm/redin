@@ -26,7 +26,6 @@ test/integration/testapp/
 .clj-kondo/
 .lsp
 .nrepl-port
-docs/superpowers
 .worktrees/
 
 # UI test screenshot artifacts
