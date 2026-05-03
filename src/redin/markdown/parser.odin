@@ -6,7 +6,10 @@ import text_pkg "../text"
 Span :: text_pkg.Span
 Span_Style :: text_pkg.Span_Style
 
-Block_Kind :: enum u8 { Paragraph }
+Block_Kind :: enum u8 {
+	Paragraph,
+	Heading_1, Heading_2, Heading_3, Heading_4, Heading_5, Heading_6,
+}
 
 Block :: struct {
 	kind:  Block_Kind,
@@ -22,6 +25,21 @@ parse :: proc(src: string, allocator := context.allocator) -> []Block {
 	blocks: [dynamic]Block
 	paragraphs := split_paragraphs(src)
 	for p in paragraphs {
+		level, content_start := detect_heading(p)
+		if level > 0 {
+			spans := parse_inline(p[content_start:])
+			kind: Block_Kind
+			switch level {
+			case 1: kind = .Heading_1
+			case 2: kind = .Heading_2
+			case 3: kind = .Heading_3
+			case 4: kind = .Heading_4
+			case 5: kind = .Heading_5
+			case 6: kind = .Heading_6
+			}
+			append(&blocks, Block{kind = kind, spans = spans})
+			continue
+		}
 		spans := parse_inline(p)
 		append(&blocks, Block{kind = .Paragraph, spans = spans})
 	}
@@ -133,6 +151,17 @@ parse_inline :: proc(src: string) -> []Span {
 	}
 	flush_regular(&out, &current)
 	return out[:]
+}
+
+// detect_heading returns (level, content_start) where level is
+// 1..6 for `# `..`###### ` and 0 for non-heading. content_start is
+// the byte index after the leading `#`s and the required single space.
+detect_heading :: proc(s: string) -> (level: int, content_start: int) {
+	i := 0
+	for i < len(s) && s[i] == '#' do i += 1
+	if i == 0 || i > 6 do return 0, 0
+	if i >= len(s) || s[i] != ' ' do return 0, 0
+	return i, i + 1
 }
 
 // Find the next occurrence of two consecutive `delim` chars at or after `from`.

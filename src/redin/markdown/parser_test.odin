@@ -114,3 +114,44 @@ test_regular_spans_dont_alias :: proc(t: ^testing.T) {
 	testing.expect_value(t, blocks[0].spans[3].text, "C")
 	testing.expect_value(t, blocks[0].spans[4].text, " ccc")
 }
+
+@(test)
+test_heading_h1 :: proc(t: ^testing.T) {
+	blocks := parse("# Hello", context.temp_allocator)
+	testing.expect_value(t, len(blocks), 1)
+	testing.expect_value(t, blocks[0].kind, Block_Kind.Heading_1)
+	testing.expect_value(t, len(blocks[0].spans), 1)
+	testing.expect_value(t, blocks[0].spans[0].text, "Hello")
+}
+
+@(test)
+test_heading_h6 :: proc(t: ^testing.T) {
+	blocks := parse("###### Hello", context.temp_allocator)
+	testing.expect_value(t, len(blocks), 1)
+	testing.expect_value(t, blocks[0].kind, Block_Kind.Heading_6)
+}
+
+@(test)
+test_heading_with_emphasis :: proc(t: ^testing.T) {
+	blocks := parse("## Hello **bold**", context.temp_allocator)
+	testing.expect_value(t, len(blocks), 1)
+	testing.expect_value(t, blocks[0].kind, Block_Kind.Heading_2)
+	testing.expect_value(t, len(blocks[0].spans), 2)
+	testing.expect_value(t, blocks[0].spans[0].style, Span_Style.Regular)
+	testing.expect_value(t, blocks[0].spans[1].style, Span_Style.Bold)
+	testing.expect_value(t, blocks[0].spans[1].text, "bold")
+}
+
+@(test)
+test_heading_too_many_hashes_is_paragraph :: proc(t: ^testing.T) {
+	blocks := parse("####### Not a heading", context.temp_allocator)
+	testing.expect_value(t, len(blocks), 1)
+	testing.expect_value(t, blocks[0].kind, Block_Kind.Paragraph)
+}
+
+@(test)
+test_heading_no_space_is_paragraph :: proc(t: ^testing.T) {
+	blocks := parse("#NotHeading", context.temp_allocator)
+	testing.expect_value(t, len(blocks), 1)
+	testing.expect_value(t, blocks[0].kind, Block_Kind.Paragraph)
+}
