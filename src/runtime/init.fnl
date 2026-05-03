@@ -16,6 +16,9 @@
 ;; Wire effect handler: dataflow dispatch -> effect execute
 (dataflow.set-effect-handler effect.execute)
 
+;; Install framework default :md/* theme entries.
+((. (require :markdown) :install))
+
 ;; Install agent event handler
 ((. (require :agent) :install))
 

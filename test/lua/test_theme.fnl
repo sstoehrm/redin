@@ -194,4 +194,13 @@
   (let [resolved (theme.resolve :bar [])]
     (assert (= 5 (. resolved :color 1)))))
 
+(fn t.test-md-defaults-registered []
+  ;; init.fnl is not loaded by the test runner — install the
+  ;; defaults manually for this test, after a reset that clears them.
+  (theme.reset)
+  ((. (require :markdown) :install))
+  (let [resolved (theme.resolve :md/body [])]
+    (assert resolved.font-size
+            "expected :md/body to have a default :font-size")))
+
 t
