@@ -22,7 +22,13 @@
       ((rawget redin-tbl :set_theme) (shallow-merge default-theme-table t)))))
 
 (fn M.set-defaults [t]
-  (set default-theme-table t))
+  (set default-theme-table t)
+  ;; Push to host so apps that never call set-theme still get the
+  ;; default aspects (md/*) on the Odin side. Merge semantics mirror
+  ;; set-theme: defaults as base, current theme overlay on top.
+  (let [redin-tbl (rawget _G :redin)]
+    (when (and redin-tbl (rawget redin-tbl :set_theme))
+      ((rawget redin-tbl :set_theme) (shallow-merge t theme-table)))))
 
 (fn M.reset []
   (set theme-table {})
