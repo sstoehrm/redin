@@ -709,7 +709,7 @@ handle_get_frames :: proc(ds: ^Dev_Server, ch: ^Response_Channel) {
 	b := strings.builder_make()
 	defer strings.builder_destroy(&b)
 	dfs_idx := 0
-	frame_value_to_json(&b, L, -1, ds.current_rects, &dfs_idx)
+	frame_value_to_json(&b, L, -1, ds.current_rects, ds.bridge.markdown_skips, &dfs_idx)
 	lua_pop(L, 1)
 	respond_json(ch, strings.to_string(b))
 }
@@ -722,10 +722,13 @@ handle_get_frames :: proc(ds: ^Dev_Server, ch: ^Response_Channel) {
 // e.g. canvas attribute tables), defers to lua_value_to_json.
 //
 // Mirrors lua_read_node's flattening order. dfs_idx must be incremented
-// exactly once per node (vector with a tag at slot 1).
+// exactly once per node (vector with a tag at slot 1) — except for
+// [:markdown], which lowers to N flat-array nodes via flatten_subtree;
+// the walker advances by N to keep aligned with subsequent siblings,
+// using the skip count recorded at flatten time.
 frame_value_to_json :: proc(
 	b: ^strings.Builder, L: ^Lua_State, index: i32,
-	rects: []rl.Rectangle, dfs_idx: ^int,
+	rects: []rl.Rectangle, markdown_skips: map[i32]i32, dfs_idx: ^int,
 ) {
 	// Normalise to absolute so the index stays valid as we push values.
 	idx := index < 0 ? lua_gettop(L) + index + 1 : index
@@ -751,6 +754,13 @@ frame_value_to_json :: proc(
 	// Capture rect now (before recursing into children, which would advance dfs_idx).
 	my_idx := dfs_idx^
 	dfs_idx^ += 1
+	// [:markdown] expands the flat array by N nodes; advance past them
+	// so the next sibling reads the correct rect.
+	if tag == "markdown" {
+		if skip, ok := markdown_skips[i32(my_idx)]; ok && skip > 1 {
+			dfs_idx^ += int(skip) - 1
+		}
+	}
 	rect_str := ""
 	if my_idx >= 0 && my_idx < len(rects) {
 		r := rects[my_idx]
@@ -802,7 +812,7 @@ frame_value_to_json :: proc(
 	for i in 3..=n {
 		strings.write_string(b, ",")
 		lua_rawgeti(L, idx, i32(i))
-		frame_value_to_json(b, L, -1, rects, dfs_idx)
+		frame_value_to_json(b, L, -1, rects, markdown_skips, dfs_idx)
 		lua_pop(L, 1)
 	}
 	strings.write_string(b, "]")

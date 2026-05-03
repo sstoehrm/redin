@@ -29,6 +29,13 @@ Bridge :: struct {
 	parent_indices:  [dynamic]int,
 	children_list:   [dynamic]types.Children,
 	node_animations: [dynamic]Maybe(types.Animate_Decoration),
+	// Side-channel for the /frames walker: every [:markdown] element
+	// expands into N flat-array nodes (wrapper + lowered subtree) but
+	// the walker visits the original Fennel tree where the markdown is
+	// just one node. After visiting a markdown, the walker must skip
+	// past the lowered subtree's flat indices to keep dfs_idx aligned
+	// with siblings. Keyed by the wrapper's flat index, value is N.
+	markdown_skips:  map[i32]i32,
 	theme:           map[string]types.Theme,
 	http_client:     Http_Client,
 	shell_client:    Shell_Client,
@@ -113,6 +120,7 @@ destroy :: proc(b: ^Bridge) {
 	http_client_destroy(&b.http_client)
 	shell_client_destroy(&b.shell_client)
 	clear_frame(b)
+	delete(b.markdown_skips)
 	for k in b.theme {
 		delete(k)
 	}
@@ -337,6 +345,7 @@ clear_frame :: proc(b: ^Bridge) {
 	}
 	delete(b.node_animations)
 	b.node_animations = {}
+	clear(&b.markdown_skips)
 }
 
 // ---------------------------------------------------------------------------
@@ -1128,6 +1137,13 @@ size_f32_to_f16 :: proc(v: union {types.SizeValue, f32}) -> union {types.SizeVal
 // markdown block sits at the top level).
 flatten_subtree :: proc(b: ^Bridge, tree: markdown.LoweredTree, parent_flat_idx: i32, cur: ^[dynamic]u8) {
 	local_to_flat := make([]i32, len(tree.nodes), context.temp_allocator)
+
+	// Record the wrapper's flat index → subtree size so the /frames
+	// walker can skip past the lowered subtree when advancing to the
+	// next sibling. Wrapper is always local index 0.
+	if len(tree.nodes) > 0 {
+		b.markdown_skips[i32(len(b.nodes))] = i32(len(tree.nodes))
+	}
 
 	// Pass 1: append nodes. DFS order matches lower()'s emission order.
 	for node, i in tree.nodes {

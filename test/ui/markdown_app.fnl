@@ -20,4 +20,8 @@ on the next line.
 
 - first item
 - second item
-- third item"]])
+- third item"]
+    ;; Sentinel sibling — guards `/frames` rect alignment for nodes
+    ;; placed after a [:markdown] (the wrapper lowers to N flat-array
+    ;; entries; the walker must skip past all of them).
+    [:text {:id :sentinel :width :full :height 40} "AFTER"]])
