@@ -23,7 +23,7 @@ Requires: `libssl-dev`, `libraylib-dev`, and the `lib/odin-http` git submodule (
 luajit test/lua/runner.lua test/lua/test_*.fnl
 ```
 
-Covers dataflow, effects, frames, views, themes, canvas, and shell. Currently 122 tests. Run after any change to `src/runtime/`.
+Covers dataflow, effects, frames, views, themes, canvas, and shell. Currently 133 tests. Run after any change to `src/runtime/`.
 
 ## UI integration tests
 

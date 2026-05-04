@@ -76,7 +76,7 @@ test_write_private_no_follow_refuses_symlink :: proc(t: ^testing.T) {
 
 @(test)
 test_write_private_no_follow_replaces_stale_regular_file :: proc(t: ^testing.T) {
-	// A previous --dev run that crashed leaves .redin-token behind as a
+	// A previous dev run that crashed leaves .redin-token behind as a
 	// regular file with mode 0600. The next run must be able to replace
 	// it (otherwise dev mode breaks after any crash). The replacement
 	// must NOT preserve any prior content.

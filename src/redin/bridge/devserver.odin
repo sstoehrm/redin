@@ -92,7 +92,7 @@ sync_queue_drain :: proc(sq: ^Sync_Queue, out: ^[dynamic]^Pending_Request) {
 //
 // On EEXIST we lstat the path and only retry after unlinking when the
 // existing entry is a regular file — handles the legitimate case where
-// a previous --dev run crashed without cleaning up. Symlinks raise
+// a previous dev run crashed without cleaning up. Symlinks raise
 // ELOOP under O_NOFOLLOW, FIFOs/sockets/devices fall through without
 // retry, so neither path can be hijacked.
 write_private_no_follow :: proc(path: string, data: []u8) -> bool {

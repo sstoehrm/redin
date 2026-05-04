@@ -159,3 +159,35 @@ jobs:
             redin-cli new-fnl my-app
             cd my-app && ./redinw main.fnl
             ```
+
+            ## Breaking changes from prior releases
+
+            The `--dev`, `--profile`, and `--track-mem` runtime CLI flags
+            are removed. They become compile-time `-define`s
+            (`REDIN_DEV`, `REDIN_PROFILE`, `REDIN_TRACK_MEM`). The
+            shipped `redin` binary has all three baked in (its audience
+            is AI workflow drivers that need the dev server); a bare
+            `odin build` still produces a release-stripped variant.
+
+            **Migrating an existing `--native` project:**
+
+            ```diff
+            # app.odin
+              cfg: redin.Config
+            - cfg.dev = true
+            - cfg.profile = true
+              cfg.app = "main.fnl"
+              redin.run(cfg)
+
+            # build.sh — add the three -define flags before -out:
+              odin build "$SCRIPT_DIR" \
+                -collection:lib="$SCRIPT_DIR/.redin/lib" \
+                -collection:luajit="$SCRIPT_DIR/.redin/vendor/luajit" \
+            +   -define:REDIN_DEV=true \
+            +   -define:REDIN_PROFILE=true \
+            +   -define:REDIN_TRACK_MEM=true \
+                -out:"$SCRIPT_DIR/build/redin"
+            ```
+
+            The F3 frame-timing overlay is now visible by default in any
+            binary built with `REDIN_PROFILE=true`. Press F3 to hide it.
