@@ -58,10 +58,14 @@ git submodule update --init --recursive
 
 # --- Build ---
 echo ""
-echo "Building redin..."
+echo "Building redin (dev binary: REDIN_DEV / REDIN_PROFILE / REDIN_TRACK_MEM baked in)..."
 mkdir -p build
-odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit -out:build/redin
+./build-dev.sh
 
 echo ""
 echo "=== Setup complete ==="
-echo "  ./build/redin --dev examples/kitchen-sink.fnl"
+echo "  ./build/redin examples/kitchen-sink.fnl"
+echo ""
+echo "Dev server (port + auth token in .redin-port / .redin-token) starts"
+echo "automatically because REDIN_DEV is compiled in. For a stripped"
+echo "release binary, use bare 'odin build' instead of ./build-dev.sh."

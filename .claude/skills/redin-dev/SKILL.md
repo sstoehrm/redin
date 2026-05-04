@@ -422,10 +422,12 @@ main :: proc() {
 ### Running
 
 ```bash
-./build-dev.sh                    # rebuild with REDIN_DEV=true (dev server enabled)
+./build-dev.sh                    # rebuild with REDIN_DEV / REDIN_PROFILE / REDIN_TRACK_MEM all baked in
 ./build/redin main.fnl            # built with REDIN_DEV → dev server starts
-./build.sh                        # (--native only) rebuild after editing app.odin (release build)
+./build.sh                        # (--native only) rebuild after editing app.odin (dev build with REDIN_DEV / REDIN_PROFILE / REDIN_TRACK_MEM)
 ```
+
+**Migrating from pre-compile-time-flags `--native` projects:** if your `app.odin` sets `cfg.dev = true` or `cfg.profile = true`, drop those lines (`Config` only has `app: string` now). Add `-define:REDIN_DEV=true -define:REDIN_PROFILE=true -define:REDIN_TRACK_MEM=true` to your `build.sh` before the `-out:` flag — the scaffolded template already does this for new projects.
 
 ## Key conventions
 

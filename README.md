@@ -31,7 +31,7 @@ curl -sL https://raw.githubusercontent.com/sstoehrm/redin-cli/main/install.sh | 
 # Create a Fennel project
 redin-cli new-fnl my-app
 cd my-app
-./redinw --dev main.fnl
+./redinw main.fnl
 
 # Or a Lua project
 redin-cli new-lua my-app
@@ -45,11 +45,17 @@ The CLI downloads a pinned redin binary into `.redin/` — no build tools needed
 # Prerequisites (Ubuntu/Debian)
 sudo apt-get install -y luajit libluajit-5.1-dev libssl-dev
 
-# Build
-odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit -out:build/redin
+# Dev build (bakes in REDIN_DEV / REDIN_PROFILE / REDIN_TRACK_MEM)
+./build-dev.sh
 
-# Run
-./build/redin --dev examples/kitchen-sink.fnl
+# Run — dev server starts because REDIN_DEV is compiled in
+./build/redin examples/kitchen-sink.fnl
+```
+
+For a release-stripped binary (no dev server, no profile, no tracker), use bare `odin build` instead:
+
+```bash
+odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit -out:build/redin
 ```
 
 | Dependency | Purpose | Required |
