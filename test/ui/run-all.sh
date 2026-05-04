@@ -45,7 +45,7 @@ TOTAL_FAILED=0
 
 # Build
 echo "=== Building redin ==="
-odin build "$ROOT_DIR/src/cmd/redin" -collection:lib="$ROOT_DIR/lib" -collection:luajit="$ROOT_DIR/vendor/luajit" -out:"$BINARY"
+( cd "$ROOT_DIR" && ./build-dev.sh )
 echo ""
 
 wait_for_server() {
@@ -91,7 +91,7 @@ for test_file in "$SCRIPT_DIR"/test_*.bb; do
 
   # Start dev server in background
   rm -f "$PORT_FILE"
-  "${LAUNCHER[@]}" "$BINARY" --dev "${extra_flags[@]}" "$app_file" &
+  "${LAUNCHER[@]}" "$BINARY" "${extra_flags[@]}" "$app_file" &
   SERVER_PID=$!
 
   if ! wait_for_server; then

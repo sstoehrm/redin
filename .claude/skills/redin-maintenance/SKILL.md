@@ -45,7 +45,8 @@ Builds redin, then for each pair: starts dev server, runs tests, shuts down. Req
 ### Run one
 
 ```bash
-./build/redin --dev test/ui/<component>_app.fnl &
+./build-dev.sh
+./build/redin test/ui/<component>_app.fnl &
 bb test/ui/run.bb test/ui/test_<component>.bb
 PORT=$(cat .redin-port); TOKEN=$(cat .redin-token)
 curl -s -X POST -H "Authorization: Bearer $TOKEN" \
@@ -68,20 +69,19 @@ Drag tests exercise the real input pipeline through the `/input/takeover` / `/in
 
 ## Memory leak detection
 
-Add `--track-mem` to enable the tracking allocator:
+Build with `./build-dev.sh` to enable the tracking allocator (REDIN_TRACK_MEM is baked in):
 
 ```bash
-./build/redin --dev --track-mem test/ui/<component>_app.fnl
+./build-dev.sh
+./build/redin test/ui/<component>_app.fnl
 ```
 
 On shutdown, the tracking allocator reports outstanding allocations. Check stderr/stdout for lines containing `leak` or `outstanding`.
 
-To run all integration tests with memory tracking:
+To run all integration tests with memory tracking, the tracker is already active in the dev build — just run:
 
 ```bash
-# Modify run-all.sh's server start line to include --track-mem:
-#   "$BINARY" --dev --track-mem "$app_file" &
-# Or run manually per-component as above.
+bash test/ui/run-all.sh --headless
 ```
 
 ## Verification checklist
@@ -92,7 +92,7 @@ After changes to the framework, verify in this order:
 2. **Runtime tests** — `luajit test/lua/runner.lua test/lua/test_*.fnl`
 3. **Integration tests** — `bash test/ui/run-all.sh`
 4. **Visual check** — for rendering changes, take a screenshot via `GET /screenshot` on the dev server and inspect
-5. **Memory check** — for allocation/bridge changes, run with `--track-mem` and verify no leaks on shutdown
+5. **Memory check** — for allocation/bridge changes, use `./build-dev.sh && bash test/ui/run-all.sh` (tracker is built in) and verify no leaks on shutdown
 6. **Docs + skills** — see below
 
 ## Keeping docs and skills in sync
@@ -133,7 +133,7 @@ If a contract was described incorrectly (not just incompletely), fix the doc eve
 | `src/redin/types/` | Yes | - | Yes | - |
 | `src/redin/text/` | Yes | - | Yes (multiline) | - |
 | `src/redin/canvas/` | Yes | - | Yes (canvas) | - |
-| `src/cmd/redin/` (CLI flags, --track-mem) | Yes | - | - | Yes |
+| `src/cmd/redin/` (top-level main, REDIN_TRACK_MEM gating) | Yes | - | - | Yes |
 
 ## Agent channel build
 
@@ -141,8 +141,7 @@ The agent channel feature is gated by `-define:REDIN_AGENT=true`. To
 run its UI test suite, build with the flag:
 
 ```bash
-odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit \
-    -define:REDIN_AGENT=true -out:build/redin
+./build-dev.sh -define:REDIN_AGENT=true
 bash test/ui/run-all.sh --headless
 ```
 
@@ -179,7 +178,7 @@ The release workflow runs `scripts/smoke-native.sh <tarball>` after packaging an
 2. Copy the local checkout's `src/redin/.` into `<tmp>/.redin/src/redin/` (simulates redin-cli's `fetch-source`).
 3. Drop a project-root `app.odin` (with `import redin "./.redin/src/redin"`) and `build.sh`.
 4. Run `./build.sh` from project root (uses `-collection:lib=.redin/lib -collection:luajit=.redin/vendor/luajit`).
-5. Launch the resulting binary under `--dev`, assert `/frames` contains a sentinel string from `main.fnl`. The sentinel check is what catches broken runtime lookup — just polling `/state` returns 200 even when Fennel fails to load.
+5. Launch the resulting binary, assert `/frames` contains a sentinel string from `main.fnl`. The sentinel check is what catches broken runtime lookup — just polling `/state` returns 200 even when Fennel fails to load.
 
 Run it locally before a release:
 

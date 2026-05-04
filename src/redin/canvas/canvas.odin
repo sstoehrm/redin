@@ -1,6 +1,11 @@
 // src/redin/canvas/canvas.odin
 package canvas
 
+// Same compile-time flag declared in bridge — Odin's `#config` reads
+// the same -define value regardless of which package declares it, so
+// this stays in lockstep without a cross-package import.
+REDIN_DEV :: #config(REDIN_DEV, false)
+
 import "core:fmt"
 import rl "vendor:raylib"
 
@@ -26,18 +31,9 @@ Canvas_Entry :: struct {
 entries: map[string]Canvas_Entry
 current_name: string
 
-@(private = "file")
-g_dev_mode: bool
-
-// Toggle dev-mode warnings. Called by redin.run; user code shouldn't need
-// this directly.
-set_dev_mode :: proc(dev: bool) {
-	g_dev_mode = dev
-}
-
 register :: proc(name: string, provider: Canvas_Provider) {
 	if existing, ok := entries[name]; ok {
-		if g_dev_mode {
+		when REDIN_DEV {
 			fmt.eprintfln("redin: warn: canvas.register(%q) replaces an existing provider", name)
 		}
 		if existing.provider.stop != nil {

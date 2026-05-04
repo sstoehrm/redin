@@ -3,7 +3,7 @@
 #
 # Takes the release tarball and simulates redin-cli's upgrade-to-native
 # flow against the current checkout: extract tarball → native/ tree →
-# ./build.sh → launch binary under --dev → curl /state.
+# ./build.sh → launch binary → curl /state.
 #
 # Catches contract breaks between the host source and the release tarball
 # (missing files, bad collection paths, runtime asset lookup) before the
@@ -52,7 +52,6 @@ import redin "./.redin/src/redin"
 
 main :: proc() {
 	cfg: redin.Config
-	cfg.dev = true
 	cfg.app = "main.fnl"
 	redin.run(cfg)
 }
@@ -66,6 +65,9 @@ mkdir -p "$SCRIPT_DIR/build"
 odin build "$SCRIPT_DIR" \
   -collection:lib="$SCRIPT_DIR/.redin/lib" \
   -collection:luajit="$SCRIPT_DIR/.redin/vendor/luajit" \
+  -define:REDIN_DEV=true \
+  -define:REDIN_PROFILE=true \
+  -define:REDIN_TRACK_MEM=true \
   -out:"$SCRIPT_DIR/build/redin"
 BUILD_SH
 chmod +x "$PROJECT/build.sh"
@@ -89,8 +91,8 @@ fi
 cd "$PROJECT"
 rm -f .redin-port .redin-token
 
-echo "=== 4/5 launching build/redin --dev ==="
-"${LAUNCHER[@]}" "$PROJECT/build/redin" --dev main.fnl &
+echo "=== 4/5 launching build/redin ==="
+"${LAUNCHER[@]}" "$PROJECT/build/redin" main.fnl &
 PID=$!
 
 cleanup() {

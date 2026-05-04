@@ -45,10 +45,10 @@ jobs:
         run: |
           luajit test/lua/runner.lua test/lua/test_*.fnl
           mkdir -p build
-          odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit -out:build/redin
+          ./build-dev.sh
 
       - name: Build release binary
-        run: odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit -out:build/redin -o:speed
+        run: ./build-dev.sh -o:speed
 
       - name: AOT compile Fennel runtime
         run: |
@@ -97,6 +97,7 @@ jobs:
           rm -rf dist-agent
           mkdir -p dist-agent
           odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit \
+            -define:REDIN_DEV=true -define:REDIN_PROFILE=true -define:REDIN_TRACK_MEM=true \
             -define:REDIN_AGENT=true -out:dist-agent/redin -o:speed
 
       - name: Package agent release
@@ -146,14 +147,15 @@ jobs:
           files: artifacts/**/*.tar.gz
           body: |
             ## What's included
-            - `redin` binary (Linux x86_64, LuaJIT statically linked)
+            - `redin` binary (Linux x86_64, LuaJIT statically linked,
+              built with REDIN_DEV / REDIN_PROFILE / REDIN_TRACK_MEM)
             - AOT-compiled Fennel runtime
-            - Fennel compiler (for --dev mode hot reload)
+            - Fennel compiler (for hot reload)
             - Developer documentation (guides + reference)
             - Claude Code skill for redin development
 
             ## Quick start
             ```
             redin-cli new-fnl my-app
-            cd my-app && ./redinw --dev main.fnl
+            cd my-app && ./redinw main.fnl
             ```

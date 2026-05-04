@@ -10,11 +10,12 @@ import "core:time"
 
 @(test)
 test_ring_fill_short :: proc(t: ^testing.T) {
+    when !REDIN_PROFILE { return }
     sync.lock(&test_mu)
     defer sync.unlock(&test_mu)
 
-    init(true)
-    defer init(false) // reset
+    init()
+    defer init() // reset
 
     for i in 0 ..< 30 {
         begin_frame()
@@ -32,11 +33,12 @@ test_ring_fill_short :: proc(t: ^testing.T) {
 
 @(test)
 test_ring_wrap :: proc(t: ^testing.T) {
+    when !REDIN_PROFILE { return }
     sync.lock(&test_mu)
     defer sync.unlock(&test_mu)
 
-    init(true)
-    defer init(false)
+    init()
+    defer init()
 
     for i in 0 ..< 200 {
         begin_frame()
@@ -55,31 +57,37 @@ test_ring_wrap :: proc(t: ^testing.T) {
 
 @(test)
 test_disabled_is_noop :: proc(t: ^testing.T) {
+    // When REDIN_PROFILE is false at compile time, all procs are no-ops
+    // and is_enabled() always returns false. Verify that invariant.
     sync.lock(&test_mu)
     defer sync.unlock(&test_mu)
 
-    init(false)
+    when !REDIN_PROFILE {
+        begin_frame()
+        s := begin(.Input)
+        end(s)
+        end_frame()
 
-    begin_frame()
-    s := begin(.Input)
-    end(s)
-    end_frame()
+        samples := make([dynamic]FrameSample)
+        defer delete(samples)
+        snapshot_into(&samples)
 
-    samples := make([dynamic]FrameSample)
-    defer delete(samples)
-    snapshot_into(&samples)
-
-    testing.expect_value(t, len(samples), 0)
-    testing.expect_value(t, is_enabled(), false)
+        testing.expect_value(t, len(samples), 0)
+        testing.expect_value(t, is_enabled(), false)
+    } else {
+        // REDIN_PROFILE=true: is_enabled always returns true.
+        testing.expect_value(t, is_enabled(), true)
+    }
 }
 
 @(test)
 test_phase_accumulation :: proc(t: ^testing.T) {
+    when !REDIN_PROFILE { return }
     sync.lock(&test_mu)
     defer sync.unlock(&test_mu)
 
-    init(true)
-    defer init(false)
+    init()
+    defer init()
 
     begin_frame()
     s := begin(.Input)

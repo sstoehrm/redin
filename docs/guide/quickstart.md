@@ -89,11 +89,15 @@ The window opens. Click the button -- the counter increments.
 
 ### Dev mode
 
+Build with the dev server enabled:
+
 ```sh
-./build/redin --dev counter.fnl
+odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit \
+    -define:REDIN_DEV=true -out:build/redin-dev
+./build/redin-dev counter.fnl
 ```
 
-`--dev` enables the HTTP dev server. It picks port 8800 by default (walks upward if busy) and writes the bound port to `./.redin-port` plus a per-run bearer token to `./.redin-token`.
+The HTTP dev server picks port 8800 by default (walks upward if busy) and writes the bound port to `./.redin-port` plus a per-run bearer token to `./.redin-token`.
 
 ```sh
 PORT=$(cat .redin-port)

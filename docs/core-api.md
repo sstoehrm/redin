@@ -86,11 +86,11 @@ For most apps this is fine — the app author chose the URL. If your app embeds 
 
 A 16 MiB cap on response bodies is enforced by the host (oversized announcements fail fast with a "Response body too large" error). Per-request wall-clock timeout is not yet wired through to the worker thread; the `:timeout` field on the effect is currently advisory.
 
-### Dev server (`--dev`)
+### Dev server (built with `-define:REDIN_DEV=true`)
 
 The dev server is the one place redin actively defends against external callers. It binds loopback only and requires a per-run Bearer token written to `./.redin-token` (mode 0600) plus a matching `Host` header to defend against DNS rebinding. See [Dev server](#dev-server-http) below for details.
 
-Production builds (no `--dev`) don't run the server at all and have no listening sockets.
+Production builds (built without `-define:REDIN_DEV=true`) don't run the server at all and have no listening sockets.
 
 ---
 
@@ -552,7 +552,7 @@ Providers register in Odin via `canvas.register(name, provider)`. See the [canva
 
 ## Dev server (HTTP)
 
-Runs on `localhost:8800` when started with `--dev` flag. All responses are JSON unless noted.
+Runs on `localhost:8800` when the binary was built with `-define:REDIN_DEV=true` (or `-define:REDIN_AGENT=true`). All responses are JSON unless noted.
 
 **Authentication.** Every non-`OPTIONS` request must include `Authorization: Bearer <token>`, where the token is read from `./.redin-token` (generated on startup, mode 0600, removed on shutdown). The server also verifies the `Host` header is `localhost:<port>` or `127.0.0.1:<port>` (DNS-rebinding defence). Missing token → `401`, bad Host → `403`, `OPTIONS` → `405` (CORS preflight not served — the endpoint is for local tools, not browsers). See [dev-server reference](../reference/dev-server.md) for usage examples.
 
@@ -654,7 +654,7 @@ odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit \
 ```
 
 Default release builds carry zero agent code. When the flag is set,
-the dev-server listener starts even without `--dev` and exposes the
+the dev-server listener starts automatically and exposes the
 `/agent/*` endpoints.
 
 The `/frames` endpoint shape is unchanged when `REDIN_AGENT` is on.

@@ -97,8 +97,10 @@ apply_register_cfunc :: proc(name: cstring, fn: proc(L: ^Lua_State) -> i32) {
 	L := g_bridge.L
 	if !get_redin_table(L, "register_cfunc", name) do return
 
-	if g_bridge.dev_mode && field_is_set(L, name) {
-		fmt.eprintfln("redin: warn: bridge.register_cfunc(%q) replaces an existing binding", name)
+	when REDIN_DEV {
+		if field_is_set(L, name) {
+			fmt.eprintfln("redin: warn: bridge.register_cfunc(%q) replaces an existing binding", name)
+		}
 	}
 
 	// Push the user proc pointer as a lightuserdata upvalue, then build a
@@ -116,8 +118,10 @@ apply_register_cfunc_raw :: proc(name: cstring, fn: Lua_CFunction) {
 	L := g_bridge.L
 	if !get_redin_table(L, "register_cfunc_raw", name) do return
 
-	if g_bridge.dev_mode && field_is_set(L, name) {
-		fmt.eprintfln("redin: warn: bridge.register_cfunc_raw(%q) replaces an existing binding", name)
+	when REDIN_DEV {
+		if field_is_set(L, name) {
+			fmt.eprintfln("redin: warn: bridge.register_cfunc_raw(%q) replaces an existing binding", name)
+		}
 	}
 
 	lua_pushcfunction(L, fn)

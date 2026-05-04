@@ -36,7 +36,7 @@ jobs:
       - name: Build redin
         run: |
           mkdir -p build
-          odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit -out:build/redin
+          ./build-dev.sh
 
   test-agent:
     runs-on: ubuntu-latest
@@ -67,8 +67,7 @@ jobs:
       - name: Build redin (REDIN_AGENT=true)
         run: |
           mkdir -p build
-          odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit \
-            -define:REDIN_AGENT=true -out:build/redin
+          ./build-dev.sh -define:REDIN_AGENT=true
 
       - name: Run UI tests under xvfb (includes agent suite)
         run: bash test/ui/run-all.sh --headless
