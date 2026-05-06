@@ -78,13 +78,13 @@ Http_Response :: struct {
 	error_msg: string,
 }
 
-// Per-in-flight-request entry tracked on Http_Client.pending. The id_owned
-// string is the same allocation as the map key — when the entry is removed
-// (either by the worker on completion, or by the poll-loop sweep on
-// timeout) the freer must `delete_key` first then `delete(id_owned)`. The
-// map's deletion does not free the key string.
 @(private = "file")
 Pending_Http :: struct {
+	// The `id_owned` string is the same allocation as the map key for
+	// this entry; freeing it once after `delete_key` releases both.
+	// This is independent of the caller-supplied `req.id`, which is
+	// owned by the worker's `Http_Response` and freed via
+	// `http_response_destroy`. Don't try to dedupe them.
 	id_owned: string,
 	deadline: time.Time,
 }
