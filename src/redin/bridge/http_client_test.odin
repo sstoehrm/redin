@@ -120,3 +120,65 @@ test_http_response_cap_rejects_oversized_content_length :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(got.error_msg, "too large"),
 		fmt.tprintf("expected error_msg to mention 'too large', got %q", got.error_msg))
 }
+
+@(test)
+test_http_header_value_rejects_crlf :: proc(t: ^testing.T) {
+	headers := make(map[string]string)
+	headers[strings.clone("X-Smuggle")] = strings.clone("evil\r\nHost: attacker")
+	defer {
+		for k, v in headers { delete(k); delete(v) }
+		delete(headers)
+	}
+
+	req := Http_Request{
+		id      = strings.clone("crlf-test"),
+		url     = strings.clone("http://127.0.0.1:1/"),
+		method  = strings.clone("GET"),
+		headers = headers,
+	}
+	defer {
+		delete(req.id); delete(req.url); delete(req.method)
+	}
+
+	got := execute_http_request(req)
+	defer {
+		delete(got.body); delete(got.error_msg)
+		for k, v in got.headers { delete(k); delete(v) }
+		delete(got.headers)
+	}
+
+	testing.expect(t, got.status == 0, "expected synthesized error status 0")
+	testing.expect(t, strings.contains(got.error_msg, "invalid character"),
+		fmt.tprintf("expected 'invalid character' in error_msg, got %q", got.error_msg))
+}
+
+@(test)
+test_http_header_key_rejects_nul :: proc(t: ^testing.T) {
+	headers := make(map[string]string)
+	headers[strings.clone("X-Bad\x00key")] = strings.clone("ok")
+	defer {
+		for k, v in headers { delete(k); delete(v) }
+		delete(headers)
+	}
+
+	req := Http_Request{
+		id      = strings.clone("nul-test"),
+		url     = strings.clone("http://127.0.0.1:1/"),
+		method  = strings.clone("GET"),
+		headers = headers,
+	}
+	defer {
+		delete(req.id); delete(req.url); delete(req.method)
+	}
+
+	got := execute_http_request(req)
+	defer {
+		delete(got.body); delete(got.error_msg)
+		for k, v in got.headers { delete(k); delete(v) }
+		delete(got.headers)
+	}
+
+	testing.expect(t, got.status == 0, "expected synthesized error status 0")
+	testing.expect(t, strings.contains(got.error_msg, "invalid character"),
+		fmt.tprintf("expected 'invalid character' in error_msg, got %q", got.error_msg))
+}

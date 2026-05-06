@@ -15,6 +15,14 @@ import http_client "lib:odin-http/client"
 // misbehaving remote could exhaust host memory.
 HTTP_MAX_BODY :: 16 * 1024 * 1024 // 16 MiB
 
+@(private = "file")
+header_safe :: proc(s: string) -> bool {
+	for r in s {
+		if r == '\r' || r == '\n' || r == 0 do return false
+	}
+	return true
+}
+
 Http_Request :: struct {
 	id:      string,
 	url:     string,
@@ -133,6 +141,14 @@ execute_http_request :: proc(req: Http_Request) -> Http_Response {
 	http_req: http_client.Request
 	http_client.request_init(&http_req, method)
 	defer http_client.request_destroy(&http_req)
+
+	for k, v in req.headers {
+		if !header_safe(k) || !header_safe(v) {
+			response.status = 0
+			response.error_msg = strings.clone("http header contains invalid character")
+			return response
+		}
+	}
 
 	for k, v in req.headers {
 		http.headers_set(&http_req.headers, k, v)
