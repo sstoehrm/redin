@@ -1,5 +1,6 @@
 package bridge
 
+import "base:runtime"
 import "core:fmt"
 import "core:os"
 import "core:strings"
@@ -88,7 +89,6 @@ shell_request_destroy :: proc(req: ^Shell_Request) {
 	delete(req.cmd)
 }
 
-@(private = "file")
 execute_shell :: proc(req: Shell_Request) -> Shell_Response {
 	response: Shell_Response
 	response.id = strings.clone(req.id)
@@ -133,12 +133,29 @@ execute_shell :: proc(req: Shell_Request) -> Shell_Response {
 		stdin_w = w
 	}
 
+	// Apply the env allowlist (issue #99 M3). When the allowlist is unset,
+	// shell_env_filtered returns nil — and Process_Desc.env = nil is the
+	// documented "inherit current process' environment" sentinel (see
+	// core/os/process.odin's Process_Desc docstring), preserving the
+	// historical full-passthrough behaviour.
+	//
+	// When set, shell_env_filtered allocates each entry + the slice via
+	// runtime.heap_allocator(); we free both after process_start, since
+	// process_start (Linux execve) copies the env into the child image.
+	filtered_env := shell_env_filtered()
+	defer if filtered_env != nil {
+		heap := runtime.heap_allocator()
+		for s in filtered_env do delete(s, heap)
+		delete(filtered_env, heap)
+	}
+
 	// Start process
 	desc := os.Process_Desc {
 		command = req.cmd,
 		stdout  = stdout_w,
 		stderr  = stderr_w,
 		stdin   = stdin_r,
+		env     = filtered_env, // nil = inherit parent env (default)
 	}
 
 	process, start_err := os.process_start(desc)

@@ -5,6 +5,7 @@ package bridge
 import "base:runtime"
 import "core:fmt"
 import "core:net"
+import "core:os"
 import "core:reflect"
 import "core:strconv"
 import "core:strings"
@@ -530,4 +531,90 @@ cidr6_match_bits :: proc(host: net.IP6_Address, net_addr: net.IP6_Address, bits:
 		if (host_bytes[full_bytes] & mask) != (net_bytes[full_bytes] & mask) do return false
 	}
 	return true
+}
+
+// ---------------------------------------------------------------------------
+// Shell env allowlist (issue #99 M3)
+// ---------------------------------------------------------------------------
+//
+// When unset (default), child processes spawned by redin.shell inherit the
+// full parent env (Process_Desc.env = nil is the documented "inherit"
+// sentinel; see core/os/process.odin). When set, only keys present in the
+// allowlist are passed through to the child. Exact match, case-sensitive.
+//
+// Storage uses runtime.heap_allocator() for the same reason as the HTTP
+// whitelist: the allowlist is read on the shell worker thread and written
+// from the main thread; under Odin's parallel test runner, per-thread
+// tracking allocators would otherwise produce spurious "bad free"
+// warnings.
+
+@(private)
+g_shell_env_allowlist:       []string
+@(private)
+g_shell_env_allowlist_mutex: sync.Mutex
+
+set_shell_env_allowlist :: proc(allow: []string) {
+	sync.lock(&g_shell_env_allowlist_mutex)
+	defer sync.unlock(&g_shell_env_allowlist_mutex)
+
+	heap := runtime.heap_allocator()
+
+	for s in g_shell_env_allowlist do delete(s, heap)
+	delete(g_shell_env_allowlist, heap)
+	g_shell_env_allowlist = nil
+
+	if allow == nil do return
+
+	cloned := make([]string, len(allow), heap)
+	for s, i in allow do cloned[i] = strings.clone(s, heap)
+	g_shell_env_allowlist = cloned
+}
+
+// shell_env_filtered returns the filtered env, or nil if the allowlist is
+// unset (caller should leave Process_Desc.env = nil for full passthrough).
+// Returned slice is owned by the caller (free each entry + the slice
+// itself, both with the same allocator that the heap_allocator yields).
+@(private)
+shell_env_filtered :: proc() -> []string {
+	sync.lock(&g_shell_env_allowlist_mutex)
+	defer sync.unlock(&g_shell_env_allowlist_mutex)
+
+	if g_shell_env_allowlist == nil do return nil
+
+	heap := runtime.heap_allocator()
+
+	// os.environ allocates a fresh []string + cloned KEY=VALUE entries
+	// using the supplied allocator. Free the unused entries below.
+	all_env, env_err := os.environ(heap)
+	if env_err != nil {
+		// Fall back to an explicit "no env" rather than passthrough; if the
+		// caller set an allowlist they explicitly opted into restriction,
+		// so a fetch failure must not silently widen the surface.
+		return make([]string, 0, heap)
+	}
+	defer delete(all_env, heap)
+
+	out := make([dynamic]string, 0, len(g_shell_env_allowlist), heap)
+	for entry in all_env {
+		// `entry` is "KEY=VALUE"; extract KEY.
+		eq := strings.index_byte(entry, '=')
+		if eq < 0 {
+			delete(entry, heap)
+			continue
+		}
+		key := entry[:eq]
+		matched := false
+		for allow in g_shell_env_allowlist {
+			if key == allow {
+				matched = true
+				break
+			}
+		}
+		if matched {
+			append(&out, entry) // transfer ownership of the cloned string
+		} else {
+			delete(entry, heap)
+		}
+	}
+	return out[:]
 }
