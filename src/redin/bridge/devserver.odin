@@ -159,25 +159,53 @@ devserver_init :: proc(ds: ^Dev_Server, b: ^Bridge) {
 	ds.expected_host_v4   = fmt.aprintf("127.0.0.1:%d", bound_port)
 	ds.expected_host_name = fmt.aprintf("localhost:%d", bound_port)
 
-	// 0600 — owner read+write only. Previously .redin-port was 0644
-	// which leaked the bound port to anyone who could list the CWD.
-	// Testing helpers run as the same user, so 0600 doesn't regress
-	// them.
-	//
-	// write_private_no_follow refuses to write through a symlink — see
-	// issue #78 finding M1. If a stale symlink in CWD points at a
-	// sensitive file, the dev server logs and continues without writing
-	// rather than overwriting the link target.
-	port_str := fmt.tprintf("%d", bound_port)
-	if !write_private_no_follow(PORT_FILE, transmute([]u8)port_str) {
-		fmt.eprintfln("Warning: could not write %s (refused to follow non-regular path)", PORT_FILE)
-	}
-	if !write_private_no_follow(TOKEN_FILE, transmute([]u8)ds.auth_token) {
-		fmt.eprintfln("Warning: could not write %s (refused to follow non-regular path)", TOKEN_FILE)
+	if !write_port_and_token_files(ds, bound_port) {
+		// Helper has already cleared ds.running and printed a diagnostic.
+		// The TCP socket bound above stays open until devserver_destroy
+		// closes it; devserver_destroy is a no-op when ds.running is
+		// false, so close it explicitly here.
+		net.close(ds.tcp_sock)
+		return
 	}
 
 	ds.server_thread = thread.create_and_start_with_poly_data(ds, server_thread_proc, context)
 	fmt.printfln("Dev server listening on http://localhost:%d (auth token in %s)", bound_port, TOKEN_FILE)
+}
+
+// Writes .redin-port and .redin-token in the current working directory.
+//
+// 0600 — owner read+write only. Previously .redin-port was 0644 which
+// leaked the bound port to anyone who could list the CWD. Testing
+// helpers run as the same user, so 0600 doesn't regress them.
+//
+// write_private_no_follow refuses to write through a symlink — see
+// issue #78 finding M1. A stale symlink in CWD pointing at a sensitive
+// file would otherwise let an attacker redirect the write.
+//
+// On failure this clears ds.running so devserver_init's caller can
+// observe that startup aborted, removes any partial state (e.g. the
+// .redin-port that was written just before the token write failed),
+// and returns false. Failing fast beats logging a warning and
+// continuing: clients authenticate by reading .redin-token, so a
+// server that started without writing it would respond 401 to every
+// request — see issue #99 finding L2.
+@(private = "package")
+write_port_and_token_files :: proc(ds: ^Dev_Server, bound_port: int) -> bool {
+	port_str := fmt.tprintf("%d", bound_port)
+	if !write_private_no_follow(PORT_FILE, transmute([]u8)port_str) {
+		fmt.eprintfln("redin: failed to write %s; aborting dev server", PORT_FILE)
+		ds.running = false
+		return false
+	}
+	if !write_private_no_follow(TOKEN_FILE, transmute([]u8)ds.auth_token) {
+		fmt.eprintfln("redin: failed to write %s; aborting dev server", TOKEN_FILE)
+		// Clean up the port file we just wrote so it doesn't lie about
+		// a live server.
+		os.remove(PORT_FILE)
+		ds.running = false
+		return false
+	}
+	return true
 }
 
 devserver_destroy :: proc(ds: ^Dev_Server) {
