@@ -35,6 +35,11 @@ url_host :: proc(url: string) -> string {
 		if c == '/' || c == '?' || c == '#' { end = i; break }
 	}
 	host := rest[:end]
+	// Strip userinfo: "user:pass@host" → "host". Last `@` since password may
+	// itself be percent-encoded but cannot contain a literal `@`.
+	if at := strings.last_index_byte(host, '@'); at >= 0 {
+		host = host[at+1:]
+	}
 	// Strip IPv6 brackets if present, before stripping port.
 	if strings.has_prefix(host, "[") {
 		if rb := strings.index_byte(host, ']'); rb >= 0 {

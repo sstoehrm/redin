@@ -362,20 +362,11 @@ test_http_whitelist_hostname_case_insensitive :: proc(t: ^testing.T) {
 	set_http_whitelist([]string{"Example.COM"})
 	defer set_http_whitelist(nil)
 
-	req := Http_Request{
-		id = strings.clone("wl-3"),
-		url = strings.clone("http://example.com/"),
-		method = strings.clone("GET"),
-	}
-	defer { delete(req.id); delete(req.url); delete(req.method) }
-	got := execute_http_request(req)
-	defer {
-		delete(got.body); delete(got.error_msg)
-		for k, v in got.headers { delete(k); delete(v) }
-		delete(got.headers)
-	}
-	testing.expect(t, !strings.contains(got.error_msg, "whitelist"),
-		"hostname compare should be case-insensitive")
+	// Direct check against the whitelist function — proves case-insensitive
+	// matching without requiring DNS or a network round-trip.
+	rejected, ok := http_whitelist_check("example.com")
+	testing.expect(t, ok, "case-insensitive match should accept lowercased host")
+	testing.expect_value(t, rejected, "")
 }
 
 @(test)
@@ -404,4 +395,24 @@ test_http_whitelist_cidr_match :: proc(t: ^testing.T) {
 		delete(got.headers)
 	}
 	testing.expect_value(t, got.status, 200)
+}
+
+@(test)
+test_http_whitelist_ipv6_cidr_match :: proc(t: ^testing.T) {
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+
+	set_http_whitelist([]string{"2001:db8::/32"})
+	defer set_http_whitelist(nil)
+
+	{
+		rejected, ok := http_whitelist_check("2001:db8:1234::1")
+		testing.expect(t, ok, "IPv6 inside the /32 should match")
+		testing.expect_value(t, rejected, "")
+	}
+	{
+		rejected, ok := http_whitelist_check("2001:db9::1")
+		testing.expect(t, !ok, "IPv6 outside the /32 must not match")
+		testing.expect_value(t, rejected, "2001:db9::1")
+	}
 }
