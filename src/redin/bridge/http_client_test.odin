@@ -182,3 +182,30 @@ test_http_header_key_rejects_nul :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(got.error_msg, "invalid character"),
 		fmt.tprintf("expected 'invalid character' in error_msg, got %q", got.error_msg))
 }
+
+@(test)
+test_http_redirect_not_followed :: proc(t: ^testing.T) {
+	resp := "HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:1/elsewhere\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+	m := mock_start(resp)
+	if m == nil {
+		testing.fail_now(t, "could not bind a mock server port")
+	}
+	defer mock_stop(m)
+
+	url := fmt.tprintf("http://127.0.0.1:%d/", m.port)
+	req := Http_Request{
+		id = strings.clone("redirect-test"),
+		url = strings.clone(url),
+		method = strings.clone("GET"),
+	}
+	defer { delete(req.id); delete(req.url); delete(req.method) }
+
+	got := execute_http_request(req)
+	defer {
+		delete(got.body); delete(got.error_msg)
+		for k, v in got.headers { delete(k); delete(v) }
+		delete(got.headers)
+	}
+
+	testing.expect_value(t, got.status, 302)
+}
