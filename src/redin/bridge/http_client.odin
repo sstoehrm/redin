@@ -118,6 +118,17 @@ execute_http_request :: proc(req: Http_Request) -> Http_Response {
 	response.id = req.id
 	response.headers = make(map[string]string)
 
+	// Scheme guard. Always-on; not opt-out. M4 from issue #99.
+	{
+		colon := strings.index_byte(req.url, ':')
+		scheme := colon < 0 ? "" : strings.to_lower(req.url[:colon], context.temp_allocator)
+		if scheme != "http" && scheme != "https" {
+			response.status = 0
+			response.error_msg = strings.clone("http scheme must be http or https")
+			return response
+		}
+	}
+
 	method: http.Method
 	lower_method := strings.to_lower(req.method)
 	defer delete(lower_method)

@@ -209,3 +209,62 @@ test_http_redirect_not_followed :: proc(t: ^testing.T) {
 
 	testing.expect_value(t, got.status, 302)
 }
+
+@(test)
+test_http_rejects_ftp_scheme :: proc(t: ^testing.T) {
+	req := Http_Request{
+		id = strings.clone("scheme-1"),
+		url = strings.clone("ftp://example.com/"),
+		method = strings.clone("GET"),
+	}
+	defer { delete(req.id); delete(req.url); delete(req.method) }
+	got := execute_http_request(req)
+	defer {
+		delete(got.body); delete(got.error_msg)
+		for k, v in got.headers { delete(k); delete(v) }
+		delete(got.headers)
+	}
+	testing.expect_value(t, got.status, 0)
+	testing.expect(t, strings.contains(got.error_msg, "scheme"),
+		fmt.tprintf("expected 'scheme' in error_msg, got %q", got.error_msg))
+}
+
+@(test)
+test_http_rejects_file_scheme :: proc(t: ^testing.T) {
+	req := Http_Request{
+		id = strings.clone("scheme-2"),
+		url = strings.clone("file:///etc/passwd"),
+		method = strings.clone("GET"),
+	}
+	defer { delete(req.id); delete(req.url); delete(req.method) }
+	got := execute_http_request(req)
+	defer {
+		delete(got.body); delete(got.error_msg)
+		for k, v in got.headers { delete(k); delete(v) }
+		delete(got.headers)
+	}
+	testing.expect_value(t, got.status, 0)
+	testing.expect(t, strings.contains(got.error_msg, "scheme"),
+		"expected scheme rejection error_msg")
+}
+
+@(test)
+test_http_accepts_uppercase_https :: proc(t: ^testing.T) {
+	// Just confirms scheme matching is case-insensitive — no real connect.
+	// We expect a connect error (status 0, error_msg contains "Request failed"
+	// or similar), NOT the scheme-rejection error_msg.
+	req := Http_Request{
+		id = strings.clone("scheme-3"),
+		url = strings.clone("HTTPS://127.0.0.1:1/"),
+		method = strings.clone("GET"),
+	}
+	defer { delete(req.id); delete(req.url); delete(req.method) }
+	got := execute_http_request(req)
+	defer {
+		delete(got.body); delete(got.error_msg)
+		for k, v in got.headers { delete(k); delete(v) }
+		delete(got.headers)
+	}
+	testing.expect(t, !strings.contains(got.error_msg, "scheme"),
+		"HTTPS (uppercase) must not be rejected as scheme")
+}
