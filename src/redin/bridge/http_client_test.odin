@@ -479,3 +479,103 @@ test_http_timeout_fires :: proc(t: ^testing.T) {
 			fmt.tprintf("expected 'timeout' in error_msg, got %q", results[0].error_msg))
 	}
 }
+
+@(test)
+test_http_inflight_cap_rejects :: proc(t: ^testing.T) {
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+
+	hc: Http_Client
+	http_client_init(&hc)
+	defer http_client_destroy(&hc)
+
+	// Spin up a slow mock so the requests stay in flight.
+	m := new(Mock_Server)
+	for p in 18900 ..< 19000 {
+		s, e := net.listen_tcp(net.Endpoint{address = net.IP4_Loopback, port = p})
+		if e == nil { m.sock = s; m.port = p; break }
+	}
+	if m.port == 0 { testing.fail_now(t, "no port") }
+	m.thread = thread.create_and_start_with_poly_data(m, slow_mock_serve, context)
+	defer mock_stop(m)
+
+	// Submit MAX_INFLIGHT_HTTP requests + 1; the +1 must be rejected.
+	for i in 0 ..< MAX_INFLIGHT_HTTP {
+		req := Http_Request{
+			id = strings.clone(fmt.tprintf("cap-%d", i)),
+			url = strings.clone(fmt.tprintf("http://127.0.0.1:%d/", m.port)),
+			method = strings.clone("GET"),
+			timeout_ms = 5000,
+		}
+		http_client_request(&hc, req)
+	}
+	overflow := Http_Request{
+		id = strings.clone("cap-over"),
+		url = strings.clone(fmt.tprintf("http://127.0.0.1:%d/", m.port)),
+		method = strings.clone("GET"),
+		timeout_ms = 5000,
+	}
+	http_client_request(&hc, overflow)
+
+	// Poll briefly for the rejected response.
+	deadline := time.time_add(time.now(), 500 * time.Millisecond)
+	results: [dynamic]Http_Response
+	defer { for &r in results do http_response_destroy(&r); delete(results) }
+	for time.diff(time.now(), deadline) > 0 {
+		http_client_poll(&hc, &results)
+		if len(results) >= 1 do break
+		time.sleep(20 * time.Millisecond)
+	}
+
+	found := false
+	for r in results {
+		if r.id == "cap-over" && strings.contains(r.error_msg, "concurrent") {
+			found = true; break
+		}
+	}
+	testing.expect(t, found, "expected overflow request to be rejected with 'concurrent' error")
+}
+
+@(test)
+test_http_destroy_drains_or_times_out :: proc(t: ^testing.T) {
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+
+	hc := new(Http_Client)
+	http_client_init(hc)
+
+	m := new(Mock_Server)
+	for p in 18900 ..< 19000 {
+		s, e := net.listen_tcp(net.Endpoint{address = net.IP4_Loopback, port = p})
+		if e == nil { m.sock = s; m.port = p; break }
+	}
+	if m.port == 0 { testing.fail_now(t, "no port") }
+	m.thread = thread.create_and_start_with_poly_data(m, slow_mock_serve, context)
+	defer mock_stop(m)
+
+	// Submit one request with a short timeout so the registry drains naturally.
+	req := Http_Request{
+		id = strings.clone("drain-1"),
+		url = strings.clone(fmt.tprintf("http://127.0.0.1:%d/", m.port)),
+		method = strings.clone("GET"),
+		timeout_ms = 100,  // 100 ms timeout, mock sleeps 2 s
+	}
+	http_client_request(hc, req)
+
+	// Wait briefly so the request enters the pending registry.
+	time.sleep(50 * time.Millisecond)
+
+	// Destroy should drain workers (workers_alive→0) within the 3-second
+	// internal deadline. The worker is blocked on the slow mock for ~2 s,
+	// then bails via the `destroying` path. We measure: does destroy
+	// return cleanly within ~3 s, and is `hc` safe to free immediately
+	// afterward (workers_alive == 0 means no worker still holds a
+	// pointer)?
+	start := time.now()
+	http_client_destroy(hc)
+	elapsed := time.diff(start, time.now())
+	free(hc)
+
+	testing.expect(t, elapsed < 4 * time.Second,
+		"http_client_destroy should drain within ~3 s, not hang")
+}
