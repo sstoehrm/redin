@@ -23,6 +23,32 @@ header_safe :: proc(s: string) -> bool {
 	return true
 }
 
+@(private = "file")
+url_host :: proc(url: string) -> string {
+	// "http://host:port/path" → "host"
+	idx := strings.index(url, "://")
+	if idx < 0 do return ""
+	rest := url[idx + 3:]
+	end := len(rest)
+	for i in 0 ..< len(rest) {
+		c := rest[i]
+		if c == '/' || c == '?' || c == '#' { end = i; break }
+	}
+	host := rest[:end]
+	// Strip IPv6 brackets if present, before stripping port.
+	if strings.has_prefix(host, "[") {
+		if rb := strings.index_byte(host, ']'); rb >= 0 {
+			return host[1:rb]  // [::1]:8080 → ::1
+		}
+		return host  // malformed; return as-is
+	}
+	// Strip port.
+	if colon := strings.last_index_byte(host, ':'); colon >= 0 {
+		host = host[:colon]
+	}
+	return host
+}
+
 Http_Request :: struct {
 	id:      string,
 	url:     string,
@@ -125,6 +151,16 @@ execute_http_request :: proc(req: Http_Request) -> Http_Response {
 		if scheme != "http" && scheme != "https" {
 			response.status = 0
 			response.error_msg = strings.clone("http scheme must be http or https")
+			return response
+		}
+	}
+
+	// Whitelist guard. Opt-in via bridge.set_http_whitelist. M4 from issue #99.
+	{
+		host := url_host(req.url)
+		if rejected, ok := http_whitelist_check(host); !ok {
+			response.status = 0
+			response.error_msg = fmt.aprintf("host %s not in http whitelist", rejected)
 			return response
 		}
 	}

@@ -18,6 +18,15 @@ import "core:sync"
 import "core:testing"
 import "core:thread"
 
+// Tests that mutate the package-level HTTP whitelist (g_http_whitelist) share
+// process state. Odin's test runner runs tests in parallel by default, so a
+// test that sets the whitelist can race against a separate test that issues
+// an HTTP request and depends on the whitelist being unset. Acquire this
+// mutex in any test that either calls set_http_whitelist or calls
+// execute_http_request with a host the whitelist might reject.
+@(private = "file")
+g_test_http_state_mutex: sync.Mutex
+
 @(private = "file")
 Mock_Server :: struct {
 	sock:     net.TCP_Socket,
@@ -76,6 +85,9 @@ mock_stop :: proc(m: ^Mock_Server) {
 
 @(test)
 test_http_response_cap_rejects_oversized_content_length :: proc(t: ^testing.T) {
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+
 	// Announce 32 MiB. With a HTTP_MAX_BODY cap of 16 MiB the underlying
 	// scanner returns Too_Long without reading the body.
 	announced := 32 * 1024 * 1024
@@ -123,6 +135,9 @@ test_http_response_cap_rejects_oversized_content_length :: proc(t: ^testing.T) {
 
 @(test)
 test_http_header_value_rejects_crlf :: proc(t: ^testing.T) {
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+
 	headers := make(map[string]string)
 	headers[strings.clone("X-Smuggle")] = strings.clone("evil\r\nHost: attacker")
 	defer {
@@ -154,6 +169,9 @@ test_http_header_value_rejects_crlf :: proc(t: ^testing.T) {
 
 @(test)
 test_http_header_key_rejects_nul :: proc(t: ^testing.T) {
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+
 	headers := make(map[string]string)
 	headers[strings.clone("X-Bad\x00key")] = strings.clone("ok")
 	defer {
@@ -185,6 +203,9 @@ test_http_header_key_rejects_nul :: proc(t: ^testing.T) {
 
 @(test)
 test_http_redirect_not_followed :: proc(t: ^testing.T) {
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+
 	resp := "HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:1/elsewhere\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
 	m := mock_start(resp)
 	if m == nil {
@@ -212,6 +233,9 @@ test_http_redirect_not_followed :: proc(t: ^testing.T) {
 
 @(test)
 test_http_rejects_ftp_scheme :: proc(t: ^testing.T) {
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+
 	req := Http_Request{
 		id = strings.clone("scheme-1"),
 		url = strings.clone("ftp://example.com/"),
@@ -231,6 +255,9 @@ test_http_rejects_ftp_scheme :: proc(t: ^testing.T) {
 
 @(test)
 test_http_rejects_file_scheme :: proc(t: ^testing.T) {
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+
 	req := Http_Request{
 		id = strings.clone("scheme-2"),
 		url = strings.clone("file:///etc/passwd"),
@@ -250,6 +277,9 @@ test_http_rejects_file_scheme :: proc(t: ^testing.T) {
 
 @(test)
 test_http_accepts_uppercase_https :: proc(t: ^testing.T) {
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+
 	// Just confirms scheme matching is case-insensitive — no real connect.
 	// We expect a connect error (status 0, error_msg contains "Request failed"
 	// or similar), NOT the scheme-rejection error_msg.
@@ -267,4 +297,111 @@ test_http_accepts_uppercase_https :: proc(t: ^testing.T) {
 	}
 	testing.expect(t, !strings.contains(got.error_msg, "scheme"),
 		"HTTPS (uppercase) must not be rejected as scheme")
+}
+
+@(test)
+test_http_whitelist_allows_listed_host :: proc(t: ^testing.T) {
+	resp := "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+	m := mock_start(resp)
+	if m == nil { testing.fail_now(t, "could not bind mock") }
+	defer mock_stop(m)
+
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+
+	set_http_whitelist([]string{"127.0.0.1"})
+	defer set_http_whitelist(nil)
+
+	url := fmt.tprintf("http://127.0.0.1:%d/", m.port)
+	req := Http_Request{
+		id = strings.clone("wl-1"), url = strings.clone(url),
+		method = strings.clone("GET"),
+	}
+	defer { delete(req.id); delete(req.url); delete(req.method) }
+	got := execute_http_request(req)
+	defer {
+		delete(got.body); delete(got.error_msg)
+		for k, v in got.headers { delete(k); delete(v) }
+		delete(got.headers)
+	}
+	testing.expect_value(t, got.status, 200)
+}
+
+@(test)
+test_http_whitelist_blocks_unlisted_host :: proc(t: ^testing.T) {
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+
+	set_http_whitelist([]string{"example.com"})
+	defer set_http_whitelist(nil)
+
+	req := Http_Request{
+		id = strings.clone("wl-2"),
+		url = strings.clone("http://127.0.0.1:1/"),
+		method = strings.clone("GET"),
+	}
+	defer { delete(req.id); delete(req.url); delete(req.method) }
+	got := execute_http_request(req)
+	defer {
+		delete(got.body); delete(got.error_msg)
+		for k, v in got.headers { delete(k); delete(v) }
+		delete(got.headers)
+	}
+	testing.expect_value(t, got.status, 0)
+	testing.expect(t, strings.contains(got.error_msg, "127.0.0.1"),
+		fmt.tprintf("expected rejected host name in error, got %q", got.error_msg))
+	testing.expect(t, strings.contains(got.error_msg, "whitelist"),
+		"expected 'whitelist' in error message")
+}
+
+@(test)
+test_http_whitelist_hostname_case_insensitive :: proc(t: ^testing.T) {
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+
+	set_http_whitelist([]string{"Example.COM"})
+	defer set_http_whitelist(nil)
+
+	req := Http_Request{
+		id = strings.clone("wl-3"),
+		url = strings.clone("http://example.com/"),
+		method = strings.clone("GET"),
+	}
+	defer { delete(req.id); delete(req.url); delete(req.method) }
+	got := execute_http_request(req)
+	defer {
+		delete(got.body); delete(got.error_msg)
+		for k, v in got.headers { delete(k); delete(v) }
+		delete(got.headers)
+	}
+	testing.expect(t, !strings.contains(got.error_msg, "whitelist"),
+		"hostname compare should be case-insensitive")
+}
+
+@(test)
+test_http_whitelist_cidr_match :: proc(t: ^testing.T) {
+	resp := "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+	m := mock_start(resp)
+	if m == nil { testing.fail_now(t, "could not bind mock") }
+	defer mock_stop(m)
+
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+
+	set_http_whitelist([]string{"127.0.0.0/8"})
+	defer set_http_whitelist(nil)
+
+	url := fmt.tprintf("http://127.0.0.1:%d/", m.port)
+	req := Http_Request{
+		id = strings.clone("wl-4"), url = strings.clone(url),
+		method = strings.clone("GET"),
+	}
+	defer { delete(req.id); delete(req.url); delete(req.method) }
+	got := execute_http_request(req)
+	defer {
+		delete(got.body); delete(got.error_msg)
+		for k, v in got.headers { delete(k); delete(v) }
+		delete(got.headers)
+	}
+	testing.expect_value(t, got.status, 200)
 }

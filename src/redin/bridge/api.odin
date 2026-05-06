@@ -4,8 +4,11 @@ package bridge
 
 import "base:runtime"
 import "core:fmt"
+import "core:net"
 import "core:reflect"
+import "core:strconv"
 import "core:strings"
+import "core:sync"
 
 // ---------------------------------------------------------------------------
 // Context propagation
@@ -413,4 +416,118 @@ dispatch :: proc(event: string, payload: any) -> (ok: bool, err: string) {
 	}
 	push(g_bridge.L, payload)
 	return dispatch_tos(g_bridge.L, event)
+}
+
+// ---------------------------------------------------------------------------
+// Outbound HTTP destination whitelist (issue #99 M4)
+// ---------------------------------------------------------------------------
+//
+// When unset (default), redin.http accepts any http(s) destination.
+// When set, the URL host must match either a hostname literal
+// (case-insensitive) or a CIDR (IPv4 or IPv6, applied only to
+// IP-literal hosts). Apps opt in by calling this setter at startup
+// from app.odin (--native projects) or via a registered cfunc.
+
+@(private)
+g_http_whitelist:       []string
+@(private)
+g_http_whitelist_mutex: sync.Mutex
+
+set_http_whitelist :: proc(allow: []string) {
+	sync.lock(&g_http_whitelist_mutex)
+	defer sync.unlock(&g_http_whitelist_mutex)
+
+	// Use the process-wide heap allocator so storage is independent of the
+	// caller's per-thread allocator (e.g. Odin's per-test tracking allocator).
+	// In production this matters because the dev-server thread that runs
+	// http_whitelist_check is not the thread that called set_http_whitelist.
+	heap := runtime.heap_allocator()
+
+	for s in g_http_whitelist do delete(s, heap)
+	delete(g_http_whitelist, heap)
+	g_http_whitelist = nil
+
+	if allow == nil do return
+
+	cloned := make([]string, len(allow), heap)
+	for s, i in allow do cloned[i] = strings.clone(s, heap)
+	g_http_whitelist = cloned
+}
+
+// http_whitelist_check returns ("", true) if allowed, ("<rejected host>", false)
+// otherwise. host must already be the URL host (no port, no scheme).
+@(private)
+http_whitelist_check :: proc(host: string) -> (rejected: string, ok: bool) {
+	sync.lock(&g_http_whitelist_mutex)
+	defer sync.unlock(&g_http_whitelist_mutex)
+
+	if g_http_whitelist == nil do return "", true
+
+	host_lower := strings.to_lower(host, context.temp_allocator)
+	for entry in g_http_whitelist {
+		// CIDR entry?
+		if strings.contains(entry, "/") {
+			if cidr_match(host, entry) do return "", true
+			continue
+		}
+		// Hostname literal — case-insensitive exact match.
+		entry_lower := strings.to_lower(entry, context.temp_allocator)
+		if host_lower == entry_lower do return "", true
+	}
+	return host, false
+}
+
+@(private = "file")
+cidr_match :: proc(host: string, cidr: string) -> bool {
+	slash := strings.last_index_byte(cidr, '/')
+	if slash < 0 do return false
+	prefix := cidr[:slash]
+	bits_str := cidr[slash+1:]
+
+	// IPv4 path: prefix parses as v4.
+	if v4, ok := net.parse_ip4_address(prefix); ok {
+		host_v4, ok2 := net.parse_ip4_address(host)
+		if !ok2 do return false
+		bits, parse_ok := strconv.parse_int(bits_str, 10)
+		if !parse_ok || bits < 0 || bits > 32 do return false
+		return cidr4_match_bits(host_v4, v4, bits)
+	}
+
+	// IPv6 path.
+	v6, ok := net.parse_ip6_address(prefix)
+	if !ok do return false
+	host_v6, ok2 := net.parse_ip6_address(host)
+	if !ok2 do return false
+	bits, parse_ok := strconv.parse_int(bits_str, 10)
+	if !parse_ok || bits < 0 || bits > 128 do return false
+	return cidr6_match_bits(host_v6, v6, bits)
+}
+
+@(private = "file")
+cidr4_match_bits :: proc(host: net.IP4_Address, net_addr: net.IP4_Address, bits: int) -> bool {
+	if bits == 0 do return true
+	host_u := u32(host[0])<<24 | u32(host[1])<<16 | u32(host[2])<<8 | u32(host[3])
+	net_u  := u32(net_addr[0])<<24 | u32(net_addr[1])<<16 | u32(net_addr[2])<<8 | u32(net_addr[3])
+	mask: u32 = bits == 32 ? 0xFFFFFFFF : (0xFFFFFFFF << u32(32 - bits))
+	return (host_u & mask) == (net_u & mask)
+}
+
+@(private = "file")
+cidr6_match_bits :: proc(host: net.IP6_Address, net_addr: net.IP6_Address, bits: int) -> bool {
+	if bits == 0 do return true
+	// IP6_Address is `distinct [8]u16be`, i.e. 16 bytes laid out in network
+	// byte order. Transmute to a flat [16]u8 for a clean byte-by-byte
+	// CIDR comparison.
+	host_bytes := transmute([16]u8)host
+	net_bytes  := transmute([16]u8)net_addr
+	full_bytes := bits / 8
+	rem_bits   := bits % 8
+	for i in 0 ..< full_bytes {
+		if host_bytes[i] != net_bytes[i] do return false
+	}
+	if rem_bits > 0 {
+		mask: u8 = u8(0xFF) << u8(8 - rem_bits)
+		if (host_bytes[full_bytes] & mask) != (net_bytes[full_bytes] & mask) do return false
+	}
+	return true
 }
