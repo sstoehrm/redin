@@ -17,6 +17,7 @@ import "core:strings"
 import "core:sync"
 import "core:testing"
 import "core:thread"
+import "core:time"
 
 // Tests that mutate the package-level HTTP whitelist (g_http_whitelist) share
 // process state. Odin's test runner runs tests in parallel by default, so a
@@ -414,5 +415,67 @@ test_http_whitelist_ipv6_cidr_match :: proc(t: ^testing.T) {
 		rejected, ok := http_whitelist_check("2001:db9::1")
 		testing.expect(t, !ok, "IPv6 outside the /32 must not match")
 		testing.expect_value(t, rejected, "2001:db9::1")
+	}
+}
+
+@(private = "file")
+slow_mock_serve :: proc(m: ^Mock_Server) {
+	defer sync.sema_post(&m.done)
+	client, _, err := net.accept_tcp(m.sock)
+	if err != nil do return
+	defer net.close(client)
+	// Read the request, then sleep instead of responding.
+	buf: [4096]u8
+	total := 0
+	for total < len(buf) {
+		n, rerr := net.recv_tcp(client, buf[total:])
+		if rerr != nil || n <= 0 do break
+		total += n
+		if strings.contains(string(buf[:total]), "\r\n\r\n") do break
+	}
+	time.sleep(2 * time.Second)
+}
+
+@(test)
+test_http_timeout_fires :: proc(t: ^testing.T) {
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+
+	m := new(Mock_Server)
+	for p in 18900 ..< 19000 {
+		s, e := net.listen_tcp(net.Endpoint{address = net.IP4_Loopback, port = p})
+		if e == nil { m.sock = s; m.port = p; break }
+	}
+	if m.port == 0 { testing.fail_now(t, "no port") }
+	m.thread = thread.create_and_start_with_poly_data(m, slow_mock_serve, context)
+	defer mock_stop(m)
+
+	hc: Http_Client
+	http_client_init(&hc)
+	defer http_client_destroy(&hc)
+
+	req := Http_Request{
+		id = strings.clone("timeout-1"),
+		url = strings.clone(fmt.tprintf("http://127.0.0.1:%d/", m.port)),
+		method = strings.clone("GET"),
+		timeout_ms = 200,  // 200 ms; mock sleeps 2 s
+	}
+	http_client_request(&hc, req)
+
+	// Poll for up to 1 s to pick up the timeout result.
+	deadline := time.time_add(time.now(), 1 * time.Second)
+	results: [dynamic]Http_Response
+	defer { for &r in results do http_response_destroy(&r); delete(results) }
+	for time.diff(time.now(), deadline) > 0 {
+		http_client_poll(&hc, &results)
+		if len(results) > 0 do break
+		time.sleep(50 * time.Millisecond)
+	}
+
+	testing.expect(t, len(results) == 1, "expected one timeout result")
+	if len(results) == 1 {
+		testing.expect_value(t, results[0].status, 0)
+		testing.expect(t, strings.contains(results[0].error_msg, "timeout"),
+			fmt.tprintf("expected 'timeout' in error_msg, got %q", results[0].error_msg))
 	}
 }

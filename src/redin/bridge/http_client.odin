@@ -5,6 +5,7 @@ import "core:fmt"
 import "core:strings"
 import "core:sync"
 import "core:thread"
+import "core:time"
 import http "lib:odin-http"
 import http_client "lib:odin-http/client"
 
@@ -14,6 +15,12 @@ import http_client "lib:odin-http/client"
 // read. Issue #78 finding M2: previously unbounded — a malicious or
 // misbehaving remote could exhaust host memory.
 HTTP_MAX_BODY :: 16 * 1024 * 1024 // 16 MiB
+
+// Per-request deadline (ms). Used when the caller doesn't supply
+// Http_Request.timeout_ms (or supplies <=0). The Fennel :http effect
+// handler always passes a value (default 30000), so this only kicks in
+// for direct Odin callers (e.g. tests). Issue #99 M1 A.
+HTTP_DEFAULT_TIMEOUT_MS :: 30_000
 
 @(private = "file")
 header_safe :: proc(s: string) -> bool {
@@ -55,11 +62,12 @@ url_host :: proc(url: string) -> string {
 }
 
 Http_Request :: struct {
-	id:      string,
-	url:     string,
-	method:  string,
-	headers: map[string]string,
-	body:    string,
+	id:         string,
+	url:        string,
+	method:     string,
+	headers:    map[string]string,
+	body:       string,
+	timeout_ms: int,
 }
 
 Http_Response :: struct {
@@ -70,9 +78,22 @@ Http_Response :: struct {
 	error_msg: string,
 }
 
+// Per-in-flight-request entry tracked on Http_Client.pending. The id_owned
+// string is the same allocation as the map key — when the entry is removed
+// (either by the worker on completion, or by the poll-loop sweep on
+// timeout) the freer must `delete_key` first then `delete(id_owned)`. The
+// map's deletion does not free the key string.
+@(private = "file")
+Pending_Http :: struct {
+	id_owned: string,
+	deadline: time.Time,
+}
+
 Http_Client :: struct {
 	results:       [dynamic]Http_Response,
 	results_mutex: sync.Mutex,
+	pending:       map[string]Pending_Http,
+	pending_mutex: sync.Mutex,
 }
 
 http_client_init :: proc(hc: ^Http_Client) {
@@ -85,6 +106,18 @@ http_client_destroy :: proc(hc: ^Http_Client) {
 	}
 	delete(hc.results)
 	sync.unlock(&hc.results_mutex)
+
+	// Free remaining pending entries. In-flight workers may still hold a
+	// pointer to hc and try to lock pending_mutex on completion — that's
+	// caller's responsibility to avoid (don't destroy while requests are
+	// outstanding). For tests, the timeout sweep before destroy + the
+	// 200ms test deadline ensures the pending map is empty by here.
+	sync.lock(&hc.pending_mutex)
+	for _, entry in hc.pending {
+		delete(entry.id_owned)
+	}
+	delete(hc.pending)
+	sync.unlock(&hc.pending_mutex)
 }
 
 http_response_destroy :: proc(r: ^Http_Response) {
@@ -104,6 +137,18 @@ Http_Thread_Data :: struct {
 }
 
 http_client_request :: proc(hc: ^Http_Client, req: Http_Request) {
+	timeout := req.timeout_ms <= 0 ? HTTP_DEFAULT_TIMEOUT_MS : req.timeout_ms
+
+	// Clone req.id for the pending map. The same allocation is used as
+	// both the map key and id_owned, so a single delete frees both.
+	id_clone := strings.clone(req.id)
+	sync.lock(&hc.pending_mutex)
+	hc.pending[id_clone] = Pending_Http{
+		id_owned = id_clone,
+		deadline = time.time_add(time.now(), time.Duration(timeout) * time.Millisecond),
+	}
+	sync.unlock(&hc.pending_mutex)
+
 	data := new(Http_Thread_Data)
 	data.client = hc
 	data.request = req
@@ -111,6 +156,43 @@ http_client_request :: proc(hc: ^Http_Client, req: Http_Request) {
 }
 
 http_client_poll :: proc(hc: ^Http_Client, results: ^[dynamic]Http_Response) {
+	now := time.now()
+
+	// Phase 1: identify timed-out pending entries and remove them. Each
+	// timed-out id_owned string is transferred to the synthesized
+	// Http_Response below — do NOT clone, do NOT free here.
+	timed_out_ids: [dynamic]string
+	defer delete(timed_out_ids)
+
+	sync.lock(&hc.pending_mutex)
+	for _, entry in hc.pending {
+		if time.diff(now, entry.deadline) <= 0 {
+			append(&timed_out_ids, entry.id_owned)
+		}
+	}
+	for id in timed_out_ids {
+		delete_key(&hc.pending, id)
+	}
+	sync.unlock(&hc.pending_mutex)
+
+	// Phase 2: synthesize timeout responses. Ownership of id (the
+	// erstwhile id_owned) transfers into Http_Response.id; the caller's
+	// http_response_destroy will delete(r.id).
+	if len(timed_out_ids) > 0 {
+		sync.lock(&hc.results_mutex)
+		for id in timed_out_ids {
+			r := Http_Response{
+				id        = id,
+				status    = 0,
+				error_msg = strings.clone("http timeout exceeded"),
+				headers   = make(map[string]string),
+			}
+			append(&hc.results, r)
+		}
+		sync.unlock(&hc.results_mutex)
+	}
+
+	// Phase 3: drain the results buffer to the caller.
 	sync.lock(&hc.results_mutex)
 	defer sync.unlock(&hc.results_mutex)
 	for &r in hc.results {
@@ -124,9 +206,27 @@ http_thread_proc :: proc(raw_data_ptr: rawptr) {
 	data := cast(^Http_Thread_Data)raw_data_ptr
 	response := execute_http_request(data.request)
 
-	sync.lock(&data.client.results_mutex)
-	append(&data.client.results, response)
-	sync.unlock(&data.client.results_mutex)
+	// Re-check the registry on completion. If the entry is gone, the
+	// poll loop has already synthesized a timeout result for this id —
+	// drop ours on the floor. Otherwise remove our entry and surface
+	// the response.
+	keep := false
+	sync.lock(&data.client.pending_mutex)
+	if entry, ok := data.client.pending[data.request.id]; ok {
+		delete_key(&data.client.pending, data.request.id)
+		delete(entry.id_owned)
+		keep = true
+	}
+	sync.unlock(&data.client.pending_mutex)
+
+	if keep {
+		sync.lock(&data.client.results_mutex)
+		append(&data.client.results, response)
+		sync.unlock(&data.client.results_mutex)
+	} else {
+		// Entry was already replaced by a timeout. Discard the result.
+		http_response_destroy(&response)
+	}
 
 	http_request_destroy(&data.request)
 	free(data)

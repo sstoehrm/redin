@@ -466,6 +466,9 @@ redin_http :: proc "c" (L: ^Lua_State) -> i32 {
 	} else {
 		req.body = strings.clone("")
 	}
+	if lua_isnumber(L, 6) {
+		req.timeout_ms = int(lua_tonumber(L, 6))
+	}
 
 	http_client_request(&g_bridge.http_client, req)
 	return 0
