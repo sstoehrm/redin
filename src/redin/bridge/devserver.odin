@@ -248,6 +248,7 @@ server_thread_proc :: proc(ds: ^Dev_Server) {
 		// Read full request into buffer
 		total := 0
 		too_large := false
+		bad_request := false
 		timed_out := false
 		for {
 			if time.diff(time.now(), deadline) < 0 {
@@ -266,6 +267,10 @@ server_thread_proc :: proc(ds: ^Dev_Server) {
 					// Check Content-Length for body
 					cl := find_content_length(req_str[:header_end])
 					body_start := header_end + 4
+					if cl < 0 {
+						bad_request = true
+						break
+					}
 					if cl > MAX_BODY {
 						too_large = true
 						break
@@ -307,6 +312,13 @@ server_thread_proc :: proc(ds: ^Dev_Server) {
 
 		if too_large {
 			resp := "HTTP/1.1 413 Payload Too Large\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+			net.send_tcp(client, transmute([]u8)resp)
+			net.close(client)
+			continue
+		}
+
+		if bad_request {
+			resp := "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
 			net.send_tcp(client, transmute([]u8)resp)
 			net.close(client)
 			continue
@@ -528,9 +540,12 @@ find_content_length :: proc(headers: string) -> int {
 	if end < 0 do end = len(rest)
 	val := strings.trim_space(rest[:end])
 	n := 0
+	digits := 0
 	for c in val {
 		if c >= '0' && c <= '9' {
-			n = n * 10 + int(c - '0')
+			digits += 1
+			if digits > 12 { return -1 }
+			n = n*10 + int(c - '0')
 		} else {
 			break
 		}

@@ -50,3 +50,23 @@ test_find_header_value_trims_whitespace :: proc(t: ^testing.T) {
 	headers := "GET / HTTP/1.1\r\nHost:    localhost:8800   \r\n"
 	testing.expect_value(t, find_header_value(headers, "host"), "localhost:8800")
 }
+
+@(test)
+test_find_content_length_overflow_returns_negative :: proc(t: ^testing.T) {
+	// 19 digits — well above 12-digit cap; current code silently wraps.
+	headers := "POST / HTTP/1.1\r\nContent-Length: 9999999999999999999\r\n"
+	testing.expect(t, find_content_length(headers) < 0,
+		"expected negative on overflow")
+}
+
+@(test)
+test_find_content_length_normal :: proc(t: ^testing.T) {
+	headers := "POST / HTTP/1.1\r\nContent-Length: 1024\r\n"
+	testing.expect_value(t, find_content_length(headers), 1024)
+}
+
+@(test)
+test_find_content_length_zero :: proc(t: ^testing.T) {
+	headers := "GET / HTTP/1.1\r\nContent-Length: 0\r\n"
+	testing.expect_value(t, find_content_length(headers), 0)
+}
