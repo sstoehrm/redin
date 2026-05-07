@@ -30,8 +30,23 @@ jobs:
       - name: Run Fennel tests
         run: luajit test/lua/runner.lua test/lua/test_*.fnl
 
-      - name: Run Odin tests
+      - name: Run Odin parser tests
         run: odin test src/redin/parser
+
+      - name: Run Odin markdown tests
+        run: odin test src/redin/markdown -collection:lib=lib -collection:luajit=vendor/luajit
+
+      - name: Run Odin profile tests
+        run: odin test src/redin/profile -collection:lib=lib -collection:luajit=vendor/luajit
+
+      # ODIN_TEST_THREADS=1 works around the package-global `state` /
+      # `override` race documented in #118. Once the fix (per-package
+      # test mutex + idempotent destroy) lands, drop the flag here.
+      - name: Run Odin input tests
+        run: odin test src/redin/input -collection:lib=lib -collection:luajit=vendor/luajit -define:ODIN_TEST_THREADS=1
+
+      - name: Run Odin bridge tests
+        run: odin test src/redin/bridge -collection:lib=lib -collection:luajit=vendor/luajit
 
       - name: Build redin
         run: |
