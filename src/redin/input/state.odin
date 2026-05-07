@@ -21,8 +21,13 @@ Input_State :: struct {
 
 state: Input_State
 
+// Both init and destroy must be idempotent: every owned field is freed
+// AND its slice/string header is reset to {}/"". Otherwise a stale header
+// survives across init/destroy pairs and the next delete is a double-free
+// (visible as "bad free" warnings under the tracking allocator).
 state_init :: proc() {
 	delete(state.selection_path)
+	state.selection_path = {}
 	state.selection_start = -1
 	state.selection_end = -1
 	state.selection_kind = .None
@@ -30,10 +35,13 @@ state_init :: proc() {
 
 state_destroy :: proc() {
 	delete(state.text)
+	state.text = {}
 	if len(state.last_dispatched) > 0 {
 		delete(state.last_dispatched)
 	}
+	state.last_dispatched = ""
 	delete(state.selection_path)
+	state.selection_path = {}
 }
 
 // Called when an input gains focus. Copies the node's value into the editing buffer.
@@ -50,6 +58,7 @@ focus_enter :: proc(value: string) {
 	state.active = true
 	if len(state.last_dispatched) > 0 {
 		delete(state.last_dispatched)
+		state.last_dispatched = ""
 	}
 	state.last_dispatched = strings_clone(value)
 }
@@ -102,6 +111,7 @@ controlled_sync :: proc(node_value: string) -> bool {
 	}
 	if len(state.last_dispatched) > 0 {
 		delete(state.last_dispatched)
+		state.last_dispatched = ""
 	}
 	state.last_dispatched = strings_clone(node_value)
 	return true

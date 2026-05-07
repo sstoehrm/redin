@@ -1,5 +1,6 @@
 package input
 
+import "core:sync"
 import "core:testing"
 import "../types"
 
@@ -18,6 +19,8 @@ test_find_node_by_path_returns_match :: proc(t: ^testing.T) {
 
 @(test)
 test_resolve_clears_when_path_missing :: proc(t: ^testing.T) {
+	sync.lock(&g_input_test_state_mutex)
+	defer sync.unlock(&g_input_test_state_mutex)
 	state_init()
 	defer state_destroy()
 	set_text_selection([]u8{0xAA}, 0, 3)
@@ -30,6 +33,8 @@ test_resolve_clears_when_path_missing :: proc(t: ^testing.T) {
 
 @(test)
 test_resolve_clears_when_content_shrinks :: proc(t: ^testing.T) {
+	sync.lock(&g_input_test_state_mutex)
+	defer sync.unlock(&g_input_test_state_mutex)
 	state_init()
 	defer state_destroy()
 
