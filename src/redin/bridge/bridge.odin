@@ -960,6 +960,13 @@ redin_shell :: proc "c" (L: ^Lua_State) -> i32 {
 		req.stdin = strings.clone("")
 	}
 
+	// Optional arg 4: per-call max output cap in MiB (issue #99 M2 A).
+	// Omitted / non-positive => execute_shell falls back to its 16 MiB default.
+	if lua_isnumber(L, 4) {
+		mb := int(lua_tonumber(L, 4))
+		if mb > 0 do req.max_output_bytes = mb * 1024 * 1024
+	}
+
 	shell_client_request(&g_bridge.shell_client, req)
 	return 0
 }

@@ -107,11 +107,12 @@
       (set next-shell-id (+ next-shell-id 1))
       (let [id (tostring next-shell-id)
             cmd (or params.cmd [])
-            stdin (or params.stdin "")]
+            stdin (or params.stdin "")
+            max-output (or params.max-output 16)]
         (tset pending-shell id {:on-success params.on-success
                                 :on-error params.on-error})
         (when _G.redin_shell
-          (_G.redin_shell id cmd stdin))))))
+          (_G.redin_shell id cmd stdin max-output))))))
 
 (register-builtins)
 

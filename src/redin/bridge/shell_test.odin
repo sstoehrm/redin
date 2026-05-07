@@ -9,6 +9,7 @@ package bridge
 // the historical behaviour for apps that shell out to credential-aware
 // tools like `gh`, `aws`, or `git`.
 
+import "core:fmt"
 import "core:strings"
 import "core:sync"
 import "core:testing"
@@ -78,4 +79,34 @@ test_shell_env_allowlist_unset_full_passthrough :: proc(t: ^testing.T) {
 	// PATH is reliably present in the test runner's env.
 	testing.expect(t, strings.contains(got.stdout, "PATH="),
 		"expected PATH= in default-passthrough env output")
+}
+
+@(test)
+test_shell_output_cap_kills_child :: proc(t: ^testing.T) {
+	sync.lock(&g_test_shell_state_mutex)
+	defer sync.unlock(&g_test_shell_state_mutex)
+
+	// `yes` runs forever; with a 1 MiB cap it should be killed quickly.
+	cmd := make([]string, 1)
+	cmd[0] = strings.clone("yes")
+	defer { for s in cmd do delete(s); delete(cmd) }
+
+	req := Shell_Request{
+		id = strings.clone("cap-1"),
+		cmd = cmd,
+		stdin = strings.clone(""),
+		max_output_bytes = 1 * 1024 * 1024,
+	}
+	defer { delete(req.id); delete(req.stdin) }
+
+	got := execute_shell(req)
+	defer {
+		delete(got.id); delete(got.stdout); delete(got.stderr); delete(got.error_msg)
+	}
+
+	testing.expect_value(t, got.exit_code, -1)
+	testing.expect(t, strings.contains(got.error_msg, "exceeded"),
+		fmt.tprintf("expected 'exceeded' in error_msg, got %q", got.error_msg))
+	testing.expect_value(t, len(got.stdout), 0)
+	testing.expect_value(t, len(got.stderr), 0)
 }
