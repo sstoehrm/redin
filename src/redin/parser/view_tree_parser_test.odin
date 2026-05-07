@@ -149,7 +149,7 @@ test_flatten_produces_correct_count :: proc(t: ^testing.T) {
 	p := _Parser{text = input, pos = 0}
 	tree, ok := _parse_element(&p)
 	testing.expect(t, ok, "parse should succeed")
-	defer _tree_node_destroy(&tree)
+	defer _tree_node_destroy_after_flatten(&tree)
 
 	paths: [dynamic]types.Path
 	nodes: [dynamic]types.Node
@@ -160,6 +160,7 @@ test_flatten_produces_correct_count :: proc(t: ^testing.T) {
 
 	_flatten(&tree, &cur, &paths, &nodes, &parent_indices, &children_list, -1)
 	defer {
+		for &n in nodes do _clear_node_strings(n)
 		for &pa in paths do delete(pa.value)
 		delete(paths)
 		delete(nodes)
