@@ -56,20 +56,46 @@ mock_serve :: proc(m: ^Mock_Server) {
 	net.send_tcp(client, transmute([]u8)m.response)
 }
 
+// Bind a loopback socket on an OS-assigned ephemeral port and return a
+// freshly allocated Mock_Server with .sock/.port populated. Returns nil
+// (and frees the allocation) if binding or endpoint lookup fails — the
+// caller should treat nil as an environment-level failure (e.g. sandboxed
+// loopback) and fail_now their test.
+@(private = "file")
+mock_bind :: proc() -> ^Mock_Server {
+	m := new(Mock_Server)
+	s, err := net.listen_tcp(net.Endpoint{address = net.IP4_Loopback, port = 0})
+	if err != nil {
+		free(m)
+		return nil
+	}
+	ep, ep_err := net.bound_endpoint(s)
+	if ep_err != nil {
+		net.close(s)
+		free(m)
+		return nil
+	}
+	m.sock = s
+	m.port = ep.port
+	return m
+}
+
 @(private = "file")
 mock_start :: proc(response: string) -> ^Mock_Server {
-	m := new(Mock_Server)
+	m := mock_bind()
+	if m == nil do return nil
 	m.response = response
-	for p in 18900 ..< 19000 {
-		s, err := net.listen_tcp(net.Endpoint{address = net.IP4_Loopback, port = p})
-		if err == nil {
-			m.sock = s
-			m.port = p
-			break
-		}
-	}
-	if m.port == 0 do return nil
 	m.thread = thread.create_and_start_with_poly_data(m, mock_serve, context)
+	return m
+}
+
+// Slow variant: accept the connection, read the request, then sleep
+// instead of replying. Used by timeout / in-flight-cap / drain tests.
+@(private = "file")
+mock_start_slow :: proc() -> ^Mock_Server {
+	m := mock_bind()
+	if m == nil do return nil
+	m.thread = thread.create_and_start_with_poly_data(m, slow_mock_serve, context)
 	return m
 }
 
@@ -441,13 +467,8 @@ test_http_timeout_fires :: proc(t: ^testing.T) {
 	sync.lock(&g_test_http_state_mutex)
 	defer sync.unlock(&g_test_http_state_mutex)
 
-	m := new(Mock_Server)
-	for p in 18900 ..< 19000 {
-		s, e := net.listen_tcp(net.Endpoint{address = net.IP4_Loopback, port = p})
-		if e == nil { m.sock = s; m.port = p; break }
-	}
-	if m.port == 0 { testing.fail_now(t, "no port") }
-	m.thread = thread.create_and_start_with_poly_data(m, slow_mock_serve, context)
+	m := mock_start_slow()
+	if m == nil { testing.fail_now(t, "could not bind a loopback mock server") }
 	defer mock_stop(m)
 
 	hc: Http_Client
@@ -497,13 +518,8 @@ test_http_inflight_cap_rejects :: proc(t: ^testing.T) {
 	defer http_client_destroy(&hc)
 
 	// Spin up a slow mock so the requests stay in flight.
-	m := new(Mock_Server)
-	for p in 18900 ..< 19000 {
-		s, e := net.listen_tcp(net.Endpoint{address = net.IP4_Loopback, port = p})
-		if e == nil { m.sock = s; m.port = p; break }
-	}
-	if m.port == 0 { testing.fail_now(t, "no port") }
-	m.thread = thread.create_and_start_with_poly_data(m, slow_mock_serve, context)
+	m := mock_start_slow()
+	if m == nil { testing.fail_now(t, "could not bind a loopback mock server") }
 	defer mock_stop(m)
 
 	// Submit MAX_INFLIGHT_HTTP requests + 1; the +1 must be rejected.
@@ -551,13 +567,8 @@ test_http_destroy_drains_or_times_out :: proc(t: ^testing.T) {
 	hc := new(Http_Client)
 	http_client_init(hc)
 
-	m := new(Mock_Server)
-	for p in 18900 ..< 19000 {
-		s, e := net.listen_tcp(net.Endpoint{address = net.IP4_Loopback, port = p})
-		if e == nil { m.sock = s; m.port = p; break }
-	}
-	if m.port == 0 { testing.fail_now(t, "no port") }
-	m.thread = thread.create_and_start_with_poly_data(m, slow_mock_serve, context)
+	m := mock_start_slow()
+	if m == nil { testing.fail_now(t, "could not bind a loopback mock server") }
 	defer mock_stop(m)
 
 	// Submit one request with a short timeout so the registry drains naturally.
