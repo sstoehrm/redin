@@ -12,9 +12,61 @@ _Tree_Node :: struct {
 	children: [dynamic]_Tree_Node,
 }
 
+// Free strings cloned by _parse_element on a parsed node. The parser
+// only clones a subset of types.Node string fields, so this is a narrow
+// mirror of bridge.clear_node_strings — DO NOT add fields the parser
+// does not clone (those would be slices into source text and freeing
+// them would be a bad free).
+_clear_node_strings :: proc(n: types.Node) {
+	switch v in n {
+	case types.NodeStack:
+	case types.NodeCanvas:
+		if len(v.provider) > 0 do delete(v.provider)
+		if len(v.aspect) > 0 do delete(v.aspect)
+	case types.NodeVbox:
+		if len(v.overflow) > 0 do delete(v.overflow)
+		if len(v.aspect) > 0 do delete(v.aspect)
+	case types.NodeHbox:
+		if len(v.overflow) > 0 do delete(v.overflow)
+		if len(v.aspect) > 0 do delete(v.aspect)
+	case types.NodeInput:
+		if len(v.aspect) > 0 do delete(v.aspect)
+		if len(v.change) > 0 do delete(v.change)
+		if len(v.key) > 0 do delete(v.key)
+	case types.NodeButton:
+		if len(v.label) > 0 do delete(v.label)
+		if len(v.aspect) > 0 do delete(v.aspect)
+		if len(v.click) > 0 do delete(v.click)
+	case types.NodeText:
+		if len(v.content) > 0 do delete(v.content)
+		if len(v.aspect) > 0 do delete(v.aspect)
+	case types.NodeImage:
+		if len(v.aspect) > 0 do delete(v.aspect)
+	case types.NodePopout:
+		if len(v.aspect) > 0 do delete(v.aspect)
+	case types.NodeModal:
+		if len(v.aspect) > 0 do delete(v.aspect)
+	}
+}
+
+// Tear down a parsed _Tree_Node that still owns its strings (i.e. the
+// node has not been flattened). Frees children recursively, the children
+// array itself, and the cloned strings on this node.
 _tree_node_destroy :: proc(n: ^_Tree_Node) {
 	for &child in n.children {
 		_tree_node_destroy(&child)
+	}
+	delete(n.children)
+	_clear_node_strings(n.data)
+}
+
+// Tear down a _Tree_Node after _flatten has copied n.data into the flat
+// nodes array. _flatten transfers string ownership by shallow-copying the
+// node value, so callers must NOT also free strings on the tree side —
+// the flat nodes array is now responsible (free with _clear_node_strings).
+_tree_node_destroy_after_flatten :: proc(n: ^_Tree_Node) {
+	for &child in n.children {
+		_tree_node_destroy_after_flatten(&child)
 	}
 	delete(n.children)
 }
@@ -354,7 +406,12 @@ _parse_element :: proc(p: ^_Parser) -> (_Tree_Node, bool) {
 	return result, true
 }
 
-// Flatten tree into parallel path/node arrays (depth-first)
+// Flatten tree into parallel path/node arrays (depth-first).
+// Shallow-copies n.data into the flat nodes array, transferring ownership
+// of any cloned strings to the flat nodes. Callers must release strings on
+// each flat node via _clear_node_strings, and must use
+// _tree_node_destroy_after_flatten (not _tree_node_destroy) to tear down
+// the source tree to avoid double-free.
 
 _flatten :: proc(
 	n: ^_Tree_Node,
@@ -416,7 +473,7 @@ load_view_tree :: proc(
 		fmt.eprintfln("Failed to parse %s", filepath)
 		return {}, {}, {}, {}, false
 	}
-	defer _tree_node_destroy(&tree)
+	defer _tree_node_destroy_after_flatten(&tree)
 
 	cur: [dynamic]u8
 	defer delete(cur)
