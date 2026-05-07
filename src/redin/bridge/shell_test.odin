@@ -110,3 +110,32 @@ test_shell_output_cap_kills_child :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(got.stdout), 0)
 	testing.expect_value(t, len(got.stderr), 0)
 }
+
+@(test)
+test_shell_timeout_kills_child :: proc(t: ^testing.T) {
+	sync.lock(&g_test_shell_state_mutex)
+	defer sync.unlock(&g_test_shell_state_mutex)
+
+	// `sleep 60` should be killed by a 200 ms timeout.
+	cmd := make([]string, 2)
+	cmd[0] = strings.clone("sleep")
+	cmd[1] = strings.clone("60")
+	defer { for s in cmd do delete(s); delete(cmd) }
+
+	req := Shell_Request{
+		id = strings.clone("to-1"),
+		cmd = cmd,
+		stdin = strings.clone(""),
+		timeout_ms = 200,
+	}
+	defer { delete(req.id); delete(req.stdin) }
+
+	got := execute_shell(req)
+	defer {
+		delete(got.id); delete(got.stdout); delete(got.stderr); delete(got.error_msg)
+	}
+
+	testing.expect_value(t, got.exit_code, -1)
+	testing.expect(t, strings.contains(got.error_msg, "timeout"),
+		fmt.tprintf("expected 'timeout' in error_msg, got %q", got.error_msg))
+}

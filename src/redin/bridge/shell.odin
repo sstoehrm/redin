@@ -7,14 +7,17 @@ import "core:strings"
 import "core:sync"
 import "core:sys/linux"
 import "core:thread"
+import "core:time"
 
 SHELL_DEFAULT_MAX_OUTPUT :: 16 * 1024 * 1024 // 16 MiB
+SHELL_DEFAULT_TIMEOUT_MS :: 30_000
 
 Shell_Request :: struct {
 	id:               string,
 	cmd:              []string,
 	stdin:            string,
 	max_output_bytes: int,
+	timeout_ms:       int,
 }
 
 Shell_Response :: struct {
@@ -106,6 +109,14 @@ execute_shell :: proc(req: Shell_Request) -> Shell_Response {
 	// Combined stdout+stderr cap. 0 / negative means "use default 16 MiB".
 	output_cap := req.max_output_bytes
 	if output_cap <= 0 do output_cap = SHELL_DEFAULT_MAX_OUTPUT
+
+	// Per-call wall-clock timeout (issue #99 M2 B). 0 / negative means
+	// "use default 30 000 ms". The deadline is checked once per poll
+	// iteration below; with a 50 ms poll tick, deadline responsiveness
+	// is bounded by ~50 ms past the requested timeout.
+	timeout_ms := req.timeout_ms
+	if timeout_ms <= 0 do timeout_ms = SHELL_DEFAULT_TIMEOUT_MS
+	deadline := time.time_add(time.now(), time.Duration(timeout_ms) * time.Millisecond)
 
 	// Create pipes for stdout and stderr
 	stdout_r, stdout_w, stdout_err := os.pipe()
@@ -211,6 +222,20 @@ execute_shell :: proc(req: Shell_Request) -> Shell_Response {
 	// we break out immediately and reap the child below.
 	killed := false
 	for !stdout_done || !stderr_done {
+		// Deadline check (issue #99 M2 B). time.diff(start, end) returns
+		// end - start, so <= 0 means now >= deadline. Checked before the
+		// poll so a deadline that has already elapsed kills the child
+		// immediately rather than waiting another 50 ms tick.
+		if time.diff(time.now(), deadline) <= 0 {
+			_ = os.process_kill(process)
+			clear(&stdout_buf)
+			clear(&stderr_buf)
+			response.exit_code = -1
+			response.error_msg = fmt.aprintf("shell timeout exceeded %d ms", timeout_ms)
+			killed = true
+			break
+		}
+
 		fds: [2]linux.Poll_Fd
 		n_fds := 0
 		stdout_idx := -1
