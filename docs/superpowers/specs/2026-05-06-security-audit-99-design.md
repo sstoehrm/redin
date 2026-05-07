@@ -68,7 +68,7 @@ For findings with a behavior choice, the design is **permissive default + opt-in
 `src/redin/bridge/devserver.odin` (`find_content_length`, caller at line ~266)
 
 - Cap digit count to 12 inside `find_content_length`; return `-1` if exceeded.
-- Caller adds a sibling check `cl < 0` → `400 Bad Request` with body `"invalid Content-Length"`. Existing `cl > MAX_BODY` → `413` path is preserved.
+- Caller adds a sibling check `cl < 0` → `400 Bad Request`. Existing `cl > MAX_BODY` → `413` path is preserved.
 - Negative result also covers any future overflow surprise without further parser changes.
 
 ### L2 — Token / port file write becomes fatal

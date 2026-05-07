@@ -116,6 +116,8 @@ execute_shell :: proc(req: Shell_Request) -> Shell_Response {
 	// is bounded by ~50 ms past the requested timeout.
 	timeout_ms := req.timeout_ms
 	if timeout_ms <= 0 do timeout_ms = SHELL_DEFAULT_TIMEOUT_MS
+	// Note: deadline includes process_start latency. Tight (<100 ms) timeouts
+	// may fire before exec returns. Negligible for the 30 s default.
 	deadline := time.time_add(time.now(), time.Duration(timeout_ms) * time.Millisecond)
 
 	// Create pipes for stdout and stderr

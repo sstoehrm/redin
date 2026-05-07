@@ -192,8 +192,13 @@ http_client_request :: proc(hc: ^Http_Client, req: Http_Request) {
 	// In-flight cap. Soft check: two simultaneous submitters could both
 	// see `inflight = 63` and both proceed, briefly reaching 65. That's
 	// fine — we're enforcing a soft cap, not a hard one. Issue #99 M1 B.
+	// We also peek at `destroying` under the same lock so a request issued
+	// concurrently with http_client_destroy can't write into a freed
+	// pending map. Production callers are main-thread only; this hardens
+	// the contract for callers on other threads.
 	sync.lock(&hc.pending_mutex)
 	inflight := len(hc.pending)
+	shutting_down := hc.destroying
 	sync.unlock(&hc.pending_mutex)
 
 	if inflight >= MAX_INFLIGHT_HTTP {
@@ -210,6 +215,21 @@ http_client_request :: proc(hc: ^Http_Client, req: Http_Request) {
 		append(&hc.results, r)
 		sync.unlock(&hc.results_mutex)
 		// We own the request strings; free them since no worker will run.
+		req := req
+		http_request_destroy(&req)
+		return
+	}
+
+	if shutting_down {
+		r := Http_Response{
+			id        = req.id,
+			status    = 0,
+			error_msg = strings.clone("http client shutting down"),
+			headers   = make(map[string]string),
+		}
+		sync.lock(&hc.results_mutex)
+		append(&hc.results, r)
+		sync.unlock(&hc.results_mutex)
 		req := req
 		http_request_destroy(&req)
 		return

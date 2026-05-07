@@ -505,7 +505,7 @@ test_http_inflight_cap_rejects :: proc(t: ^testing.T) {
 			id = strings.clone(fmt.tprintf("cap-%d", i)),
 			url = strings.clone(fmt.tprintf("http://127.0.0.1:%d/", m.port)),
 			method = strings.clone("GET"),
-			timeout_ms = 5000,
+			timeout_ms = 1500,
 		}
 		http_client_request(&hc, req)
 	}
@@ -513,7 +513,7 @@ test_http_inflight_cap_rejects :: proc(t: ^testing.T) {
 		id = strings.clone("cap-over"),
 		url = strings.clone(fmt.tprintf("http://127.0.0.1:%d/", m.port)),
 		method = strings.clone("GET"),
-		timeout_ms = 5000,
+		timeout_ms = 1500,
 	}
 	http_client_request(&hc, overflow)
 

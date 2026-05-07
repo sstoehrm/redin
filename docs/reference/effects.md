@@ -149,7 +149,7 @@ Spawn a child process. The result is routed back as an event.
 |-------|------|----------|---------|-------------|
 | `cmd` | array of strings | yes | -- | Argv (no shell interpolation). |
 | `stdin` | string | no | `nil` | Bytes piped to the child's stdin. |
-| `timeout` | number | no | `30000` | Per-call timeout in milliseconds. On expiry the child is killed and the call fails. |
+| `timeout` | number | no | `30000` | Per-call timeout in milliseconds (includes child-process startup latency). On expiry the child is killed and the call fails. |
 | `max-output` | number | no | `16` | Per-call cap on combined stdout + stderr in MiB. On exceedance the child is killed. |
 | `on-success` | keyword | yes | -- | Event dispatched on `exit-code == 0`. |
 | `on-error` | keyword | yes | -- | Event dispatched on non-zero exit, kill, or host-side failure. |
