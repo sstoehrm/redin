@@ -234,8 +234,8 @@ canvas.register("my-provider", my_provider)
 
 `:shell` map:
 - `:cmd` array of strings (argv, no shell interpolation), `:stdin` optional string.
-- `:timeout` (ms, default 30000). On expiry, child is killed; error handler receives `{exit_code: -1, error_msg: "shell timeout exceeded N ms"}`.
-- `:max-output` (MiB, default 16). Combined stdout+stderr cap; on exceedance, child is killed; error handler receives `{exit_code: -1, error_msg: "shell output exceeded N MiB cap"}`.
+- `:timeout` (ms, default 30000). On expiry, child is killed; error handler receives `{exit-code: -1, error: "shell timeout exceeded N ms"}`.
+- `:max-output` (MiB, default 16). Combined stdout+stderr cap; on exceedance, child is killed; error handler receives `{exit-code: -1, error: "shell output exceeded N MiB cap"}`.
 
 Optional global policy (in `app.odin` for `--native` projects):
 - `bridge.set_http_whitelist([]string{...})` — restrict `redin.http` to listed hostnames / CIDR blocks.

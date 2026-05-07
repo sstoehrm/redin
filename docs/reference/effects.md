@@ -151,10 +151,10 @@ Spawn a child process. The result is routed back as an event.
 | `stdin` | string | no | `nil` | Bytes piped to the child's stdin. |
 | `timeout` | number | no | `30000` | Per-call timeout in milliseconds. On expiry the child is killed and the call fails. |
 | `max-output` | number | no | `16` | Per-call cap on combined stdout + stderr in MiB. On exceedance the child is killed. |
-| `on-success` | keyword | yes | -- | Event dispatched on `exit_code == 0`. |
+| `on-success` | keyword | yes | -- | Event dispatched on `exit-code == 0`. |
 | `on-error` | keyword | yes | -- | Event dispatched on non-zero exit, kill, or host-side failure. |
 
-**Failure response shape.** Failures dispatch to `on-error` with `{:exit_code -1 :error_msg "<message>"}` (no partial output). Possible messages:
+**Failure response shape.** Failures dispatch to `on-error` with `{:exit-code -1 :error "<message>"}` (no partial output). Possible messages:
 
 | Message | Cause |
 |---|---|
