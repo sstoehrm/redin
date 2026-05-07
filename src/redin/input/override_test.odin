@@ -1,19 +1,18 @@
 package input
 
+import "core:sync"
 import "core:testing"
 import rl "vendor:raylib"
 
-// These tests mutate the package-level `override` variable, so they must
-// be run sequentially. Use:
-//
-//   odin test src/redin/input -collection:lib=lib -collection:luajit=vendor/luajit \
-//       -define:ODIN_TEST_THREADS=1
-//
-// Without the flag, parallel test execution races on the shared global
-// and yields intermittent failures.
+// These tests mutate the package-level `override` variable. Each one
+// acquires g_input_test_state_mutex (declared in state_test.odin) so the
+// runner can stay parallel package-wide while these tests serialize
+// against each other and against state-mutating tests.
 
 @(test)
 test_mouse_pos_falls_back_to_raylib_when_inactive :: proc(t: ^testing.T) {
+	sync.lock(&g_input_test_state_mutex)
+	defer sync.unlock(&g_input_test_state_mutex)
 	override = Mouse_Override{}
 	// Cannot easily mock rl.GetMousePosition; just assert active=false path
 	// returns the raylib value (whatever it is) by reading both.
@@ -24,6 +23,8 @@ test_mouse_pos_falls_back_to_raylib_when_inactive :: proc(t: ^testing.T) {
 
 @(test)
 test_mouse_pos_uses_override_when_active :: proc(t: ^testing.T) {
+	sync.lock(&g_input_test_state_mutex)
+	defer sync.unlock(&g_input_test_state_mutex)
 	override = Mouse_Override{active = true, pos = {123, 456}}
 	got := mouse_pos()
 	testing.expect_value(t, got.x, f32(123))
@@ -33,6 +34,8 @@ test_mouse_pos_uses_override_when_active :: proc(t: ^testing.T) {
 
 @(test)
 test_is_mouse_button_down_uses_override :: proc(t: ^testing.T) {
+	sync.lock(&g_input_test_state_mutex)
+	defer sync.unlock(&g_input_test_state_mutex)
 	override = Mouse_Override{active = true, button_left = true}
 	testing.expect(t, is_mouse_button_down(.LEFT))
 	testing.expect(t, !is_mouse_button_down(.RIGHT))
@@ -41,6 +44,8 @@ test_is_mouse_button_down_uses_override :: proc(t: ^testing.T) {
 
 @(test)
 test_pressed_clears_pending_flag :: proc(t: ^testing.T) {
+	sync.lock(&g_input_test_state_mutex)
+	defer sync.unlock(&g_input_test_state_mutex)
 	override = Mouse_Override{active = true, pending_press_left = true}
 	testing.expect(t, is_mouse_button_pressed(.LEFT))
 	testing.expect(t, !override.pending_press_left,
@@ -52,6 +57,8 @@ test_pressed_clears_pending_flag :: proc(t: ^testing.T) {
 
 @(test)
 test_released_clears_pending_flag :: proc(t: ^testing.T) {
+	sync.lock(&g_input_test_state_mutex)
+	defer sync.unlock(&g_input_test_state_mutex)
 	override = Mouse_Override{active = true, pending_release_left = true}
 	testing.expect(t, is_mouse_button_released(.LEFT))
 	testing.expect(t, !override.pending_release_left)
@@ -60,6 +67,8 @@ test_released_clears_pending_flag :: proc(t: ^testing.T) {
 
 @(test)
 test_pending_flags_do_not_bleed_across_buttons :: proc(t: ^testing.T) {
+	sync.lock(&g_input_test_state_mutex)
+	defer sync.unlock(&g_input_test_state_mutex)
 	override = Mouse_Override{
 		active             = true,
 		pending_press_left = true,

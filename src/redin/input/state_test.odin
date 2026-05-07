@@ -1,9 +1,20 @@
 package input
 
+import "core:sync"
 import "core:testing"
+
+// `state` and `override` are package-level mutable globals (see
+// state.odin / override.odin). Odin's test runner is parallel by default,
+// so any test that mutates either global must serialize through this
+// mutex. Same pattern as bridge's g_test_http_state_mutex. Package-scope
+// (no @private) so text_select_test and override_test can lock the same
+// mutex.
+g_input_test_state_mutex: sync.Mutex
 
 @(test)
 test_set_text_selection_stores_path_copy :: proc(t: ^testing.T) {
+	sync.lock(&g_input_test_state_mutex)
+	defer sync.unlock(&g_input_test_state_mutex)
 	state_init()
 	defer state_destroy()
 
@@ -21,6 +32,8 @@ test_set_text_selection_stores_path_copy :: proc(t: ^testing.T) {
 
 @(test)
 test_clear_text_selection_frees_path :: proc(t: ^testing.T) {
+	sync.lock(&g_input_test_state_mutex)
+	defer sync.unlock(&g_input_test_state_mutex)
 	state_init()
 	defer state_destroy()
 
@@ -34,6 +47,8 @@ test_clear_text_selection_frees_path :: proc(t: ^testing.T) {
 
 @(test)
 test_clear_text_selection_resets_has_selection :: proc(t: ^testing.T) {
+	sync.lock(&g_input_test_state_mutex)
+	defer sync.unlock(&g_input_test_state_mutex)
 	state_init()
 	defer state_destroy()
 	set_text_selection([]u8{0x01}, 3, 7)
@@ -44,6 +59,8 @@ test_clear_text_selection_resets_has_selection :: proc(t: ^testing.T) {
 
 @(test)
 test_focus_enter_clears_text_selection :: proc(t: ^testing.T) {
+	sync.lock(&g_input_test_state_mutex)
+	defer sync.unlock(&g_input_test_state_mutex)
 	state_init()
 	defer state_destroy()
 	set_text_selection([]u8{0xAA}, 0, 1)
@@ -54,6 +71,8 @@ test_focus_enter_clears_text_selection :: proc(t: ^testing.T) {
 
 @(test)
 test_copy_selection_source_text_for_text_kind :: proc(t: ^testing.T) {
+	sync.lock(&g_input_test_state_mutex)
+	defer sync.unlock(&g_input_test_state_mutex)
 	state_init()
 	defer state_destroy()
 	set_text_selection([]u8{0x01}, 4, 9)
@@ -63,6 +82,8 @@ test_copy_selection_source_text_for_text_kind :: proc(t: ^testing.T) {
 
 @(test)
 test_copy_selection_source_text_for_input_kind :: proc(t: ^testing.T) {
+	sync.lock(&g_input_test_state_mutex)
+	defer sync.unlock(&g_input_test_state_mutex)
 	state_init()
 	defer state_destroy()
 	focus_enter("hello world")
@@ -75,6 +96,8 @@ test_copy_selection_source_text_for_input_kind :: proc(t: ^testing.T) {
 
 @(test)
 test_copy_selection_source_text_none_kind :: proc(t: ^testing.T) {
+	sync.lock(&g_input_test_state_mutex)
+	defer sync.unlock(&g_input_test_state_mutex)
 	state_init()
 	defer state_destroy()
 	got := copy_selection_source_text("ignored")
@@ -83,6 +106,8 @@ test_copy_selection_source_text_none_kind :: proc(t: ^testing.T) {
 
 @(test)
 test_copy_selection_source_text_clamps_text_kind :: proc(t: ^testing.T) {
+	sync.lock(&g_input_test_state_mutex)
+	defer sync.unlock(&g_input_test_state_mutex)
 	state_init()
 	defer state_destroy()
 	set_text_selection([]u8{0x01}, 2, 100)   // hi beyond content
