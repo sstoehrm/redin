@@ -7,19 +7,33 @@ set -euo pipefail
 echo "=== redin development setup ==="
 
 # --- System packages ---
+# Build deps mirror .github/workflows/test.yml; xvfb is needed for the
+# `bash test/ui/run-all.sh --headless` UI test path. We deliberately do
+# NOT install libluajit-5.1-dev — the LuaJIT C library is statically
+# linked from vendor/luajit/lib/libluajit-5.1.a.
 echo ""
 echo "Installing system packages..."
 if command -v apt-get &>/dev/null; then
   sudo apt-get update -qq
-  sudo apt-get install -y luajit libluajit-5.1-dev libssl-dev clang xvfb
+  sudo apt-get install -y luajit libssl-dev \
+    libgl1-mesa-dev libx11-dev libxrandr-dev libxi-dev \
+    libxcursor-dev libxinerama-dev \
+    xvfb
 elif command -v dnf &>/dev/null; then
-  sudo dnf install -y luajit luajit-devel openssl-devel
+  sudo dnf install -y luajit openssl-devel \
+    mesa-libGL-devel libX11-devel libXrandr-devel libXi-devel \
+    libXcursor-devel libXinerama-devel \
+    xorg-x11-server-Xvfb
 elif command -v pacman &>/dev/null; then
-  sudo pacman -S --needed luajit openssl
+  sudo pacman -S --needed luajit openssl \
+    mesa libx11 libxrandr libxi libxcursor libxinerama xorg-server-xvfb
 elif command -v brew &>/dev/null; then
   brew install luajit openssl
 else
-  echo "WARNING: Unknown package manager. Install LuaJIT, libluajit-5.1-dev, and libssl-dev manually."
+  echo "WARNING: Unknown package manager. Install LuaJIT runtime, libssl-dev,"
+  echo "and the GL/X11 dev headers (libgl1-mesa-dev, libx11-dev, libxrandr-dev,"
+  echo "libxi-dev, libxcursor-dev, libxinerama-dev) manually. Add xvfb if you"
+  echo "plan to run UI tests headless."
 fi
 
 # --- Tool checks ---

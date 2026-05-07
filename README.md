@@ -43,7 +43,12 @@ The CLI downloads a pinned redin binary into `.redin/` — no build tools needed
 
 ```bash
 # Prerequisites (Ubuntu/Debian)
-sudo apt-get install -y luajit libluajit-5.1-dev libssl-dev
+sudo apt-get install -y luajit libssl-dev \
+  libgl1-mesa-dev libx11-dev libxrandr-dev libxi-dev \
+  libxcursor-dev libxinerama-dev
+
+# Initialize submodules (lib/odin-http)
+git submodule update --init --recursive
 
 # Dev build (bakes in REDIN_DEV / REDIN_PROFILE / REDIN_TRACK_MEM)
 ./build-dev.sh
@@ -62,8 +67,10 @@ odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit -o
 |-----------|---------|----------|
 | **Odin** (nightly) | Compiles the host/renderer | Yes |
 | **Raylib** | Bundled with Odin | -- |
-| **LuaJIT** (`luajit` + `libluajit-5.1-dev`) | Runs tests, AOT compiles Fennel | Yes |
+| **LuaJIT** (`luajit`) | Runs tests, AOT compiles Fennel; the C library is statically linked from `vendor/luajit/` so `libluajit-5.1-dev` is not required | Yes |
 | **OpenSSL** (`libssl-dev`) | HTTPS support via odin-http | Yes |
+| **OpenGL + X11 dev headers** (Linux only — `libgl1-mesa-dev`, `libx11-dev`, `libxrandr-dev`, `libxi-dev`, `libxcursor-dev`, `libxinerama-dev`) | Required by Odin's bundled Raylib at link time | Yes (Linux) |
+| **`lib/odin-http` submodule** | Async HTTP client used by `redin.http` | Yes |
 
 ## Test
 
@@ -73,6 +80,13 @@ luajit test/lua/runner.lua test/lua/test_*.fnl
 
 # Build check
 odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit -out:build/redin
+```
+
+UI integration tests additionally need [Babashka](https://github.com/babashka/babashka#installation) (`bb`), and `xvfb` for headless runs:
+
+```bash
+sudo apt-get install -y xvfb
+bash test/ui/run-all.sh --headless
 ```
 
 ## Project structure
