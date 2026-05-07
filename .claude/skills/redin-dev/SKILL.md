@@ -226,6 +226,21 @@ canvas.register("my-provider", my_provider)
      :dispatch-later {:ms 1000 :dispatch [:event/timeout]}}))
 ```
 
+### Effect-map fields (security-relevant)
+
+`:http` map:
+- `:timeout` (ms, default 30000). On expiry, error handler receives `{status: 0, error: "http timeout exceeded"}`.
+- URL scheme must be `http`/`https`; header keys/values must not contain `\r`, `\n`, `\x00`. 3xx responses are not auto-followed. In-flight cap is 64. See `docs/reference/effects.md` for the full failure-message table.
+
+`:shell` map:
+- `:cmd` array of strings (argv, no shell interpolation), `:stdin` optional string.
+- `:timeout` (ms, default 30000). On expiry, child is killed; error handler receives `{exit_code: -1, error_msg: "shell timeout exceeded N ms"}`.
+- `:max-output` (MiB, default 16). Combined stdout+stderr cap; on exceedance, child is killed; error handler receives `{exit_code: -1, error_msg: "shell output exceeded N MiB cap"}`.
+
+Optional global policy (in `app.odin` for `--native` projects):
+- `bridge.set_http_whitelist([]string{...})` — restrict `redin.http` to listed hostnames / CIDR blocks.
+- `bridge.set_shell_env_allowlist([]string{...})` — strip env vars not in the list when spawning children.
+
 ## Dev server (built with `-define:REDIN_DEV=true` or `./build-dev.sh`, default port 8800)
 
 Authenticated: every non-OPTIONS request needs `Authorization: Bearer <token>`, where the token is written to `./.redin-token` on startup (0600, deleted on shutdown). The `Host` header must also be `localhost:<port>` or `127.0.0.1:<port>`. Bound port is in `./.redin-port`.
@@ -346,6 +361,8 @@ For `proc "c"` cfuncs (escape hatch — usually not needed), use `bridge.registe
 | `bridge.push(L, value: any)` | Marshaller: Odin → Lua. Supports primitives, slices, arrays, dynamic arrays, maps, structs, unions, pointers, enums, any. Bails at depth 32 on cycles. |
 | `bridge.dispatch(event, payload: any) -> (ok, err)` | Marshal payload + push to Fennel as `[:dispatch [:event-name payload]]`. Calls the matching `reg-handler`. |
 | `bridge.dispatch_tos(L, event) -> (ok, err)` | Zero-copy: caller already pushed payload onto the stack (hot path, e.g. per-frame state). |
+| `bridge.set_http_whitelist(allow: []string)` | Restrict `redin.http` to listed hostnames / CIDR blocks. `nil` = unset (accept any). Rejection: `{status: 0, error: "host <name> not in http whitelist"}`. |
+| `bridge.set_shell_env_allowlist(allow: []string)` | Strip env vars not in the list when spawning `redin.shell` children. `nil` = full passthrough. |
 
 ## redin-cli
 

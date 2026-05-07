@@ -78,13 +78,22 @@ This is by design and appropriate for a development framework. **It does mean re
 
 The runtime's internal tables (`dataflow`, `effect`, `view`, etc.) are reachable from app code via `require`. Don't rely on them being private — they're "internal" by convention only.
 
-### `redin.http` — unrestricted URLs
+### `redin.http` — unrestricted URLs by default
 
-The `redin.http` host function (and the `:http` effect that wraps it) sends whatever URL the app constructs. There is no allowlist for loopback (`127/8`), link-local (`169.254/16`), RFC1918 (`10/8`, `172.16/12`, `192.168/16`), or `file://`. Any string that reaches the helper hits the network as-is.
+The `redin.http` host function (and the `:http` effect that wraps it) sends whatever URL the app constructs. There is no built-in SSRF allowlist for loopback (`127/8`), link-local (`169.254/16`), or RFC1918 (`10/8`, `172.16/12`, `192.168/16`); any reachable host is fair game.
 
-For most apps this is fine — the app author chose the URL. If your app embeds third-party templates, plugin URLs, or anything that could turn a remote string into a request target, **sanitize before dispatching**. Server-side request forgery (SSRF) is otherwise on the table.
+For most apps this is fine — the app author chose the URL. If your app embeds third-party templates, plugin URLs, or anything that could turn a remote string into a request target, **sanitize before dispatching**, or use `bridge.set_http_whitelist` (see [native bridge](reference/native-bridge.md)) to enforce a hostname/CIDR allowlist at the host boundary.
 
-A 16 MiB cap on response bodies is enforced by the host (oversized announcements fail fast with a "Response body too large" error). Per-request wall-clock timeout is not yet wired through to the worker thread; the `:timeout` field on the effect is currently advisory.
+Always-on guards (no opt-out):
+
+- **Scheme:** only `http` and `https` URLs are accepted. Other schemes (e.g. `file://`, `ftp://`) fail with `{status: 0, error: "http scheme must be http or https"}`.
+- **Headers:** any header key/value containing `\r`, `\n`, or `\x00` fails with `{status: 0, error: "http header contains invalid character"}` (defence against header-splitting).
+- **Redirects:** 3xx responses are **not** auto-followed. The status, headers (including `Location`), and body surface to the caller as-is.
+- **Body cap:** 16 MiB cap on response bodies; oversized responses fail with "Response body too large".
+- **In-flight cap:** 64 concurrent requests; over-cap submission fails with `{status: 0, error: "too many concurrent http requests (cap 64)"}`.
+- **Timeout:** default 30000 ms; override via `:timeout N` (ms) on the `:http` effect map. On expiry: `{status: 0, error: "http timeout exceeded"}`.
+
+See [Effects](reference/effects.md#built-in-http) for the full failure-response table and [native bridge](reference/native-bridge.md) for the optional whitelist setter.
 
 ### Dev server (built with `-define:REDIN_DEV=true`)
 
@@ -513,6 +522,8 @@ Called automatically by the view runner after `main_view` returns.
 
 Queues an async HTTP request. The request runs on a background thread. When complete, the response is delivered as an `[:http-response data]` event where `data` is `{id, status, body, headers, error}`.
 
+`timeout` is in milliseconds (default 30000). Scheme must be `http` or `https`. Header keys/values must not contain `\r`, `\n`, or `\x00`. 3xx responses are not auto-followed. Concurrency cap: 64 in-flight requests. See [Effects](reference/effects.md#built-in-http) for the full failure-response table.
+
 Typically called through the `:http` effect rather than directly.
 
 ### `redin.json_encode(value)`
@@ -554,7 +565,7 @@ Providers register in Odin via `canvas.register(name, provider)`. See the [canva
 
 Runs on `localhost:8800` when the binary was built with `-define:REDIN_DEV=true` (or `-define:REDIN_AGENT=true`). All responses are JSON unless noted.
 
-**Authentication.** Every non-`OPTIONS` request must include `Authorization: Bearer <token>`, where the token is read from `./.redin-token` (generated on startup, mode 0600, removed on shutdown). The server also verifies the `Host` header is `localhost:<port>` or `127.0.0.1:<port>` (DNS-rebinding defence). Missing token → `401`, bad Host → `403`, `OPTIONS` → `405` (CORS preflight not served — the endpoint is for local tools, not browsers). See [dev-server reference](../reference/dev-server.md) for usage examples.
+**Authentication.** Every non-`OPTIONS` request must include `Authorization: Bearer <token>`, where the token is read from `./.redin-token` (generated on startup, mode 0600, removed on shutdown). The server also verifies the `Host` header is `localhost:<port>` or `127.0.0.1:<port>` (DNS-rebinding defence). Missing token → `401`, bad Host → `403`, `OPTIONS` → `405` (CORS preflight not served — the endpoint is for local tools, not browsers), malformed `Content-Length` (more than 12 digits) → `400`. See [dev-server reference](../reference/dev-server.md) for usage examples.
 
 ### Frames
 
