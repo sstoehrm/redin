@@ -233,9 +233,13 @@ execute_shell :: proc(req: Shell_Request) -> Shell_Response {
 		}
 
 		n_ready, perr := linux.poll(fds[:n_fds], 50)
+		if perr == .EINTR {
+			// signal interrupted poll (Raylib installs handlers); retry
+			continue
+		}
 		if perr != .NONE {
-			// poll error (e.g. EINTR) — bail out cleanly; the cap
-			// or wait below will surface any final state.
+			// genuinely fatal poll error (EBADF, ENOMEM, EINVAL) —
+			// bail out cleanly; wait below will surface final state.
 			stdout_done = true
 			stderr_done = true
 			break
