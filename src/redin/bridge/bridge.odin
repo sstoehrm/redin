@@ -466,6 +466,9 @@ redin_http :: proc "c" (L: ^Lua_State) -> i32 {
 	} else {
 		req.body = strings.clone("")
 	}
+	if lua_isnumber(L, 6) {
+		req.timeout_ms = int(lua_tonumber(L, 6))
+	}
 
 	http_client_request(&g_bridge.http_client, req)
 	return 0
@@ -955,6 +958,20 @@ redin_shell :: proc "c" (L: ^Lua_State) -> i32 {
 		req.stdin = strings.clone_from_cstring(lua_tostring_raw(L, 3))
 	} else {
 		req.stdin = strings.clone("")
+	}
+
+	// Optional arg 4: per-call max output cap in MiB (issue #99 M2 A).
+	// Omitted / non-positive => execute_shell falls back to its 16 MiB default.
+	if lua_isnumber(L, 4) {
+		mb := int(lua_tonumber(L, 4))
+		if mb > 0 do req.max_output_bytes = mb * 1024 * 1024
+	}
+
+	// Optional arg 5: per-call timeout in ms (issue #99 M2 B).
+	// Omitted / non-positive => execute_shell falls back to its 30000 ms default.
+	if lua_isnumber(L, 5) {
+		ms := int(lua_tonumber(L, 5))
+		if ms > 0 do req.timeout_ms = ms
 	}
 
 	shell_client_request(&g_bridge.shell_client, req)

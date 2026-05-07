@@ -84,15 +84,27 @@ Make an async HTTP request. The response is routed back as an event.
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `url` | string | yes | -- | Request URL (HTTP or HTTPS) |
+| `url` | string | yes | -- | Request URL. Scheme must be `http` or `https`. |
 | `method` | keyword | no | `:get` | `:get`, `:post`, `:put`, `:delete`, `:patch` |
-| `headers` | table | no | `{}` | Key-value header pairs |
+| `headers` | table | no | `{}` | Key-value header pairs. Keys/values containing `\r`, `\n`, or `\x00` are rejected. |
 | `body` | string | no | `nil` | Request body |
-| `timeout` | number | no | `30000` | Timeout in milliseconds |
+| `timeout` | number | no | `30000` | Per-call timeout in milliseconds. On expiry the call fails with `error = "http timeout exceeded"`. |
 | `on-success` | keyword | yes | -- | Event dispatched on 2xx response |
 | `on-error` | keyword | yes | -- | Event dispatched on error |
 
 **Response routing:** 2xx status codes dispatch to `on-success`, all others to `on-error`. The host calls `effect.handle-http-response` with `{:id :status :headers :body}`.
+
+**Redirects** are **not** auto-followed. 3xx responses surface to the caller as-is, including the `Location` header.
+
+**Failure response shape.** Network/host-side failures dispatch to `on-error` with `{:status 0 :error "<message>"}`. Possible messages:
+
+| Message | Cause |
+|---|---|
+| `"http scheme must be http or https"` | URL scheme is not `http`/`https` (e.g. `file://`, `ftp://`). |
+| `"http header contains invalid character"` | A header key or value contained `\r`, `\n`, or `\x00`. |
+| `"http timeout exceeded"` | Wall-clock timeout (per-call `:timeout`, default 30000 ms) elapsed. |
+| `"too many concurrent http requests (cap 64)"` | Submitted while 64 in-flight requests were already running. |
+| `"host <name> not in http whitelist"` | Whitelist is set (`bridge.set_http_whitelist`) and the URL host is not on it. See [native bridge](native-bridge.md). |
 
 **Success handler** receives `[event-name response]`:
 
@@ -115,6 +127,41 @@ Make an async HTTP request. The response is routed back as an event.
     (assoc db :error (or error.error (.. "HTTP " (tostring error.status)))
               :loading false)))
 ```
+
+---
+
+## Built-in: `:shell`
+
+Spawn a child process. The result is routed back as an event.
+
+```fennel
+(reg-handler :event/run-build
+  (fn [db event]
+    {:db (assoc db :building true)
+     :shell {:cmd ["bb" "build.bb" "--release"]
+             :timeout 60000
+             :max-output 32
+             :on-success :event/build-done
+             :on-error :event/build-failed}}))
+```
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `cmd` | array of strings | yes | -- | Argv (no shell interpolation). |
+| `stdin` | string | no | `nil` | Bytes piped to the child's stdin. |
+| `timeout` | number | no | `30000` | Per-call timeout in milliseconds (includes child-process startup latency). On expiry the child is killed and the call fails. |
+| `max-output` | number | no | `16` | Per-call cap on combined stdout + stderr in MiB. On exceedance the child is killed. |
+| `on-success` | keyword | yes | -- | Event dispatched on `exit-code == 0`. |
+| `on-error` | keyword | yes | -- | Event dispatched on non-zero exit, kill, or host-side failure. |
+
+**Failure response shape.** Failures dispatch to `on-error` with `{:exit-code -1 :error "<message>"}` (no partial output). Possible messages:
+
+| Message | Cause |
+|---|---|
+| `"shell timeout exceeded N ms"` | Wall-clock timeout (per-call `:timeout`, default 30000 ms) elapsed; child killed. |
+| `"shell output exceeded N MiB cap"` | Combined stdout + stderr exceeded the cap (per-call `:max-output`, default 16 MiB); child killed. |
+
+The shell-env allowlist (`bridge.set_shell_env_allowlist`, see [native bridge](native-bridge.md)) is applied at spawn time and does not produce a runtime failure — children just see a stripped environment when it is set.
 
 ---
 

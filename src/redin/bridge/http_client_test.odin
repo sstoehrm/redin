@@ -17,6 +17,16 @@ import "core:strings"
 import "core:sync"
 import "core:testing"
 import "core:thread"
+import "core:time"
+
+// Tests that mutate the package-level HTTP whitelist (g_http_whitelist) share
+// process state. Odin's test runner runs tests in parallel by default, so a
+// test that sets the whitelist can race against a separate test that issues
+// an HTTP request and depends on the whitelist being unset. Acquire this
+// mutex in any test that either calls set_http_whitelist or calls
+// execute_http_request with a host the whitelist might reject.
+@(private = "file")
+g_test_http_state_mutex: sync.Mutex
 
 @(private = "file")
 Mock_Server :: struct {
@@ -76,6 +86,9 @@ mock_stop :: proc(m: ^Mock_Server) {
 
 @(test)
 test_http_response_cap_rejects_oversized_content_length :: proc(t: ^testing.T) {
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+
 	// Announce 32 MiB. With a HTTP_MAX_BODY cap of 16 MiB the underlying
 	// scanner returns Too_Long without reading the body.
 	announced := 32 * 1024 * 1024
@@ -119,4 +132,457 @@ test_http_response_cap_rejects_oversized_content_length :: proc(t: ^testing.T) {
 	testing.expect(t, len(got.error_msg) > 0, "expected an error message about the cap")
 	testing.expect(t, strings.contains(got.error_msg, "too large"),
 		fmt.tprintf("expected error_msg to mention 'too large', got %q", got.error_msg))
+}
+
+@(test)
+test_http_header_value_rejects_crlf :: proc(t: ^testing.T) {
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+
+	headers := make(map[string]string)
+	headers[strings.clone("X-Smuggle")] = strings.clone("evil\r\nHost: attacker")
+	defer {
+		for k, v in headers { delete(k); delete(v) }
+		delete(headers)
+	}
+
+	req := Http_Request{
+		id      = strings.clone("crlf-test"),
+		url     = strings.clone("http://127.0.0.1:1/"),
+		method  = strings.clone("GET"),
+		headers = headers,
+	}
+	defer {
+		delete(req.id); delete(req.url); delete(req.method)
+	}
+
+	got := execute_http_request(req)
+	defer {
+		delete(got.body); delete(got.error_msg)
+		for k, v in got.headers { delete(k); delete(v) }
+		delete(got.headers)
+	}
+
+	testing.expect(t, got.status == 0, "expected synthesized error status 0")
+	testing.expect(t, strings.contains(got.error_msg, "invalid character"),
+		fmt.tprintf("expected 'invalid character' in error_msg, got %q", got.error_msg))
+}
+
+@(test)
+test_http_header_key_rejects_nul :: proc(t: ^testing.T) {
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+
+	headers := make(map[string]string)
+	headers[strings.clone("X-Bad\x00key")] = strings.clone("ok")
+	defer {
+		for k, v in headers { delete(k); delete(v) }
+		delete(headers)
+	}
+
+	req := Http_Request{
+		id      = strings.clone("nul-test"),
+		url     = strings.clone("http://127.0.0.1:1/"),
+		method  = strings.clone("GET"),
+		headers = headers,
+	}
+	defer {
+		delete(req.id); delete(req.url); delete(req.method)
+	}
+
+	got := execute_http_request(req)
+	defer {
+		delete(got.body); delete(got.error_msg)
+		for k, v in got.headers { delete(k); delete(v) }
+		delete(got.headers)
+	}
+
+	testing.expect(t, got.status == 0, "expected synthesized error status 0")
+	testing.expect(t, strings.contains(got.error_msg, "invalid character"),
+		fmt.tprintf("expected 'invalid character' in error_msg, got %q", got.error_msg))
+}
+
+@(test)
+test_http_redirect_not_followed :: proc(t: ^testing.T) {
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+
+	resp := "HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:1/elsewhere\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+	m := mock_start(resp)
+	if m == nil {
+		testing.fail_now(t, "could not bind a mock server port")
+	}
+	defer mock_stop(m)
+
+	url := fmt.tprintf("http://127.0.0.1:%d/", m.port)
+	req := Http_Request{
+		id = strings.clone("redirect-test"),
+		url = strings.clone(url),
+		method = strings.clone("GET"),
+	}
+	defer { delete(req.id); delete(req.url); delete(req.method) }
+
+	got := execute_http_request(req)
+	defer {
+		delete(got.body); delete(got.error_msg)
+		for k, v in got.headers { delete(k); delete(v) }
+		delete(got.headers)
+	}
+
+	testing.expect_value(t, got.status, 302)
+}
+
+@(test)
+test_http_rejects_ftp_scheme :: proc(t: ^testing.T) {
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+
+	req := Http_Request{
+		id = strings.clone("scheme-1"),
+		url = strings.clone("ftp://example.com/"),
+		method = strings.clone("GET"),
+	}
+	defer { delete(req.id); delete(req.url); delete(req.method) }
+	got := execute_http_request(req)
+	defer {
+		delete(got.body); delete(got.error_msg)
+		for k, v in got.headers { delete(k); delete(v) }
+		delete(got.headers)
+	}
+	testing.expect_value(t, got.status, 0)
+	testing.expect(t, strings.contains(got.error_msg, "scheme"),
+		fmt.tprintf("expected 'scheme' in error_msg, got %q", got.error_msg))
+}
+
+@(test)
+test_http_rejects_file_scheme :: proc(t: ^testing.T) {
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+
+	req := Http_Request{
+		id = strings.clone("scheme-2"),
+		url = strings.clone("file:///etc/passwd"),
+		method = strings.clone("GET"),
+	}
+	defer { delete(req.id); delete(req.url); delete(req.method) }
+	got := execute_http_request(req)
+	defer {
+		delete(got.body); delete(got.error_msg)
+		for k, v in got.headers { delete(k); delete(v) }
+		delete(got.headers)
+	}
+	testing.expect_value(t, got.status, 0)
+	testing.expect(t, strings.contains(got.error_msg, "scheme"),
+		"expected scheme rejection error_msg")
+}
+
+@(test)
+test_http_accepts_uppercase_https :: proc(t: ^testing.T) {
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+
+	// Just confirms scheme matching is case-insensitive — no real connect.
+	// We expect a connect error (status 0, error_msg contains "Request failed"
+	// or similar), NOT the scheme-rejection error_msg.
+	req := Http_Request{
+		id = strings.clone("scheme-3"),
+		url = strings.clone("HTTPS://127.0.0.1:1/"),
+		method = strings.clone("GET"),
+	}
+	defer { delete(req.id); delete(req.url); delete(req.method) }
+	got := execute_http_request(req)
+	defer {
+		delete(got.body); delete(got.error_msg)
+		for k, v in got.headers { delete(k); delete(v) }
+		delete(got.headers)
+	}
+	testing.expect(t, !strings.contains(got.error_msg, "scheme"),
+		"HTTPS (uppercase) must not be rejected as scheme")
+}
+
+@(test)
+test_http_whitelist_allows_listed_host :: proc(t: ^testing.T) {
+	resp := "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+	m := mock_start(resp)
+	if m == nil { testing.fail_now(t, "could not bind mock") }
+	defer mock_stop(m)
+
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+
+	set_http_whitelist([]string{"127.0.0.1"})
+	defer set_http_whitelist(nil)
+
+	url := fmt.tprintf("http://127.0.0.1:%d/", m.port)
+	req := Http_Request{
+		id = strings.clone("wl-1"), url = strings.clone(url),
+		method = strings.clone("GET"),
+	}
+	defer { delete(req.id); delete(req.url); delete(req.method) }
+	got := execute_http_request(req)
+	defer {
+		delete(got.body); delete(got.error_msg)
+		for k, v in got.headers { delete(k); delete(v) }
+		delete(got.headers)
+	}
+	testing.expect_value(t, got.status, 200)
+}
+
+@(test)
+test_http_whitelist_blocks_unlisted_host :: proc(t: ^testing.T) {
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+
+	set_http_whitelist([]string{"example.com"})
+	defer set_http_whitelist(nil)
+
+	req := Http_Request{
+		id = strings.clone("wl-2"),
+		url = strings.clone("http://127.0.0.1:1/"),
+		method = strings.clone("GET"),
+	}
+	defer { delete(req.id); delete(req.url); delete(req.method) }
+	got := execute_http_request(req)
+	defer {
+		delete(got.body); delete(got.error_msg)
+		for k, v in got.headers { delete(k); delete(v) }
+		delete(got.headers)
+	}
+	testing.expect_value(t, got.status, 0)
+	testing.expect(t, strings.contains(got.error_msg, "127.0.0.1"),
+		fmt.tprintf("expected rejected host name in error, got %q", got.error_msg))
+	testing.expect(t, strings.contains(got.error_msg, "whitelist"),
+		"expected 'whitelist' in error message")
+}
+
+@(test)
+test_http_whitelist_hostname_case_insensitive :: proc(t: ^testing.T) {
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+
+	set_http_whitelist([]string{"Example.COM"})
+	defer set_http_whitelist(nil)
+
+	// Direct check against the whitelist function — proves case-insensitive
+	// matching without requiring DNS or a network round-trip.
+	rejected, ok := http_whitelist_check("example.com")
+	testing.expect(t, ok, "case-insensitive match should accept lowercased host")
+	testing.expect_value(t, rejected, "")
+}
+
+@(test)
+test_http_whitelist_cidr_match :: proc(t: ^testing.T) {
+	resp := "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+	m := mock_start(resp)
+	if m == nil { testing.fail_now(t, "could not bind mock") }
+	defer mock_stop(m)
+
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+
+	set_http_whitelist([]string{"127.0.0.0/8"})
+	defer set_http_whitelist(nil)
+
+	url := fmt.tprintf("http://127.0.0.1:%d/", m.port)
+	req := Http_Request{
+		id = strings.clone("wl-4"), url = strings.clone(url),
+		method = strings.clone("GET"),
+	}
+	defer { delete(req.id); delete(req.url); delete(req.method) }
+	got := execute_http_request(req)
+	defer {
+		delete(got.body); delete(got.error_msg)
+		for k, v in got.headers { delete(k); delete(v) }
+		delete(got.headers)
+	}
+	testing.expect_value(t, got.status, 200)
+}
+
+@(test)
+test_http_whitelist_ipv6_cidr_match :: proc(t: ^testing.T) {
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+
+	set_http_whitelist([]string{"2001:db8::/32"})
+	defer set_http_whitelist(nil)
+
+	{
+		rejected, ok := http_whitelist_check("2001:db8:1234::1")
+		testing.expect(t, ok, "IPv6 inside the /32 should match")
+		testing.expect_value(t, rejected, "")
+	}
+	{
+		rejected, ok := http_whitelist_check("2001:db9::1")
+		testing.expect(t, !ok, "IPv6 outside the /32 must not match")
+		testing.expect_value(t, rejected, "2001:db9::1")
+	}
+}
+
+@(private = "file")
+slow_mock_serve :: proc(m: ^Mock_Server) {
+	defer sync.sema_post(&m.done)
+	client, _, err := net.accept_tcp(m.sock)
+	if err != nil do return
+	defer net.close(client)
+	// Read the request, then sleep instead of responding.
+	buf: [4096]u8
+	total := 0
+	for total < len(buf) {
+		n, rerr := net.recv_tcp(client, buf[total:])
+		if rerr != nil || n <= 0 do break
+		total += n
+		if strings.contains(string(buf[:total]), "\r\n\r\n") do break
+	}
+	time.sleep(2 * time.Second)
+}
+
+@(test)
+test_http_timeout_fires :: proc(t: ^testing.T) {
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+
+	m := new(Mock_Server)
+	for p in 18900 ..< 19000 {
+		s, e := net.listen_tcp(net.Endpoint{address = net.IP4_Loopback, port = p})
+		if e == nil { m.sock = s; m.port = p; break }
+	}
+	if m.port == 0 { testing.fail_now(t, "no port") }
+	m.thread = thread.create_and_start_with_poly_data(m, slow_mock_serve, context)
+	defer mock_stop(m)
+
+	hc: Http_Client
+	http_client_init(&hc)
+	defer http_client_destroy(&hc)
+
+	req := Http_Request{
+		id = strings.clone("timeout-1"),
+		url = strings.clone(fmt.tprintf("http://127.0.0.1:%d/", m.port)),
+		method = strings.clone("GET"),
+		timeout_ms = 200,  // 200 ms; mock sleeps 2 s
+	}
+	http_client_request(&hc, req)
+
+	// Poll for up to 1 s to pick up the timeout result.
+	deadline := time.time_add(time.now(), 1 * time.Second)
+	results: [dynamic]Http_Response
+	defer { for &r in results do http_response_destroy(&r); delete(results) }
+	for time.diff(time.now(), deadline) > 0 {
+		http_client_poll(&hc, &results)
+		if len(results) > 0 do break
+		time.sleep(50 * time.Millisecond)
+	}
+
+	testing.expect(t, len(results) == 1, "expected one timeout result")
+	if len(results) == 1 {
+		testing.expect_value(t, results[0].status, 0)
+		testing.expect(t, strings.contains(results[0].error_msg, "timeout"),
+			fmt.tprintf("expected 'timeout' in error_msg, got %q", results[0].error_msg))
+	}
+}
+
+@(test)
+// Known leak: the 64 in-flight workers are blocked in odin-http's
+// http_client.request, which has no cancellation knob. http_client_destroy
+// waits 3 s for them to drain via the timeout sweep, then logs and gives up.
+// The tracking allocator reports each worker's scanner buffer (~4 KiB) as
+// leaked. Eliminating this requires either modifying odin-http (vendored,
+// out of scope) or tracking + closing pending sockets from destroy
+// (substantial change). The leak is bounded and shutdown-only.
+test_http_inflight_cap_rejects :: proc(t: ^testing.T) {
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+
+	hc: Http_Client
+	http_client_init(&hc)
+	defer http_client_destroy(&hc)
+
+	// Spin up a slow mock so the requests stay in flight.
+	m := new(Mock_Server)
+	for p in 18900 ..< 19000 {
+		s, e := net.listen_tcp(net.Endpoint{address = net.IP4_Loopback, port = p})
+		if e == nil { m.sock = s; m.port = p; break }
+	}
+	if m.port == 0 { testing.fail_now(t, "no port") }
+	m.thread = thread.create_and_start_with_poly_data(m, slow_mock_serve, context)
+	defer mock_stop(m)
+
+	// Submit MAX_INFLIGHT_HTTP requests + 1; the +1 must be rejected.
+	for i in 0 ..< MAX_INFLIGHT_HTTP {
+		req := Http_Request{
+			id = strings.clone(fmt.tprintf("cap-%d", i)),
+			url = strings.clone(fmt.tprintf("http://127.0.0.1:%d/", m.port)),
+			method = strings.clone("GET"),
+			timeout_ms = 1500,
+		}
+		http_client_request(&hc, req)
+	}
+	overflow := Http_Request{
+		id = strings.clone("cap-over"),
+		url = strings.clone(fmt.tprintf("http://127.0.0.1:%d/", m.port)),
+		method = strings.clone("GET"),
+		timeout_ms = 1500,
+	}
+	http_client_request(&hc, overflow)
+
+	// Poll briefly for the rejected response.
+	deadline := time.time_add(time.now(), 500 * time.Millisecond)
+	results: [dynamic]Http_Response
+	defer { for &r in results do http_response_destroy(&r); delete(results) }
+	for time.diff(time.now(), deadline) > 0 {
+		http_client_poll(&hc, &results)
+		if len(results) >= 1 do break
+		time.sleep(20 * time.Millisecond)
+	}
+
+	found := false
+	for r in results {
+		if r.id == "cap-over" && strings.contains(r.error_msg, "concurrent") {
+			found = true; break
+		}
+	}
+	testing.expect(t, found, "expected overflow request to be rejected with 'concurrent' error")
+}
+
+@(test)
+test_http_destroy_drains_or_times_out :: proc(t: ^testing.T) {
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+
+	hc := new(Http_Client)
+	http_client_init(hc)
+
+	m := new(Mock_Server)
+	for p in 18900 ..< 19000 {
+		s, e := net.listen_tcp(net.Endpoint{address = net.IP4_Loopback, port = p})
+		if e == nil { m.sock = s; m.port = p; break }
+	}
+	if m.port == 0 { testing.fail_now(t, "no port") }
+	m.thread = thread.create_and_start_with_poly_data(m, slow_mock_serve, context)
+	defer mock_stop(m)
+
+	// Submit one request with a short timeout so the registry drains naturally.
+	req := Http_Request{
+		id = strings.clone("drain-1"),
+		url = strings.clone(fmt.tprintf("http://127.0.0.1:%d/", m.port)),
+		method = strings.clone("GET"),
+		timeout_ms = 100,  // 100 ms timeout, mock sleeps 2 s
+	}
+	http_client_request(hc, req)
+
+	// Wait briefly so the request enters the pending registry.
+	time.sleep(50 * time.Millisecond)
+
+	// Destroy should drain workers (workers_alive→0) within the 3-second
+	// internal deadline. The worker is blocked on the slow mock for ~2 s,
+	// then bails via the `destroying` path. We measure: does destroy
+	// return cleanly within ~3 s, and is `hc` safe to free immediately
+	// afterward (workers_alive == 0 means no worker still holds a
+	// pointer)?
+	start := time.now()
+	http_client_destroy(hc)
+	elapsed := time.diff(start, time.now())
+	free(hc)
+
+	testing.expect(t, elapsed < 4 * time.Second,
+		"http_client_destroy should drain within ~3 s, not hang")
 }

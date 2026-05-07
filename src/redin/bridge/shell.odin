@@ -1,15 +1,23 @@
 package bridge
 
+import "base:runtime"
 import "core:fmt"
 import "core:os"
 import "core:strings"
 import "core:sync"
+import "core:sys/linux"
 import "core:thread"
+import "core:time"
+
+SHELL_DEFAULT_MAX_OUTPUT :: 16 * 1024 * 1024 // 16 MiB
+SHELL_DEFAULT_TIMEOUT_MS :: 30_000
 
 Shell_Request :: struct {
-	id:    string,
-	cmd:   []string,
-	stdin: string,
+	id:               string,
+	cmd:              []string,
+	stdin:            string,
+	max_output_bytes: int,
+	timeout_ms:       int,
 }
 
 Shell_Response :: struct {
@@ -88,7 +96,6 @@ shell_request_destroy :: proc(req: ^Shell_Request) {
 	delete(req.cmd)
 }
 
-@(private = "file")
 execute_shell :: proc(req: Shell_Request) -> Shell_Response {
 	response: Shell_Response
 	response.id = strings.clone(req.id)
@@ -98,6 +105,20 @@ execute_shell :: proc(req: Shell_Request) -> Shell_Response {
 		response.exit_code = -1
 		return response
 	}
+
+	// Combined stdout+stderr cap. 0 / negative means "use default 16 MiB".
+	output_cap := req.max_output_bytes
+	if output_cap <= 0 do output_cap = SHELL_DEFAULT_MAX_OUTPUT
+
+	// Per-call wall-clock timeout (issue #99 M2 B). 0 / negative means
+	// "use default 30 000 ms". The deadline is checked once per poll
+	// iteration below; with a 50 ms poll tick, deadline responsiveness
+	// is bounded by ~50 ms past the requested timeout.
+	timeout_ms := req.timeout_ms
+	if timeout_ms <= 0 do timeout_ms = SHELL_DEFAULT_TIMEOUT_MS
+	// Note: deadline includes process_start latency. Tight (<100 ms) timeouts
+	// may fire before exec returns. Negligible for the 30 s default.
+	deadline := time.time_add(time.now(), time.Duration(timeout_ms) * time.Millisecond)
 
 	// Create pipes for stdout and stderr
 	stdout_r, stdout_w, stdout_err := os.pipe()
@@ -133,12 +154,29 @@ execute_shell :: proc(req: Shell_Request) -> Shell_Response {
 		stdin_w = w
 	}
 
+	// Apply the env allowlist (issue #99 M3). When the allowlist is unset,
+	// shell_env_filtered returns nil — and Process_Desc.env = nil is the
+	// documented "inherit current process' environment" sentinel (see
+	// core/os/process.odin's Process_Desc docstring), preserving the
+	// historical full-passthrough behaviour.
+	//
+	// When set, shell_env_filtered allocates each entry + the slice via
+	// runtime.heap_allocator(); we free both after process_start, since
+	// process_start (Linux execve) copies the env into the child image.
+	filtered_env := shell_env_filtered()
+	defer if filtered_env != nil {
+		heap := runtime.heap_allocator()
+		for s in filtered_env do delete(s, heap)
+		delete(filtered_env, heap)
+	}
+
 	// Start process
 	desc := os.Process_Desc {
 		command = req.cmd,
 		stdout  = stdout_w,
 		stderr  = stderr_w,
 		stdin   = stdin_r,
+		env     = filtered_env, // nil = inherit parent env (default)
 	}
 
 	process, start_err := os.process_start(desc)
@@ -170,31 +208,111 @@ execute_shell :: proc(req: Shell_Request) -> Shell_Response {
 	read_buf: [4096]u8
 	stdout_done, stderr_done: bool
 
-	// Blocking reads on child pipes. The previous version gated each
-	// read on os.pipe_has_data and fell through to os.read in both
-	// branches — same behaviour, extra syscall, and on macOS/BSD the
-	// has_data probe could false-negative and turn a quick command
-	// into a hang (the `else` branch still called os.read after the
-	// probe said "nothing there"). Direct blocking reads are simpler
-	// and work on all platforms: when the child exits and closes its
-	// pipe, os.read returns 0 / error and we mark that side done.
+	// Use linux.poll to multiplex stdout + stderr reads. The previous
+	// blocking-read approach (os.read on each pipe in turn) deadlocked
+	// for stderr-quiet long-running children: e.g. `yes` writes only
+	// to stdout, so the stderr read blocked indefinitely while the
+	// stdout buffer grew unbounded — the cap check at the bottom of
+	// the loop body could never fire. With poll, we only read the
+	// pipe(s) that actually have data ready (or have been closed) and
+	// re-check the cap each iteration.
+	//
+	// 50 ms timeout balances responsiveness vs. CPU. On overflow, kill
+	// the child, clear partial buffers, and surface a -1 exit code with
+	// a descriptive error_msg (issue #99 M2 A). Subsequent reads would
+	// return EOF as the kernel closes the (now-orphaned) pipe ends, but
+	// we break out immediately and reap the child below.
+	killed := false
 	for !stdout_done || !stderr_done {
+		// Deadline check (issue #99 M2 B). time.diff(start, end) returns
+		// end - start, so <= 0 means now >= deadline. Checked before the
+		// poll so a deadline that has already elapsed kills the child
+		// immediately rather than waiting another 50 ms tick.
+		if time.diff(time.now(), deadline) <= 0 {
+			_ = os.process_kill(process)
+			clear(&stdout_buf)
+			clear(&stderr_buf)
+			response.exit_code = -1
+			response.error_msg = fmt.aprintf("shell timeout exceeded %d ms", timeout_ms)
+			killed = true
+			break
+		}
+
+		fds: [2]linux.Poll_Fd
+		n_fds := 0
+		stdout_idx := -1
+		stderr_idx := -1
 		if !stdout_done {
-			n, err := os.read(stdout_r, read_buf[:])
-			if err != nil || n <= 0 {
-				stdout_done = true
-			} else {
-				append(&stdout_buf, ..read_buf[:n])
+			fds[n_fds] = linux.Poll_Fd {
+				fd     = linux.Fd(os.fd(stdout_r)),
+				events = {.IN},
 			}
+			stdout_idx = n_fds
+			n_fds += 1
 		}
 		if !stderr_done {
-			n, err := os.read(stderr_r, read_buf[:])
-			if err != nil || n <= 0 {
-				stderr_done = true
-			} else {
-				append(&stderr_buf, ..read_buf[:n])
+			fds[n_fds] = linux.Poll_Fd {
+				fd     = linux.Fd(os.fd(stderr_r)),
+				events = {.IN},
+			}
+			stderr_idx = n_fds
+			n_fds += 1
+		}
+
+		n_ready, perr := linux.poll(fds[:n_fds], 50)
+		if perr == .EINTR {
+			// signal interrupted poll (Raylib installs handlers); retry
+			continue
+		}
+		if perr != .NONE {
+			// genuinely fatal poll error (EBADF, ENOMEM, EINVAL) —
+			// bail out cleanly; wait below will surface final state.
+			stdout_done = true
+			stderr_done = true
+			break
+		}
+
+		if n_ready > 0 {
+			if stdout_idx >= 0 &&
+			   (.IN in fds[stdout_idx].revents || .HUP in fds[stdout_idx].revents) {
+				n, err := os.read(stdout_r, read_buf[:])
+				if err != nil || n <= 0 {
+					stdout_done = true
+				} else {
+					append(&stdout_buf, ..read_buf[:n])
+				}
+			}
+			if stderr_idx >= 0 &&
+			   (.IN in fds[stderr_idx].revents || .HUP in fds[stderr_idx].revents) {
+				n, err := os.read(stderr_r, read_buf[:])
+				if err != nil || n <= 0 {
+					stderr_done = true
+				} else {
+					append(&stderr_buf, ..read_buf[:n])
+				}
 			}
 		}
+
+		if len(stdout_buf) + len(stderr_buf) > output_cap {
+			_ = os.process_kill(process)
+			clear(&stdout_buf)
+			clear(&stderr_buf)
+			response.exit_code = -1
+			response.error_msg = fmt.aprintf(
+				"shell output exceeded %d MiB cap",
+				output_cap / (1024 * 1024),
+			)
+			killed = true
+			break
+		}
+	}
+
+	if killed {
+		// Reap the child to avoid a zombie. The exit_code from a SIGKILL'd
+		// process isn't useful here — we already set it to -1 above to
+		// signal "cap exceeded" distinctly from a normal non-zero exit.
+		_, _ = os.process_wait(process)
+		return response
 	}
 
 	// Wait for process

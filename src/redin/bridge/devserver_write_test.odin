@@ -74,6 +74,60 @@ test_write_private_no_follow_refuses_symlink :: proc(t: ^testing.T) {
 	testing.expect_value(t, got, sentinel)
 }
 
+// Regression test for issue #99 finding L2: the dev server must abort
+// startup if .redin-port or .redin-token cannot be written. Previously
+// it logged a warning and kept running, which produced silent 401
+// responses on every request because clients authenticate by reading
+// .redin-token from disk.
+//
+// Forces a write failure by planting a directory at .redin-token in
+// the test's CWD: write_private_no_follow opens with O_NOFOLLOW|O_EXCL,
+// gets EEXIST, lstats and rejects anything that isn't a regular file.
+@(test)
+test_write_port_and_token_aborts_on_failure :: proc(t: ^testing.T) {
+	original_cwd, cwd_err := os.getwd(context.temp_allocator)
+	if cwd_err != nil {
+		testing.fail_now(t, fmt.tprintf("getwd failed: %v", cwd_err))
+	}
+	defer os.chdir(original_cwd)
+
+	tmp_dir := make_tmp_path("write_abort_dir")
+	defer delete(tmp_dir)
+	if mkerr := os.make_directory(tmp_dir); mkerr != nil {
+		testing.fail_now(t, fmt.tprintf("make_directory(%s) failed: %v", tmp_dir, mkerr))
+	}
+	defer os.remove(tmp_dir)
+
+	if cherr := os.chdir(tmp_dir); cherr != nil {
+		testing.fail_now(t, fmt.tprintf("chdir(%s) failed: %v", tmp_dir, cherr))
+	}
+
+	// Plant a directory at TOKEN_FILE so write_private_no_follow refuses it.
+	// PORT_FILE is left unplanted so the helper succeeds at writing it
+	// first, then fails on the token write — exercising the cleanup path.
+	if mkerr := os.make_directory(TOKEN_FILE); mkerr != nil {
+		testing.fail_now(t, fmt.tprintf("planting directory at %s failed: %v", TOKEN_FILE, mkerr))
+	}
+	defer os.remove(TOKEN_FILE)
+	defer os.remove(PORT_FILE) // helper writes this before failing on token
+
+	ds := Dev_Server{
+		running    = true,
+		auth_token = "test_token_value",
+	}
+
+	ok := write_port_and_token_files(&ds, 9999)
+	testing.expect(t, !ok, "write_port_and_token_files must return false when token write fails")
+	testing.expect(t, !ds.running, "ds.running must be cleared after a write failure")
+
+	// .redin-port must be cleaned up so it doesn't advertise a server
+	// that never finished standing up.
+	if _, stat_err := os.stat(PORT_FILE, context.temp_allocator); stat_err == nil {
+		testing.fail(t)
+		fmt.println("PORT_FILE was not cleaned up after token write failure")
+	}
+}
+
 @(test)
 test_write_private_no_follow_replaces_stale_regular_file :: proc(t: ^testing.T) {
 	// A previous dev run that crashed leaves .redin-token behind as a

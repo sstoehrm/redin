@@ -109,6 +109,32 @@ build_combat_table_on_stack(L, &combat)
 ok, err := bridge.dispatch_tos(L, "combat/push")
 ```
 
+## Effect policy setters
+
+These setters install host-side policy for the built-in `redin.http` and `redin.shell` host functions. Both are global, take a slice of strings (cloned internally), and accept `nil` to clear back to the permissive default. Call before or after `redin.run`; changes apply to subsequent requests.
+
+### `bridge.set_http_whitelist(allow: []string)`
+
+When set, `redin.http` accepts only URLs whose host matches an entry. Entries are either hostname literals (case-insensitive — e.g. `"api.example.com"`) or CIDR blocks (IPv4 or IPv6 — e.g. `"127.0.0.0/8"`, `"::1/128"`). CIDR entries are matched only against IP-literal hosts, not DNS names. `nil` (the default) accepts any host.
+
+Rejection failure (delivered to the `:http` effect's `on-error`): `{status: 0, error: "host <name> not in http whitelist"}`.
+
+```odin
+bridge.set_http_whitelist([]string{"api.example.com", "127.0.0.0/8"})
+redin.run(cfg)
+```
+
+### `bridge.set_shell_env_allowlist(allow: []string)`
+
+When set, child processes spawned by `redin.shell` see only env vars whose keys match a list entry. Comparison is exact (case-sensitive on POSIX). `nil` (the default) is full passthrough — children inherit the parent process environment.
+
+The setter does not produce a runtime failure path. It only changes the env that reaches `execve(2)`.
+
+```odin
+bridge.set_shell_env_allowlist([]string{"PATH", "HOME", "GITHUB_TOKEN"})
+redin.run(cfg)
+```
+
 ## Calling conventions and context
 
 | Convention | Context propagates? | When you write it |
