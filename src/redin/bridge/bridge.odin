@@ -2624,19 +2624,23 @@ setup_lua_paths :: proc(L: ^Lua_State, source_tree: bool) {
 }
 
 load_fennel :: proc(L: ^Lua_State) {
+	// `_redin_source_tree` was set in setup_lua_paths and persists for
+	// the lifetime of the Lua state.
 	code := `
 		local d = _redin_exe_dir
 		package.loaded["fennel"] = {}
 		local ok = pcall(dofile, d .. "/vendor/fennel/fennel.lua")
 		if not ok then ok = pcall(dofile, d .. "/../.redin/vendor/fennel/fennel.lua") end
-		if not ok then pcall(dofile, "vendor/fennel/fennel.lua") end
+		if not ok and _redin_source_tree then
+		  pcall(dofile, "vendor/fennel/fennel.lua")
+		end
 		package.loaded["fennel"] = nil
 		local fennel = require("fennel")
 		table.insert(package.loaders, fennel.searcher)
 		fennel.path =
 		  d .. "/runtime/?.fnl;" ..
 		  d .. "/../.redin/runtime/?.fnl;" ..
-		  "src/runtime/?.fnl;" ..
+		  (_redin_source_tree and "src/runtime/?.fnl;" or "") ..
 		  fennel.path
 	`
 	if luaL_dostring(L, cstring(raw_data(code))) != 0 {
