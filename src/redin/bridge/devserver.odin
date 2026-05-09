@@ -246,7 +246,15 @@ write_port_and_token_files :: proc(ds: ^Dev_Server, bound_port: int) -> bool {
 devserver_destroy :: proc(ds: ^Dev_Server) {
 	if ds.running {
 		ds.running = false
-		// Connect-and-close to unblock the accept call.
+		// Wake the acceptor by both (a) closing the listen socket, which
+		// makes blocking accept_tcp return an error, and (b) opening a
+		// loopback connection to the same port as a fallback for any
+		// stack where close-during-accept doesn't surface an error.
+		// Close-first is the load-bearing path; the dial is belt-and-
+		// braces. Order matters: close before dial so dial either fails
+		// (listen gone) or races a new bind, neither of which can leave
+		// accept blocked.
+		net.close(ds.tcp_sock)
 		if unblock, err := net.dial_tcp(net.Endpoint{address = net.IP4_Loopback, port = ds.port}); err == nil {
 			net.close(unblock)
 		}
@@ -262,7 +270,6 @@ devserver_destroy :: proc(ds: ^Dev_Server) {
 				thread.destroy(t)
 			}
 		}
-		net.close(ds.tcp_sock)
 		// Defensive drain: any Pending_Conn the acceptor enqueued before
 		// it observed running=false has already been consumed by a
 		// handler in the join above. The queue should be empty here, but
