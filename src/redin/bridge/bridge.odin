@@ -104,7 +104,7 @@ init :: proc(b: ^Bridge) {
 		devserver_init(&b.dev_server, b)
 	}
 	when REDIN_DEV {
-		hotreload_init(&b.hot_reload)
+		hotreload_init(&b.hot_reload, b.source_tree)
 	}
 }
 

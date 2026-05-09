@@ -11,8 +11,10 @@ Hot_Reload :: struct {
 	check_interval: int,
 }
 
-hotreload_init :: proc(hr: ^Hot_Reload) {
+hotreload_init :: proc(hr: ^Hot_Reload, source_tree: bool) {
 	hr.check_interval = 60
+	if !source_tree do return  // #129 H6: cwd-relative watch list only
+	                            // active inside the redin source tree.
 	files := []string{
 		"src/runtime/dataflow.fnl",
 		"src/runtime/effect.fnl",
