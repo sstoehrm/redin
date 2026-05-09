@@ -109,9 +109,20 @@ for test_file in "$SCRIPT_DIR"/test_*.bb; do
     TOTAL_FAILED=$((TOTAL_FAILED + 1))
   fi
 
-  # Shutdown
+  # Shutdown — issue /shutdown, then bound the wait. Issue #131
+  # tracks an intermittent dev-build hang where /shutdown returns
+  # 200 but the process doesn't exit; force-kill after the deadline
+  # so the suite cannot stall.
   curl -s -X POST -H "Authorization: Bearer $TOKEN" \
        "http://localhost:$PORT/shutdown" >/dev/null 2>&1 || true
+  for i in 1 2 3 4 5; do
+    if ! kill -0 "$SERVER_PID" 2>/dev/null; then break; fi
+    sleep 1
+  done
+  if kill -0 "$SERVER_PID" 2>/dev/null; then
+    echo "WARN: $name dev server did not exit after /shutdown; force-killing (#131)" >&2
+    kill -9 "$SERVER_PID" 2>/dev/null || true
+  fi
   wait "$SERVER_PID" 2>/dev/null || true
   echo ""
 done
