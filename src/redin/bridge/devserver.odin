@@ -40,6 +40,35 @@ Sync_Queue :: struct {
 	mu: sync.Mutex,
 }
 
+// --- Handler pool queue (#129 H8) ---
+
+HANDLER_POOL_SIZE :: 4
+
+Pending_Conn :: struct {
+	socket: net.TCP_Socket,
+}
+
+Conn_Queue :: struct {
+	q:    queue.Queue(^Pending_Conn),
+	mu:   sync.Mutex,
+	sema: sync.Sema,
+}
+
+conn_push :: proc(cq: ^Conn_Queue, c: ^Pending_Conn) {
+	sync.lock(&cq.mu)
+	queue.push_back(&cq.q, c)
+	sync.unlock(&cq.mu)
+	sync.sema_post(&cq.sema)
+}
+
+conn_pop_blocking :: proc(cq: ^Conn_Queue) -> ^Pending_Conn {
+	sync.sema_wait(&cq.sema)
+	sync.lock(&cq.mu)
+	defer sync.unlock(&cq.mu)
+	c, _ := queue.pop_front_safe(&cq.q)
+	return c
+}
+
 Dev_Server :: struct {
 	bridge:             ^Bridge,
 	tcp_sock:           net.TCP_Socket,
