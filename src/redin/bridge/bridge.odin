@@ -351,7 +351,9 @@ redin_log :: proc "c" (L: ^Lua_State) -> i32 {
 		t := lua_type(L, i)
 		switch t {
 		case LUA_TSTRING:
-			fmt.print(string(lua_tostring_raw(L, i)))
+			slen: uint
+			s := lua_tolstring(L, i, &slen)
+			fmt.print(string(([^]u8)(s)[:slen]))
 		case LUA_TNUMBER:
 			fmt.print(lua_tonumber(L, i))
 		case LUA_TBOOLEAN:

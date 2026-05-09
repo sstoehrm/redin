@@ -11,10 +11,12 @@ import "core:os"
 import redin "../../redin"
 
 main :: proc() {
-	cfg: redin.Config
-	for arg in os.args[1:] {
-		cfg.app = arg
+	if len(os.args) != 2 {
+		fmt.eprintln("usage: redin <app.fnl|app.lua>")
+		os.exit(2)
 	}
+	cfg: redin.Config
+	cfg.app = os.args[1]
 
 	when REDIN_TRACK_MEM {
 		track: mem.Tracking_Allocator

@@ -23,7 +23,7 @@ jobs:
             libxcursor-dev libxinerama-dev
 
       - name: Install Odin
-        uses: laytan/setup-odin@v2
+        uses: laytan/setup-odin@8536d8fa450ec6f1bd9ddc84bbaaf16296c0051d  # v2.12.2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -72,7 +72,7 @@ jobs:
         run: curl -sL https://raw.githubusercontent.com/babashka/babashka/master/install | sudo bash
 
       - name: Install Odin
-        uses: laytan/setup-odin@v2
+        uses: laytan/setup-odin@8536d8fa450ec6f1bd9ddc84bbaaf16296c0051d  # v2.12.2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
