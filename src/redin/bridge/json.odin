@@ -1,5 +1,6 @@
 package bridge
 
+import "core:fmt"
 import "core:strconv"
 import "core:strings"
 import "core:unicode/utf8"
@@ -31,7 +32,11 @@ json_string :: proc(b: ^strings.Builder, s: string) {
 		case '\t':
 			strings.write_string(b, `\t`)
 		case:
-			strings.write_rune(b, c)
+			if c < 0x20 {
+				fmt.sbprintf(b, `\u%04x`, i32(c))
+			} else {
+				strings.write_rune(b, c)
+			}
 		}
 	}
 	strings.write_byte(b, '"')
