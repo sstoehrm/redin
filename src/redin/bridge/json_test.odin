@@ -55,3 +55,29 @@ test_json_string_high_bytes_pass_through :: proc(t: ^testing.T) {
 	json_string(&b, " A~")
 	testing.expect_value(t, strings.to_string(b), `" A~"`)
 }
+
+@(test)
+test_json_number_finite :: proc(t: ^testing.T) {
+	cases := []struct{ n: f64, expected: string }{
+		{0.0,    "0"},
+		{1.0,    "1"},
+		{-1.5,   "-1.5"},
+		{42.0,   "42"},
+		{1e10,   "1e10"},
+	}
+	for c in cases {
+		b := strings.builder_make(context.temp_allocator)
+		json_number(&b, c.n)
+		testing.expect_value(t, strings.to_string(b), c.expected)
+	}
+}
+
+@(test)
+test_json_number_non_finite_emits_null :: proc(t: ^testing.T) {
+	non_finite := []f64{math.nan_f64(), math.inf_f64(1), math.inf_f64(-1)}
+	for n in non_finite {
+		b := strings.builder_make(context.temp_allocator)
+		json_number(&b, n)
+		testing.expect_value(t, strings.to_string(b), "null")
+	}
+}

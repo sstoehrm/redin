@@ -1,6 +1,7 @@
 package bridge
 
 import "core:fmt"
+import "core:math"
 import "core:strconv"
 import "core:strings"
 import "core:unicode/utf8"
@@ -43,6 +44,10 @@ json_string :: proc(b: ^strings.Builder, s: string) {
 }
 
 json_number :: proc(b: ^strings.Builder, n: f64) {
+	if math.is_nan(n) || math.is_inf(n) {
+		strings.write_string(b, "null")
+		return
+	}
 	buf: [64]u8
 	s := strconv.write_float(buf[:], n, 'g', -1, 64)
 	for c in s {
