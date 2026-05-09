@@ -1007,30 +1007,16 @@ agent_node_tag :: proc(L: ^Lua_State) -> string {
 	return strings.clone(string(lua_tostring_raw(L, -1)), context.temp_allocator)
 }
 
-agent_escape_json :: proc(s: string) -> string {
-	b := strings.builder_make(context.temp_allocator)
-	for r in s {
-		switch r {
-		case '"':  strings.write_string(&b, `\"`)
-		case '\\': strings.write_string(&b, `\\`)
-		case '\n': strings.write_string(&b, `\n`)
-		case '\t': strings.write_string(&b, `\t`)
-		case:      strings.write_rune(&b, r)
-		}
-	}
-	return strings.to_string(b)
-}
-
 // Emits {"content": ...} JSON for the node at -1 based on its tag.
 emit_agent_content :: proc(b: ^strings.Builder, L: ^Lua_State, tag: string) {
 	strings.write_string(b, `{"content":`)
 	switch tag {
 	case "input":
 		val := agent_node_attr_string(L, "value")
-		fmt.sbprintf(b, `"%s"`, agent_escape_json(val))
+		json_string(b, val)
 	case "image":
 		val := agent_node_attr_string(L, "src")
-		fmt.sbprintf(b, `"%s"`, agent_escape_json(val))
+		json_string(b, val)
 	case "vbox", "hbox", "stack", "popout", "modal":
 		strings.write_string(b, "[")
 		n := lua_objlen(L, -1)
@@ -1049,7 +1035,7 @@ emit_agent_content :: proc(b: ^strings.Builder, L: ^Lua_State, tag: string) {
 		val := ""
 		if lua_isstring(L, -1) do val = string(lua_tostring_raw(L, -1))
 		lua_pop(L, 1)
-		fmt.sbprintf(b, `"%s"`, agent_escape_json(val))
+		json_string(b, val)
 	}
 	strings.write_string(b, "}")
 }
