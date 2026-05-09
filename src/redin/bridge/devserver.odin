@@ -76,7 +76,9 @@ Dev_Server :: struct {
 	auth_token:         string, // 64-char hex, required as Bearer on every non-OPTIONS request
 	expected_host_v4:   string, // "127.0.0.1:<port>"
 	expected_host_name: string, // "localhost:<port>"
-	server_thread:      ^thread.Thread,
+	accepted_conns:     Conn_Queue,
+	acceptor_thread:    ^thread.Thread,
+	handler_threads:    [HANDLER_POOL_SIZE]^thread.Thread,
 	incoming:           Sync_Queue,
 	event_queue:        [dynamic]types.InputEvent,
 	current_rects:      []rl.Rectangle, // borrowed during a poll cycle, nil otherwise
@@ -152,6 +154,7 @@ devserver_init :: proc(ds: ^Dev_Server, b: ^Bridge) {
 	ds.bridge = b
 	ds.running = true
 	queue.init(&ds.incoming.q)
+	queue.init(&ds.accepted_conns.q)
 
 	sock: net.TCP_Socket
 	bound_port := 0
@@ -197,7 +200,10 @@ devserver_init :: proc(ds: ^Dev_Server, b: ^Bridge) {
 		return
 	}
 
-	ds.server_thread = thread.create_and_start_with_poly_data(ds, server_thread_proc, context)
+	ds.acceptor_thread = thread.create_and_start_with_poly_data(ds, acceptor_thread_proc, context)
+	for i in 0 ..< HANDLER_POOL_SIZE {
+		ds.handler_threads[i] = thread.create_and_start_with_poly_data(ds, handler_thread_proc, context)
+	}
 	fmt.printfln("Dev server listening on http://localhost:%d (auth token in %s)", bound_port, TOKEN_FILE)
 }
 
@@ -240,15 +246,40 @@ write_port_and_token_files :: proc(ds: ^Dev_Server, bound_port: int) -> bool {
 devserver_destroy :: proc(ds: ^Dev_Server) {
 	if ds.running {
 		ds.running = false
-		// Connect to unblock the accept call
+		// Connect-and-close to unblock the accept call.
 		if unblock, err := net.dial_tcp(net.Endpoint{address = net.IP4_Loopback, port = ds.port}); err == nil {
 			net.close(unblock)
 		}
-		if ds.server_thread != nil {
-			thread.join(ds.server_thread)
-			thread.destroy(ds.server_thread)
+		if ds.acceptor_thread != nil {
+			thread.join(ds.acceptor_thread)
+			thread.destroy(ds.acceptor_thread)
+		}
+		// Acceptor pushed HANDLER_POOL_SIZE nils on its way out; each
+		// handler will pop one nil and exit.
+		for t in ds.handler_threads {
+			if t != nil {
+				thread.join(t)
+				thread.destroy(t)
+			}
 		}
 		net.close(ds.tcp_sock)
+		// Defensive drain: any Pending_Conn the acceptor enqueued before
+		// it observed running=false has already been consumed by a
+		// handler in the join above. The queue should be empty here, but
+		// if it isn't (e.g. tighter races on slow hosts), close the
+		// stragglers so we don't leak file descriptors.
+		for {
+			sync.lock(&ds.accepted_conns.mu)
+			empty := queue.len(ds.accepted_conns.q) == 0
+			sync.unlock(&ds.accepted_conns.mu)
+			if empty do break
+			pc, ok := queue.pop_front_safe(&ds.accepted_conns.q)
+			if !ok do break
+			if pc != nil {
+				net.close(pc.socket)
+				free(pc)
+			}
+		}
 		os.remove(PORT_FILE)
 		os.remove(TOKEN_FILE)
 	}
@@ -256,6 +287,7 @@ devserver_destroy :: proc(ds: ^Dev_Server) {
 	if len(ds.expected_host_v4) > 0 do delete(ds.expected_host_v4)
 	if len(ds.expected_host_name) > 0 do delete(ds.expected_host_name)
 	queue.destroy(&ds.incoming.q)
+	queue.destroy(&ds.accepted_conns.q)
 	delete(ds.event_queue)
 }
 
@@ -279,20 +311,33 @@ CLIENT_RECV_TIMEOUT :: 5 * time.Second
 // just often enough to keep the per-recv timer from firing.
 CLIENT_REQUEST_DEADLINE :: 30 * time.Second
 
-server_thread_proc :: proc(ds: ^Dev_Server) {
-	stack_buf: [8192]u8
+acceptor_thread_proc :: proc(ds: ^Dev_Server) {
 	for ds.running {
 		client, _, accept_err := net.accept_tcp(ds.tcp_sock)
 		if accept_err != nil || !ds.running {
 			break
 		}
-		handle_one_connection(ds, client, stack_buf[:])
+		pc := new(Pending_Conn)
+		pc.socket = client
+		conn_push(&ds.accepted_conns, pc)
+	}
+	// Wake every handler so they observe the nil sentinel and exit.
+	for _ in 0 ..< HANDLER_POOL_SIZE {
+		conn_push(&ds.accepted_conns, nil)
 	}
 }
 
-// Existing single-thread per-request handling, unchanged. Lifted out
-// of server_thread_proc so the upcoming handler-pool restructure
-// (#129 H8) can call the same body from N worker threads.
+handler_thread_proc :: proc(ds: ^Dev_Server) {
+	stack_buf: [8192]u8
+	for {
+		pc := conn_pop_blocking(&ds.accepted_conns)
+		if pc == nil do return
+		handle_one_connection(ds, pc.socket, stack_buf[:])
+		free(pc)
+	}
+}
+
+// Per-request handling, called by each handler-pool worker thread.
 handle_one_connection :: proc(ds: ^Dev_Server, client: net.TCP_Socket, stack_buf: []u8) {
 	MAX_BODY :: 1024 * 1024
 
