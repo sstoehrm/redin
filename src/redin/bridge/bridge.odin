@@ -99,7 +99,14 @@ init :: proc(b: ^Bridge) {
 
 	load_fennel(b.L)
 	load_runtime(b.L)
+}
 
+// Bring up the dev server and hot-reload watcher. Caller is expected
+// to invoke this *after* `load_app` so the host thread is ready to
+// drain incoming requests by the time the listen socket goes live —
+// otherwise the first /frames request queues up against load_app and
+// can take seconds to respond, which breaks bb-side test timeouts (#132).
+start_devserver :: proc(b: ^Bridge) {
 	when REDIN_DEV || REDIN_AGENT {
 		devserver_init(&b.dev_server, b)
 	}

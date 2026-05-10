@@ -159,6 +159,15 @@ run :: proc(cfg: Config) {
 
 	bridge.load_app(&b, cfg.app)
 
+	// Bring up the dev server and hot-reload watcher only after the app
+	// has finished loading. devserver_init opens the listen socket and
+	// spawns the acceptor + handler-pool; if this happened before
+	// load_app the first /frames request would queue against load_app
+	// on the host thread, which can take several seconds and breaks
+	// bb-side test timeouts (#132). bridge.destroy still tears these
+	// down via its existing devserver_destroy / hotreload_destroy calls.
+	bridge.start_devserver(&b)
+
 	input.state_init()
 	defer input.state_destroy()
 
