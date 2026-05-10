@@ -348,6 +348,17 @@ handler_thread_proc :: proc(ds: ^Dev_Server) {
 handle_one_connection :: proc(ds: ^Dev_Server, client: net.TCP_Socket, stack_buf: []u8) {
 	MAX_BODY :: 1024 * 1024
 
+	// One stderr line per accepted connection. This is load-bearing on
+	// CI's GitHub-hosted Ubuntu runners (#132): without an early stderr
+	// write here, every test fails the same way — wait_for_server's
+	// curl returns success but bb's follow-up /frames request hangs the
+	// full :timeout. Hypothesis: under llvmpipe + xvfb the host thread
+	// is starving the handler-pool threads on the first frame; the
+	// stderr write must hit a scheduling boundary that lets the handler
+	// run. Worth its own bug; for now keep the line so CI is green.
+	t_accept := time.now()
+	fmt.eprintfln("[devserver] accepted")
+
 	// Receive timeout on this client: each recv returns within
 	// CLIENT_RECV_TIMEOUT even if the peer sends nothing, so
 	// "open TCP and stall" no longer pins the server thread.
@@ -551,6 +562,8 @@ handle_one_connection :: proc(ds: ^Dev_Server, client: net.TCP_Socket, stack_buf
 
 	net.close(client)
 	sync.sema_post(&channel.ack)
+	dt := i64(time.duration_milliseconds(time.diff(t_accept, time.now())))
+	fmt.eprintfln("[devserver] %s %s %d %dms", method, path, channel.status, dt)
 	free(pending)
 }
 
