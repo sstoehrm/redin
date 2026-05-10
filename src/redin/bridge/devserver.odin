@@ -348,6 +348,12 @@ handler_thread_proc :: proc(ds: ^Dev_Server) {
 handle_one_connection :: proc(ds: ^Dev_Server, client: net.TCP_Socket, stack_buf: []u8) {
 	MAX_BODY :: 1024 * 1024
 
+	// #132 diagnostics: print the request lifecycle to stderr so the
+	// CI log shows exactly where a hang is happening (parse vs main-
+	// thread dispatch vs HTTP response send).
+	t_accept := time.now()
+	fmt.eprintfln("[devserver] +%dms accepted", 0)
+
 	// Receive timeout on this client: each recv returns within
 	// CLIENT_RECV_TIMEOUT even if the peer sends nothing, so
 	// "open TCP and stall" no longer pins the server thread.
@@ -522,8 +528,14 @@ handle_one_connection :: proc(ds: ^Dev_Server, client: net.TCP_Socket, stack_buf
 	pending.body = body
 	pending.response = &channel
 
+	dt_parsed := time.diff(t_accept, time.now())
+	fmt.eprintfln("[devserver] +%dms %s %s — dispatch", i64(time.duration_milliseconds(dt_parsed)), method, path)
+
 	sync_queue_push(&ds.incoming, pending)
 	sync.sema_wait(&channel.done)
+
+	dt_done := time.diff(t_accept, time.now())
+	fmt.eprintfln("[devserver] +%dms %s %s — main responded (%d)", i64(time.duration_milliseconds(dt_done)), method, path, channel.status)
 
 	// Build and send HTTP response
 	status_line := status_text(channel.status)
@@ -551,6 +563,8 @@ handle_one_connection :: proc(ds: ^Dev_Server, client: net.TCP_Socket, stack_buf
 
 	net.close(client)
 	sync.sema_post(&channel.ack)
+	dt_sent := time.diff(t_accept, time.now())
+	fmt.eprintfln("[devserver] +%dms %s %s — closed", i64(time.duration_milliseconds(dt_sent)), method, path)
 	free(pending)
 }
 
