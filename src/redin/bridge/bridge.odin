@@ -48,6 +48,7 @@ Bridge :: struct {
 	hot_reload:      Hot_Reload,
 	dev_server:      Dev_Server,
 	frame_changed:   bool,
+	source_tree:     bool,
 }
 
 g_bridge: ^Bridge
@@ -65,7 +66,8 @@ init :: proc(b: ^Bridge) {
 	lua_pushstring(b.L, strings.clone_to_cstring(exe_dir))
 	lua_setglobal(b.L, "_redin_exe_dir")
 
-	setup_lua_paths(b.L)
+	b.source_tree = is_redin_source_tree()
+	setup_lua_paths(b.L, b.source_tree)
 
 	// Create redin global table with host functions
 	lua_newtable(b.L)
@@ -102,7 +104,7 @@ init :: proc(b: ^Bridge) {
 		devserver_init(&b.dev_server, b)
 	}
 	when REDIN_DEV {
-		hotreload_init(&b.hot_reload)
+		hotreload_init(&b.hot_reload, b.source_tree)
 	}
 }
 
@@ -2595,39 +2597,50 @@ string_to_key :: proc(name: string) -> rl.KeyboardKey {
 	}
 }
 
-setup_lua_paths :: proc(L: ^Lua_State) {
+setup_lua_paths :: proc(L: ^Lua_State, source_tree: bool) {
+	// Push the gate flag into Lua so the snippet below can branch on it
+	// without string manipulation.
+	lua_pushboolean(L, source_tree ? 1 : 0)
+	lua_setglobal(L, "_redin_source_tree")
+
 	// Search paths, in priority order:
-	//   <exe>/...          — pinned release (binary sits next to vendor/+runtime/)
-	//   <exe>/../.redin/... — redin-cli's upgrade-to-native layout (build/redin's
+	//   <exe>/...           — pinned release (binary sits next to vendor/+runtime/)
+	//   <exe>/../.redin/... — redin-cli's --native layout (build/redin's
 	//                         sibling is .redin/, which has vendor/ + runtime/)
-	//   vendor/fennel/...  — cwd-relative (running from the redin repo in dev)
+	//   vendor/fennel/...   — cwd-relative, only if running from the
+	//                         redin source tree (issue #129 H6).
 	code := `
 		local d = _redin_exe_dir
+		local cwd = _redin_source_tree and "vendor/fennel/?.lua;" or ""
 		package.path =
 		  d .. "/vendor/fennel/?.lua;" ..
 		  d .. "/runtime/?.lua;" ..
 		  d .. "/../.redin/vendor/fennel/?.lua;" ..
 		  d .. "/../.redin/runtime/?.lua;" ..
-		  "vendor/fennel/?.lua;" ..
+		  cwd ..
 		  package.path
 	`
 	luaL_dostring(L, cstring(raw_data(code)))
 }
 
 load_fennel :: proc(L: ^Lua_State) {
+	// `_redin_source_tree` was set in setup_lua_paths and persists for
+	// the lifetime of the Lua state.
 	code := `
 		local d = _redin_exe_dir
 		package.loaded["fennel"] = {}
 		local ok = pcall(dofile, d .. "/vendor/fennel/fennel.lua")
 		if not ok then ok = pcall(dofile, d .. "/../.redin/vendor/fennel/fennel.lua") end
-		if not ok then pcall(dofile, "vendor/fennel/fennel.lua") end
+		if not ok and _redin_source_tree then
+		  pcall(dofile, "vendor/fennel/fennel.lua")
+		end
 		package.loaded["fennel"] = nil
 		local fennel = require("fennel")
 		table.insert(package.loaders, fennel.searcher)
 		fennel.path =
 		  d .. "/runtime/?.fnl;" ..
 		  d .. "/../.redin/runtime/?.fnl;" ..
-		  "src/runtime/?.fnl;" ..
+		  (_redin_source_tree and "src/runtime/?.fnl;" or "") ..
 		  fennel.path
 	`
 	if luaL_dostring(L, cstring(raw_data(code))) != 0 {

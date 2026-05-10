@@ -59,10 +59,17 @@
 ;; HTTP helpers
 ;; ---------------------------------------------------------------------------
 
+;; Per-request timeout for every helper below. The dev-server's per-
+;; request deadline is 30s, so 10s is generous for any healthy call yet
+;; small enough that a hung server surfaces fast under run-all.sh's
+;; outer timeout instead of pinning the whole suite (#132).
+(def ^:private http-timeout-ms 10000)
+
 (defn- get-json [path]
   (let [resp (http/get (str (base-url) path)
                        {:headers (merge {"Accept" "application/json"}
-                                        (auth-headers))})]
+                                        (auth-headers))
+                        :timeout http-timeout-ms})]
     (json/parse-string (:body resp) true)))
 
 (defn- post-json [path body]
@@ -70,7 +77,8 @@
                         {:headers (merge {"Content-Type" "application/json"
                                           "Accept" "application/json"}
                                          (auth-headers))
-                         :body (json/generate-string body)})]
+                         :body (json/generate-string body)
+                         :timeout http-timeout-ms})]
     (json/parse-string (:body resp) true)))
 
 (defn- put-json [path body]
@@ -78,7 +86,8 @@
                        {:headers (merge {"Content-Type" "application/json"
                                          "Accept" "application/json"}
                                         (auth-headers))
-                        :body (json/generate-string body)})]
+                        :body (json/generate-string body)
+                        :timeout http-timeout-ms})]
     (json/parse-string (:body resp) true)))
 
 ;; ---------------------------------------------------------------------------
@@ -385,7 +394,8 @@
   ([] (screenshot nil))
   ([path]
    (let [resp (http/get (str (base-url) "/screenshot")
-                        {:as :bytes :headers (auth-headers)})]
+                        {:as :bytes :headers (auth-headers)
+                         :timeout http-timeout-ms})]
      (when path
        (with-open [out (java.io.FileOutputStream. path)]
          (.write out ^bytes (:body resp))))
@@ -427,7 +437,8 @@
   (try
     (let [resp (http/get (str (base-url) "/agent/nodes")
                          {:headers (auth-headers)
-                          :throw false})]
+                          :throw false
+                          :timeout http-timeout-ms})]
       (= 200 (:status resp)))
     (catch Exception _ false)))
 
@@ -449,7 +460,8 @@
                        {:headers (merge {"Content-Type" "application/json"}
                                         (auth-headers))
                         :body (json/generate-string body)
-                        :throw false})]
+                        :throw false
+                        :timeout http-timeout-ms})]
     {:status (:status resp)
      :body (try (json/parse-string (:body resp) true)
                 (catch Exception _ (:body resp)))}))

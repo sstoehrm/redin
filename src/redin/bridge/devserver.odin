@@ -40,6 +40,35 @@ Sync_Queue :: struct {
 	mu: sync.Mutex,
 }
 
+// --- Handler pool queue (#129 H8) ---
+
+HANDLER_POOL_SIZE :: 4
+
+Pending_Conn :: struct {
+	socket: net.TCP_Socket,
+}
+
+Conn_Queue :: struct {
+	q:    queue.Queue(^Pending_Conn),
+	mu:   sync.Mutex,
+	sema: sync.Sema,
+}
+
+conn_push :: proc(cq: ^Conn_Queue, c: ^Pending_Conn) {
+	sync.lock(&cq.mu)
+	queue.push_back(&cq.q, c)
+	sync.unlock(&cq.mu)
+	sync.sema_post(&cq.sema)
+}
+
+conn_pop_blocking :: proc(cq: ^Conn_Queue) -> ^Pending_Conn {
+	sync.sema_wait(&cq.sema)
+	sync.lock(&cq.mu)
+	defer sync.unlock(&cq.mu)
+	c, _ := queue.pop_front_safe(&cq.q)
+	return c
+}
+
 Dev_Server :: struct {
 	bridge:             ^Bridge,
 	tcp_sock:           net.TCP_Socket,
@@ -47,7 +76,9 @@ Dev_Server :: struct {
 	auth_token:         string, // 64-char hex, required as Bearer on every non-OPTIONS request
 	expected_host_v4:   string, // "127.0.0.1:<port>"
 	expected_host_name: string, // "localhost:<port>"
-	server_thread:      ^thread.Thread,
+	accepted_conns:     Conn_Queue,
+	acceptor_thread:    ^thread.Thread,
+	handler_threads:    [HANDLER_POOL_SIZE]^thread.Thread,
 	incoming:           Sync_Queue,
 	event_queue:        [dynamic]types.InputEvent,
 	current_rects:      []rl.Rectangle, // borrowed during a poll cycle, nil otherwise
@@ -123,6 +154,7 @@ devserver_init :: proc(ds: ^Dev_Server, b: ^Bridge) {
 	ds.bridge = b
 	ds.running = true
 	queue.init(&ds.incoming.q)
+	queue.init(&ds.accepted_conns.q)
 
 	sock: net.TCP_Socket
 	bound_port := 0
@@ -168,7 +200,10 @@ devserver_init :: proc(ds: ^Dev_Server, b: ^Bridge) {
 		return
 	}
 
-	ds.server_thread = thread.create_and_start_with_poly_data(ds, server_thread_proc, context)
+	ds.acceptor_thread = thread.create_and_start_with_poly_data(ds, acceptor_thread_proc, context)
+	for i in 0 ..< HANDLER_POOL_SIZE {
+		ds.handler_threads[i] = thread.create_and_start_with_poly_data(ds, handler_thread_proc, context)
+	}
 	fmt.printfln("Dev server listening on http://localhost:%d (auth token in %s)", bound_port, TOKEN_FILE)
 }
 
@@ -211,15 +246,47 @@ write_port_and_token_files :: proc(ds: ^Dev_Server, bound_port: int) -> bool {
 devserver_destroy :: proc(ds: ^Dev_Server) {
 	if ds.running {
 		ds.running = false
-		// Connect to unblock the accept call
+		// Wake the acceptor by both (a) closing the listen socket, which
+		// makes blocking accept_tcp return an error, and (b) opening a
+		// loopback connection to the same port as a fallback for any
+		// stack where close-during-accept doesn't surface an error.
+		// Close-first is the load-bearing path; the dial is belt-and-
+		// braces. Order matters: close before dial so dial either fails
+		// (listen gone) or races a new bind, neither of which can leave
+		// accept blocked.
+		net.close(ds.tcp_sock)
 		if unblock, err := net.dial_tcp(net.Endpoint{address = net.IP4_Loopback, port = ds.port}); err == nil {
 			net.close(unblock)
 		}
-		if ds.server_thread != nil {
-			thread.join(ds.server_thread)
-			thread.destroy(ds.server_thread)
+		if ds.acceptor_thread != nil {
+			thread.join(ds.acceptor_thread)
+			thread.destroy(ds.acceptor_thread)
 		}
-		net.close(ds.tcp_sock)
+		// Acceptor pushed HANDLER_POOL_SIZE nils on its way out; each
+		// handler will pop one nil and exit.
+		for t in ds.handler_threads {
+			if t != nil {
+				thread.join(t)
+				thread.destroy(t)
+			}
+		}
+		// Defensive drain: any Pending_Conn the acceptor enqueued before
+		// it observed running=false has already been consumed by a
+		// handler in the join above. The queue should be empty here, but
+		// if it isn't (e.g. tighter races on slow hosts), close the
+		// stragglers so we don't leak file descriptors.
+		for {
+			sync.lock(&ds.accepted_conns.mu)
+			empty := queue.len(ds.accepted_conns.q) == 0
+			sync.unlock(&ds.accepted_conns.mu)
+			if empty do break
+			pc, ok := queue.pop_front_safe(&ds.accepted_conns.q)
+			if !ok do break
+			if pc != nil {
+				net.close(pc.socket)
+				free(pc)
+			}
+		}
 		os.remove(PORT_FILE)
 		os.remove(TOKEN_FILE)
 	}
@@ -227,6 +294,7 @@ devserver_destroy :: proc(ds: ^Dev_Server) {
 	if len(ds.expected_host_v4) > 0 do delete(ds.expected_host_v4)
 	if len(ds.expected_host_name) > 0 do delete(ds.expected_host_name)
 	queue.destroy(&ds.incoming.q)
+	queue.destroy(&ds.accepted_conns.q)
 	delete(ds.event_queue)
 }
 
@@ -250,221 +318,240 @@ CLIENT_RECV_TIMEOUT :: 5 * time.Second
 // just often enough to keep the per-recv timer from firing.
 CLIENT_REQUEST_DEADLINE :: 30 * time.Second
 
-server_thread_proc :: proc(ds: ^Dev_Server) {
-	stack_buf: [8192]u8
-	MAX_BODY :: 1024 * 1024
-
+acceptor_thread_proc :: proc(ds: ^Dev_Server) {
 	for ds.running {
 		client, _, accept_err := net.accept_tcp(ds.tcp_sock)
 		if accept_err != nil || !ds.running {
 			break
 		}
+		pc := new(Pending_Conn)
+		pc.socket = client
+		conn_push(&ds.accepted_conns, pc)
+	}
+	// Wake every handler so they observe the nil sentinel and exit.
+	for _ in 0 ..< HANDLER_POOL_SIZE {
+		conn_push(&ds.accepted_conns, nil)
+	}
+}
 
-		// Receive timeout on this client: each recv returns within
-		// CLIENT_RECV_TIMEOUT even if the peer sends nothing, so
-		// "open TCP and stall" no longer pins the server thread.
-		// Ignore errors — a missing timeout isn't fatal, it just
-		// means we fall back to the per-request deadline below.
-		_ = net.set_option(client, .Receive_Timeout, CLIENT_RECV_TIMEOUT)
+handler_thread_proc :: proc(ds: ^Dev_Server) {
+	stack_buf: [8192]u8
+	for {
+		pc := conn_pop_blocking(&ds.accepted_conns)
+		if pc == nil do return
+		handle_one_connection(ds, pc.socket, stack_buf[:])
+		free(pc)
+	}
+}
 
-		deadline := time.time_add(time.now(), CLIENT_REQUEST_DEADLINE)
+// Per-request handling, called by each handler-pool worker thread.
+handle_one_connection :: proc(ds: ^Dev_Server, client: net.TCP_Socket, stack_buf: []u8) {
+	MAX_BODY :: 1024 * 1024
 
-		buf: []u8 = stack_buf[:]
-		heap_buf: []u8
-		defer if heap_buf != nil do delete(heap_buf)
+	// Receive timeout on this client: each recv returns within
+	// CLIENT_RECV_TIMEOUT even if the peer sends nothing, so
+	// "open TCP and stall" no longer pins the server thread.
+	// Ignore errors — a missing timeout isn't fatal, it just
+	// means we fall back to the per-request deadline below.
+	_ = net.set_option(client, .Receive_Timeout, CLIENT_RECV_TIMEOUT)
 
-		// Read full request into buffer
-		total := 0
-		too_large := false
-		bad_request := false
-		timed_out := false
-		for {
-			if time.diff(time.now(), deadline) < 0 {
-				timed_out = true
-				break
-			}
-			n, recv_err := net.recv_tcp(client, buf[total:])
-			if recv_err != nil || n <= 0 {
-				break
-			}
-			total += n
-			// Check for end of headers (double CRLF)
-			if total >= 4 {
-				req_str := string(buf[:total])
-				if header_end := strings.index(req_str, "\r\n\r\n"); header_end >= 0 {
-					// Check Content-Length for body
-					cl := find_content_length(req_str[:header_end])
-					body_start := header_end + 4
-					if cl < 0 {
-						bad_request = true
-						break
-					}
-					if cl > MAX_BODY {
-						too_large = true
-						break
-					}
-					needed := body_start + cl
-					if needed > len(buf) {
-						heap_buf = make([]u8, needed)
-						copy(heap_buf, buf[:total])
-						buf = heap_buf
-					}
-					for total < needed {
-						if time.diff(time.now(), deadline) < 0 {
-							timed_out = true
-							break
-						}
-						n2, err2 := net.recv_tcp(client, buf[total:])
-						if err2 != nil || n2 <= 0 do break
-						total += n2
-					}
+	deadline := time.time_add(time.now(), CLIENT_REQUEST_DEADLINE)
+
+	buf: []u8 = stack_buf
+	heap_buf: []u8
+	defer if heap_buf != nil do delete(heap_buf)
+
+	// Read full request into buffer
+	total := 0
+	too_large := false
+	bad_request := false
+	timed_out := false
+	for {
+		if time.diff(time.now(), deadline) < 0 {
+			timed_out = true
+			break
+		}
+		n, recv_err := net.recv_tcp(client, buf[total:])
+		if recv_err != nil || n <= 0 {
+			break
+		}
+		total += n
+		// Check for end of headers (double CRLF)
+		if total >= 4 {
+			req_str := string(buf[:total])
+			if header_end := strings.index(req_str, "\r\n\r\n"); header_end >= 0 {
+				// Check Content-Length for body
+				cl := find_content_length(req_str[:header_end])
+				body_start := header_end + 4
+				if cl < 0 {
+					bad_request = true
 					break
 				}
-			}
-			if total >= len(buf) {
-				// Headers did not fit in the stack buffer
-				too_large = true
+				if cl > MAX_BODY {
+					too_large = true
+					break
+				}
+				needed := body_start + cl
+				if needed > len(buf) {
+					heap_buf = make([]u8, needed)
+					copy(heap_buf, buf[:total])
+					buf = heap_buf
+				}
+				for total < needed {
+					if time.diff(time.now(), deadline) < 0 {
+						timed_out = true
+						break
+					}
+					n2, err2 := net.recv_tcp(client, buf[total:])
+					if err2 != nil || n2 <= 0 do break
+					total += n2
+				}
 				break
 			}
 		}
-
-		if timed_out {
-			// 408 instead of 413/200: the client didn't finish in time.
-			// Some stacks surface this to the user; for slowloris we
-			// mostly care that the server thread is freed.
-			resp := "HTTP/1.1 408 Request Timeout\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-			net.send_tcp(client, transmute([]u8)resp)
-			net.close(client)
-			continue
+		if total >= len(buf) {
+			// Headers did not fit in the stack buffer
+			too_large = true
+			break
 		}
-
-		if too_large {
-			resp := "HTTP/1.1 413 Payload Too Large\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-			net.send_tcp(client, transmute([]u8)resp)
-			net.close(client)
-			continue
-		}
-
-		if bad_request {
-			resp := "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-			net.send_tcp(client, transmute([]u8)resp)
-			net.close(client)
-			continue
-		}
-
-		if total == 0 {
-			net.close(client)
-			continue
-		}
-
-		req_str := string(buf[:total])
-
-		// Parse request line
-		rline_end := strings.index(req_str, "\r\n")
-		if rline_end < 0 {
-			net.close(client)
-			continue
-		}
-		rline := req_str[:rline_end]
-
-		// Split request line manually (avoid allocator)
-		method, path: string
-		{
-			sp1 := strings.index_byte(rline, ' ')
-			if sp1 < 0 {
-				net.close(client)
-				continue
-			}
-			method = rline[:sp1]
-			rest := rline[sp1 + 1:]
-			sp2 := strings.index_byte(rest, ' ')
-			path = rest[:sp2] if sp2 >= 0 else rest
-		}
-
-		// Split headers / body. Headers are everything up to the first
-		// "\r\n\r\n" — the request line is included, which is fine:
-		// header lookup works with any leading line, and the second
-		// line onward are real headers.
-		headers := req_str
-		body := ""
-		if header_end := strings.index(req_str, "\r\n\r\n"); header_end >= 0 {
-			headers = req_str[:header_end]
-			body_start := header_end + 4
-			if body_start < total {
-				body = req_str[body_start:]
-			}
-		}
-
-		// DNS-rebinding defence: require Host: localhost:<port> or
-		// 127.0.0.1:<port>. A malicious site resolving an attacker
-		// hostname to 127.0.0.1 would send a different Host header,
-		// so the request is rejected before the auth check runs.
-		host_ok := check_host_header(headers, ds.expected_host_v4, ds.expected_host_name)
-		if !host_ok {
-			deny := "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-			net.send_tcp(client, transmute([]u8)deny)
-			net.close(client)
-			continue
-		}
-
-		// OPTIONS: reject — we don't serve CORS preflight. With auth
-		// required and no Access-Control-Allow-Origin emitted, browsers
-		// can't make cross-origin calls regardless, so OPTIONS has no
-		// legitimate use here.
-		if method == "OPTIONS" {
-			deny := "HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-			net.send_tcp(client, transmute([]u8)deny)
-			net.close(client)
-			continue
-		}
-
-		// Require a matching Bearer token on every non-OPTIONS request.
-		if !check_bearer_token(headers, ds.auth_token) {
-			deny := "HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Bearer\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-			net.send_tcp(client, transmute([]u8)deny)
-			net.close(client)
-			continue
-		}
-
-		// Dispatch to main thread
-		channel: Response_Channel
-		pending := new(Pending_Request)
-		pending.method = method
-		pending.path = path
-		pending.body = body
-		pending.response = &channel
-
-		sync_queue_push(&ds.incoming, pending)
-		sync.sema_wait(&channel.done)
-
-		// Build and send HTTP response
-		status_line := status_text(channel.status)
-		ct := channel.content_type if len(channel.content_type) > 0 else "application/json"
-		resp_body := channel.body if len(channel.body) > 0 else ""
-		body_len := len(channel.binary) if len(channel.binary) > 0 else len(resp_body)
-
-		// Send header line by line (no allocator needed)
-		send_str(client, "HTTP/1.1 ")
-		send_str(client, status_line)
-		send_str(client, "\r\nContent-Type: ")
-		send_str(client, ct)
-		send_str(client, "\r\nContent-Length: ")
-		{
-			int_buf: [20]u8
-			send_str(client, int_to_str(int_buf[:], body_len))
-		}
-		send_str(client, "\r\nConnection: close\r\n\r\n")
-
-		if len(channel.binary) > 0 {
-			net.send_tcp(client, channel.binary)
-		} else {
-			send_str(client, resp_body)
-		}
-
-		net.close(client)
-		sync.sema_post(&channel.ack)
-		free(pending)
 	}
+
+	if timed_out {
+		// 408 instead of 413/200: the client didn't finish in time.
+		// Some stacks surface this to the user; for slowloris we
+		// mostly care that the server thread is freed.
+		resp := "HTTP/1.1 408 Request Timeout\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+		net.send_tcp(client, transmute([]u8)resp)
+		net.close(client)
+		return
+	}
+
+	if too_large {
+		resp := "HTTP/1.1 413 Payload Too Large\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+		net.send_tcp(client, transmute([]u8)resp)
+		net.close(client)
+		return
+	}
+
+	if bad_request {
+		resp := "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+		net.send_tcp(client, transmute([]u8)resp)
+		net.close(client)
+		return
+	}
+
+	if total == 0 {
+		net.close(client)
+		return
+	}
+
+	req_str := string(buf[:total])
+
+	// Parse request line
+	rline_end := strings.index(req_str, "\r\n")
+	if rline_end < 0 {
+		net.close(client)
+		return
+	}
+	rline := req_str[:rline_end]
+
+	// Split request line manually (avoid allocator)
+	method, path: string
+	{
+		sp1 := strings.index_byte(rline, ' ')
+		if sp1 < 0 {
+			net.close(client)
+			return
+		}
+		method = rline[:sp1]
+		rest := rline[sp1 + 1:]
+		sp2 := strings.index_byte(rest, ' ')
+		path = rest[:sp2] if sp2 >= 0 else rest
+	}
+
+	// Split headers / body. Headers are everything up to the first
+	// "\r\n\r\n" — the request line is included, which is fine:
+	// header lookup works with any leading line, and the second
+	// line onward are real headers.
+	headers := req_str
+	body := ""
+	if header_end := strings.index(req_str, "\r\n\r\n"); header_end >= 0 {
+		headers = req_str[:header_end]
+		body_start := header_end + 4
+		if body_start < total {
+			body = req_str[body_start:]
+		}
+	}
+
+	// DNS-rebinding defence: require Host: localhost:<port> or
+	// 127.0.0.1:<port>. A malicious site resolving an attacker
+	// hostname to 127.0.0.1 would send a different Host header,
+	// so the request is rejected before the auth check runs.
+	host_ok := check_host_header(headers, ds.expected_host_v4, ds.expected_host_name)
+	if !host_ok {
+		deny := "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+		net.send_tcp(client, transmute([]u8)deny)
+		net.close(client)
+		return
+	}
+
+	// OPTIONS: reject — we don't serve CORS preflight. With auth
+	// required and no Access-Control-Allow-Origin emitted, browsers
+	// can't make cross-origin calls regardless, so OPTIONS has no
+	// legitimate use here.
+	if method == "OPTIONS" {
+		deny := "HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+		net.send_tcp(client, transmute([]u8)deny)
+		net.close(client)
+		return
+	}
+
+	// Require a matching Bearer token on every non-OPTIONS request.
+	if !check_bearer_token(headers, ds.auth_token) {
+		deny := "HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Bearer\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+		net.send_tcp(client, transmute([]u8)deny)
+		net.close(client)
+		return
+	}
+
+	// Dispatch to main thread
+	channel: Response_Channel
+	pending := new(Pending_Request)
+	pending.method = method
+	pending.path = path
+	pending.body = body
+	pending.response = &channel
+
+	sync_queue_push(&ds.incoming, pending)
+	sync.sema_wait(&channel.done)
+
+	// Build and send HTTP response
+	status_line := status_text(channel.status)
+	ct := channel.content_type if len(channel.content_type) > 0 else "application/json"
+	resp_body := channel.body if len(channel.body) > 0 else ""
+	body_len := len(channel.binary) if len(channel.binary) > 0 else len(resp_body)
+
+	// Send header line by line (no allocator needed)
+	send_str(client, "HTTP/1.1 ")
+	send_str(client, status_line)
+	send_str(client, "\r\nContent-Type: ")
+	send_str(client, ct)
+	send_str(client, "\r\nContent-Length: ")
+	{
+		int_buf: [20]u8
+		send_str(client, int_to_str(int_buf[:], body_len))
+	}
+	send_str(client, "\r\nConnection: close\r\n\r\n")
+
+	if len(channel.binary) > 0 {
+		net.send_tcp(client, channel.binary)
+	} else {
+		send_str(client, resp_body)
+	}
+
+	net.close(client)
+	sync.sema_post(&channel.ack)
+	free(pending)
 }
 
 send_str :: proc(sock: net.TCP_Socket, s: string) {

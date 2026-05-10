@@ -43,6 +43,14 @@ TOKEN=""
 TOTAL_PASSED=0
 TOTAL_FAILED=0
 
+# Per-test and total wall-clock budgets (#132). Defaults are tight on
+# purpose: a healthy test runs in seconds, so 30s catches a hang fast,
+# and a 120s total cap keeps a runaway suite from pinning CI for hours
+# while still leaving room for the fast-path of 25-ish tests.
+TEST_TIMEOUT="${REDIN_TEST_TIMEOUT:-30}"
+GLOBAL_TIMEOUT="${REDIN_GLOBAL_TIMEOUT:-120}"
+GLOBAL_START=$SECONDS
+
 # Build
 echo "=== Building redin ==="
 ( cd "$ROOT_DIR" && ./build-dev.sh )
@@ -74,6 +82,12 @@ for test_file in "$SCRIPT_DIR"/test_*.bb; do
   app_name="${name#test_}"                  # smoke
   app_file="$SCRIPT_DIR/${app_name}_app.fnl"
 
+  if (( SECONDS - GLOBAL_START >= GLOBAL_TIMEOUT )); then
+    echo "GLOBAL TIMEOUT: suite exceeded ${GLOBAL_TIMEOUT}s; remaining tests skipped (#132)" >&2
+    TOTAL_FAILED=$((TOTAL_FAILED + 1))
+    break
+  fi
+
   if [ ! -f "$app_file" ]; then
     echo "SKIP $name — no matching ${app_name}_app.fnl"
     continue
@@ -102,16 +116,39 @@ for test_file in "$SCRIPT_DIR"/test_*.bb; do
     continue
   fi
 
-  # Run test
-  if bb "$SCRIPT_DIR/run.bb" "$test_file"; then
+  # Run test — bound with `timeout` so a hung HTTP call against the dev
+  # server can't stall the whole suite. The bb http helpers in
+  # redin_test.bb don't all carry a per-request deadline, and the runner
+  # used to silently absorb a stuck test until GitHub's 6h job cap
+  # kicked in (#132). Surface the offender by name instead.
+  if timeout --foreground "$TEST_TIMEOUT" bb "$SCRIPT_DIR/run.bb" "$test_file"; then
     : # pass count comes from run.bb output
   else
+    rc=$?
+    if [ "$rc" -eq 124 ]; then
+      echo "TIMEOUT: $name exceeded ${TEST_TIMEOUT}s — likely a hung HTTP call (#132)" >&2
+    fi
     TOTAL_FAILED=$((TOTAL_FAILED + 1))
   fi
 
-  # Shutdown
-  curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+  # Shutdown — issue /shutdown, then bound the wait. Issue #131
+  # tracks an intermittent dev-build hang where /shutdown returns
+  # 200 but the process doesn't exit; force-kill after the deadline
+  # so the suite cannot stall.
+  #
+  # --max-time 3 is the load-bearing piece for #132: without it, an
+  # unresponsive dev server leaves curl waiting forever (no default
+  # request timeout), and the kill -0 / kill -9 loop below never runs.
+  curl -s --max-time 3 -X POST -H "Authorization: Bearer $TOKEN" \
        "http://localhost:$PORT/shutdown" >/dev/null 2>&1 || true
+  for i in 1 2 3 4 5; do
+    if ! kill -0 "$SERVER_PID" 2>/dev/null; then break; fi
+    sleep 1
+  done
+  if kill -0 "$SERVER_PID" 2>/dev/null; then
+    echo "WARN: $name dev server did not exit after /shutdown; force-killing (#131)" >&2
+    kill -9 "$SERVER_PID" 2>/dev/null || true
+  fi
   wait "$SERVER_PID" 2>/dev/null || true
   echo ""
 done
