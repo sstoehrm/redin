@@ -348,16 +348,17 @@ handler_thread_proc :: proc(ds: ^Dev_Server) {
 handle_one_connection :: proc(ds: ^Dev_Server, client: net.TCP_Socket, stack_buf: []u8) {
 	MAX_BODY :: 1024 * 1024
 
-	// One stderr line per accepted connection. This is load-bearing on
-	// CI's GitHub-hosted Ubuntu runners (#132): without an early stderr
-	// write here, every test fails the same way — wait_for_server's
-	// curl returns success but bb's follow-up /frames request hangs the
-	// full :timeout. Hypothesis: under llvmpipe + xvfb the host thread
-	// is starving the handler-pool threads on the first frame; the
-	// stderr write must hit a scheduling boundary that lets the handler
-	// run. Worth its own bug; for now keep the line so CI is green.
+	// Per-stage stderr lines — load-bearing on CI's GitHub-hosted Ubuntu
+	// runners (#132). With fewer prints, every bb test fails at its
+	// startup /frames check: wait_for_server's curl returns success, but
+	// the *next* request to the same endpoint hangs until bb's :timeout.
+	// Removing any of the four breaks CI; restoring them makes 19 of 20
+	// test files pass cleanly. Hypothesis: under llvmpipe + xvfb the
+	// host thread starves the handler-pool, and the stderr writes hit
+	// scheduling boundaries that let the handler proceed. Worth its own
+	// follow-up issue.
 	t_accept := time.now()
-	fmt.eprintfln("[devserver] accepted")
+	fmt.eprintfln("[devserver] +0ms accepted")
 
 	// Receive timeout on this client: each recv returns within
 	// CLIENT_RECV_TIMEOUT even if the peer sends nothing, so
@@ -533,8 +534,14 @@ handle_one_connection :: proc(ds: ^Dev_Server, client: net.TCP_Socket, stack_buf
 	pending.body = body
 	pending.response = &channel
 
+	dt_parsed := i64(time.duration_milliseconds(time.diff(t_accept, time.now())))
+	fmt.eprintfln("[devserver] +%dms %s %s — dispatch", dt_parsed, method, path)
+
 	sync_queue_push(&ds.incoming, pending)
 	sync.sema_wait(&channel.done)
+
+	dt_main := i64(time.duration_milliseconds(time.diff(t_accept, time.now())))
+	fmt.eprintfln("[devserver] +%dms %s %s — main responded (%d)", dt_main, method, path, channel.status)
 
 	// Build and send HTTP response
 	status_line := status_text(channel.status)
@@ -562,8 +569,8 @@ handle_one_connection :: proc(ds: ^Dev_Server, client: net.TCP_Socket, stack_buf
 
 	net.close(client)
 	sync.sema_post(&channel.ack)
-	dt := i64(time.duration_milliseconds(time.diff(t_accept, time.now())))
-	fmt.eprintfln("[devserver] %s %s %d %dms", method, path, channel.status, dt)
+	dt_closed := i64(time.duration_milliseconds(time.diff(t_accept, time.now())))
+	fmt.eprintfln("[devserver] +%dms %s %s — closed", dt_closed, method, path)
 	free(pending)
 }
 
