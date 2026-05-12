@@ -63,11 +63,13 @@ init :: proc(b: ^Bridge) {
 	luaL_openlibs(b.L)
 
 	// Lua copies the cstring on push, so both allocations are
-	// short-lived — free them locally instead of leaking until exit.
-	exe_dir := filepath.dir(string(os.args[0]))
-	defer delete(exe_dir)
-	exe_dir_c := strings.clone_to_cstring(exe_dir)
-	defer delete(exe_dir_c)
+	// one-shot. Route them through temp_allocator instead of the
+	// tracking allocator: it skips the leak-at-exit report AND avoids
+	// the "Bad free" some Odin versions of filepath.dir produce by
+	// returning a slice of the input rather than a heap clone. The
+	// first frame's `free_all(context.temp_allocator)` reclaims these.
+	exe_dir := filepath.dir(string(os.args[0]), context.temp_allocator)
+	exe_dir_c := strings.clone_to_cstring(exe_dir, context.temp_allocator)
 	lua_pushstring(b.L, exe_dir_c)
 	lua_setglobal(b.L, "_redin_exe_dir")
 
