@@ -27,18 +27,24 @@
                sort
                seq)))))
 
-;; Check dev server
+;; Check dev server. The first /frames response can be slow because
+;; devserver_init prints "listening" before load_app finishes — the
+;; first request queues on the host thread until the app's first frame.
+;; On CI's llvmpipe rasterizer that easily exceeds 2s. 10s is generous
+;; for a healthy boot and bounded enough that a truly stuck server
+;; surfaces fast (#132).
 (print "Checking dev server... ")
 (flush)
 (try
   (http/get (str "http://" host ":" port "/frames")
             {:headers (merge {"Accept" "application/json"}
                              (when token {"Authorization" (str "Bearer " token)}))
-             :timeout 2000})
+             :timeout 10000})
   (println "OK")
-  (catch Exception _
+  (catch Exception e
     (println "FAILED")
-    (println (str "Dev server not reachable at " host ":" port))
+    (println (str "Dev server not reachable at " host ":" port
+                  " (" (.getMessage e) ")"))
     (println "Start redin with --dev first.")
     (System/exit 2)))
 

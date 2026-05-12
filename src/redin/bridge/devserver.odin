@@ -514,13 +514,17 @@ handle_one_connection :: proc(ds: ^Dev_Server, client: net.TCP_Socket, stack_buf
 		return
 	}
 
-	// Dispatch to main thread
-	channel: Response_Channel
+	// Dispatch to main thread. Pending_Request *and* Response_Channel
+	// are heap-allocated so neither can be reused under main while it
+	// is still inside `sync.sema_wait` on the channel's futex. Ownership
+	// transfers to main when we sema_post the channel's `ack` below —
+	// main frees both after `process_request` returns (#132 follow-up).
+	channel := new(Response_Channel)
 	pending := new(Pending_Request)
 	pending.method = method
 	pending.path = path
 	pending.body = body
-	pending.response = &channel
+	pending.response = channel
 
 	sync_queue_push(&ds.incoming, pending)
 	sync.sema_wait(&channel.done)
@@ -550,8 +554,11 @@ handle_one_connection :: proc(ds: ^Dev_Server, client: net.TCP_Socket, stack_buf
 	}
 
 	net.close(client)
+	// After this post, main owns both `channel` and `pending` and is
+	// responsible for freeing them. Touching either from here would be
+	// a use-after-free in the worst case (main could already have
+	// returned from sema_wait and dropped both).
 	sync.sema_post(&channel.ack)
-	free(pending)
 }
 
 send_str :: proc(sock: net.TCP_Socket, s: string) {
@@ -692,6 +699,11 @@ devserver_poll :: proc(ds: ^Dev_Server) {
 	sync_queue_drain(&ds.incoming, &requests)
 	for req in requests {
 		process_request(ds, req)
+		// Main owns the channel + pending now that the handler has
+		// observed our `ack`. Free here, never in the handler — see
+		// the comment in handle_one_connection above sema_post(ack).
+		free(req.response)
+		free(req)
 	}
 }
 

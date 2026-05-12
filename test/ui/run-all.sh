@@ -57,14 +57,19 @@ echo "=== Building redin ==="
 echo ""
 
 wait_for_server() {
-  local timeout=10
+  # Budget covers the slow path on CI: devserver_init prints "listening"
+  # before load_app finishes, so the first /frames request queues on the
+  # host thread until the first render frame. On CI's llvmpipe that
+  # routinely takes several seconds. --max-time bounds each curl so the
+  # outer SECONDS check can actually fire if the server is wedged.
+  local timeout=15
   local start=$SECONDS
   while true; do
     if [ -f "$PORT_FILE" ] && [ -f "$TOKEN_FILE" ]; then
       PORT="$(cat "$PORT_FILE")"
       TOKEN="$(cat "$TOKEN_FILE")"
       if [ -n "$PORT" ] && [ -n "$TOKEN" ] \
-         && curl -s -H "Authorization: Bearer $TOKEN" \
+         && curl -s --max-time 12 -H "Authorization: Bearer $TOKEN" \
                  "http://localhost:$PORT/frames" >/dev/null 2>&1; then
         return 0
       fi

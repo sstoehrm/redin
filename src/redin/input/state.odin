@@ -42,6 +42,8 @@ state_destroy :: proc() {
 	state.last_dispatched = ""
 	delete(state.selection_path)
 	state.selection_path = {}
+	delete(gesture.anchor_path)
+	gesture.anchor_path = {}
 }
 
 // Called when an input gains focus. Copies the node's value into the editing buffer.

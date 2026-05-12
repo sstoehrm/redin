@@ -15,7 +15,6 @@ REDIN_DEV :: #config(REDIN_DEV, false)
 import "core:fmt"
 import "core:math"
 import "core:os"
-import "core:path/filepath"
 import "core:strings"
 import "core:time"
 import "core:unicode/utf8"
@@ -62,8 +61,27 @@ init :: proc(b: ^Bridge) {
 	b.L = luaL_newstate()
 	luaL_openlibs(b.L)
 
-	exe_dir := filepath.dir(string(os.args[0]))
-	lua_pushstring(b.L, strings.clone_to_cstring(exe_dir))
+	// Compute the executable's directory by slicing argv[0] up to the
+	// last path separator. Avoiding filepath.dir lets us sidestep the
+	// version-dependent allocation behavior (the older Odin pinned by
+	// CI returns a borrowed slice of the input — a free of which the
+	// tracking allocator flags as a "Bad free"; the dev-nightly Odin
+	// allocates). Lua copies the cstring on push, so the temp clone is
+	// reclaimed by the first frame's free_all(context.temp_allocator).
+	exe_path := string(os.args[0])
+	exe_dir: string
+	{
+		last_sep := -1
+		for i := len(exe_path) - 1; i >= 0; i -= 1 {
+			if exe_path[i] == '/' || exe_path[i] == '\\' {
+				last_sep = i
+				break
+			}
+		}
+		exe_dir = exe_path[:last_sep] if last_sep > 0 else "."
+	}
+	exe_dir_c := strings.clone_to_cstring(exe_dir, context.temp_allocator)
+	lua_pushstring(b.L, exe_dir_c)
 	lua_setglobal(b.L, "_redin_exe_dir")
 
 	b.source_tree = is_redin_source_tree()
@@ -99,7 +117,14 @@ init :: proc(b: ^Bridge) {
 
 	load_fennel(b.L)
 	load_runtime(b.L)
+}
 
+// Bring up the dev server and hot-reload watcher. Caller is expected
+// to invoke this *after* `load_app` so the host thread is ready to
+// drain incoming requests by the time the listen socket goes live —
+// otherwise the first /frames request queues up against load_app and
+// can take seconds to respond, which breaks bb-side test timeouts (#132).
+start_devserver :: proc(b: ^Bridge) {
 	when REDIN_DEV || REDIN_AGENT {
 		devserver_init(&b.dev_server, b)
 	}
@@ -119,8 +144,11 @@ destroy :: proc(b: ^Bridge) {
 	shell_client_destroy(&b.shell_client)
 	clear_frame(b)
 	delete(b.markdown_skips)
-	for k in b.theme {
+	// Themes own a heap `font` string (set in redin_set_theme via
+	// lua_get_string_field). Delete both the key and the font value.
+	for k, v in b.theme {
 		delete(k)
+		if len(v.font) > 0 do delete(v.font)
 	}
 	delete(b.theme)
 	lua_close(b.L)
@@ -423,9 +451,10 @@ redin_set_theme :: proc "c" (L: ^Lua_State) -> i32 {
 		}
 		lua_pop(L, 1)
 
-		// Clear old theme
-		for k in g_bridge.theme {
+		// Clear old theme (keys and the per-entry `font` allocation).
+		for k, v in g_bridge.theme {
 			delete(k)
+			if len(v.font) > 0 do delete(v.font)
 		}
 		delete(g_bridge.theme)
 		g_bridge.theme = lua_to_theme(L, 1)

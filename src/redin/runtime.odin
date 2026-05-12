@@ -6,6 +6,7 @@ import "core:fmt"
 import "font"
 import "input"
 import "profile"
+import text "text"
 import "types"
 import rl "vendor:raylib"
 
@@ -156,8 +157,22 @@ run :: proc(cfg: Config) {
 	bridge.init(&b)
 	defer bridge.destroy(&b)
 	defer canvas.destroy()
+	// Release package-level dynamic state so REDIN_TRACK_MEM reports
+	// a clean shutdown (these caches are alive for the program's
+	// lifetime, but still tracked allocations).
+	defer render_destroy()
+	defer text.destroy_intrinsic_cache()
 
 	bridge.load_app(&b, cfg.app)
+
+	// Bring up the dev server and hot-reload watcher only after the app
+	// has finished loading. devserver_init opens the listen socket and
+	// spawns the acceptor + handler-pool; if this happened before
+	// load_app the first /frames request would queue against load_app
+	// on the host thread, which can take several seconds and breaks
+	// bb-side test timeouts (#132). bridge.destroy still tears these
+	// down via its existing devserver_destroy / hotreload_destroy calls.
+	bridge.start_devserver(&b)
 
 	input.state_init()
 	defer input.state_destroy()
