@@ -94,6 +94,15 @@ invalidate_height_cache :: proc() {
 	}
 }
 
+// Release the package-level intrinsic cache (plus any held line
+// slices). Called once from runtime.run's shutdown path so the
+// tracking allocator doesn't report the cache as a leak.
+destroy_intrinsic_cache :: proc() {
+	invalidate_height_cache()
+	delete(intrinsic_cache)
+	intrinsic_cache = nil
+}
+
 Text_Line :: struct {
 	start: int, // byte offset inclusive
 	end:   int, // byte offset exclusive

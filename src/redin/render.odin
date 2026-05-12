@@ -28,6 +28,23 @@ resolve_vp :: proc(v: types.ViewportValue, window_dim: f32) -> f32 {
 	return 0
 }
 
+// Release the package-level dynamic state. Called from runtime.run's
+// shutdown path so the tracking allocator doesn't report these as
+// leaks (the storage is alive for the program's lifetime, but it is
+// still allocated state we own).
+render_destroy :: proc() {
+	delete(node_rects)
+	node_rects = nil
+	delete(node_content_rects)
+	node_content_rects = nil
+	delete(scroll_offsets)
+	scroll_offsets = nil
+	delete(scroll_offsets_x)
+	scroll_offsets_x = nil
+	delete(node_scroll_info)
+	node_scroll_info = nil
+}
+
 // Layout rects populated during render, indexed by node idx.
 // Used by input handling for hit testing in the next frame.
 node_rects: [dynamic]rl.Rectangle

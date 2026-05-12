@@ -62,8 +62,13 @@ init :: proc(b: ^Bridge) {
 	b.L = luaL_newstate()
 	luaL_openlibs(b.L)
 
+	// Lua copies the cstring on push, so both allocations are
+	// short-lived — free them locally instead of leaking until exit.
 	exe_dir := filepath.dir(string(os.args[0]))
-	lua_pushstring(b.L, strings.clone_to_cstring(exe_dir))
+	defer delete(exe_dir)
+	exe_dir_c := strings.clone_to_cstring(exe_dir)
+	defer delete(exe_dir_c)
+	lua_pushstring(b.L, exe_dir_c)
 	lua_setglobal(b.L, "_redin_exe_dir")
 
 	b.source_tree = is_redin_source_tree()
@@ -126,8 +131,11 @@ destroy :: proc(b: ^Bridge) {
 	shell_client_destroy(&b.shell_client)
 	clear_frame(b)
 	delete(b.markdown_skips)
-	for k in b.theme {
+	// Themes own a heap `font` string (set in redin_set_theme via
+	// lua_get_string_field). Delete both the key and the font value.
+	for k, v in b.theme {
 		delete(k)
+		if len(v.font) > 0 do delete(v.font)
 	}
 	delete(b.theme)
 	lua_close(b.L)
@@ -430,9 +438,10 @@ redin_set_theme :: proc "c" (L: ^Lua_State) -> i32 {
 		}
 		lua_pop(L, 1)
 
-		// Clear old theme
-		for k in g_bridge.theme {
+		// Clear old theme (keys and the per-entry `font` allocation).
+		for k, v in g_bridge.theme {
 			delete(k)
+			if len(v.font) > 0 do delete(v.font)
 		}
 		delete(g_bridge.theme)
 		g_bridge.theme = lua_to_theme(L, 1)

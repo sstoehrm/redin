@@ -6,6 +6,7 @@ import "core:fmt"
 import "font"
 import "input"
 import "profile"
+import text "text"
 import "types"
 import rl "vendor:raylib"
 
@@ -156,6 +157,11 @@ run :: proc(cfg: Config) {
 	bridge.init(&b)
 	defer bridge.destroy(&b)
 	defer canvas.destroy()
+	// Release package-level dynamic state so REDIN_TRACK_MEM reports
+	// a clean shutdown (these caches are alive for the program's
+	// lifetime, but still tracked allocations).
+	defer render_destroy()
+	defer text.destroy_intrinsic_cache()
 
 	bridge.load_app(&b, cfg.app)
 

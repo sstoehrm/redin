@@ -96,10 +96,13 @@ end_frame :: proc() {
 
 // Called on shutdown. Stops all providers and clears the registry.
 destroy :: proc() {
-	for _, &entry in entries {
+	for k, &entry in entries {
 		if entry.provider.stop != nil {
 			entry.provider.stop()
 		}
+		// Keys are heap-allocated by redin_canvas_register; the map
+		// doesn't own them, so we have to delete each one explicitly.
+		delete(k)
 	}
 	delete(entries)
 }
