@@ -472,6 +472,8 @@ redin_http :: proc "c" (L: ^Lua_State) -> i32 {
 	context = g_context
 	if g_bridge == nil do return 0
 
+	http_warn_open_once()
+
 	req: Http_Request
 	req.headers = make(map[string]string)
 
@@ -967,6 +969,8 @@ deliver_http_response :: proc(b: ^Bridge, resp: ^Http_Response) {
 redin_shell :: proc "c" (L: ^Lua_State) -> i32 {
 	context = g_context
 	if g_bridge == nil do return 0
+
+	shell_warn_open_once()
 
 	req: Shell_Request
 

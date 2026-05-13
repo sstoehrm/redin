@@ -455,6 +455,25 @@ set_http_whitelist :: proc(allow: []string) {
 	g_http_whitelist = cloned
 }
 
+// #129 H1: warn loudly once per process the first time redin.http is invoked
+// with no whitelist set. Fail-open is intentional (keeps the framework usable
+// as a scripting toolkit), but combined with the dev server's /events pivot
+// this grants any holder of .redin-token outbound HTTP. The warning surfaces
+// the choice so app authors can opt in to restriction.
+@(private) g_http_open_warned: bool
+
+@(private)
+http_warn_open_once :: proc() {
+	sync.lock(&g_http_whitelist_mutex)
+	defer sync.unlock(&g_http_whitelist_mutex)
+	if g_http_whitelist != nil do return
+	if g_http_open_warned do return
+	g_http_open_warned = true
+	fmt.eprintln("[redin] WARNING: redin.http called with no host whitelist (#129 H1).")
+	fmt.eprintln("[redin]   Outbound HTTP is unrestricted. Call bridge.set_http_whitelist([...])")
+	fmt.eprintln("[redin]   from app.odin to restrict. Logged once per process.")
+}
+
 // http_whitelist_check returns ("", true) if allowed, ("<rejected host>", false)
 // otherwise. host must already be the URL host (no port, no scheme).
 @(private)
@@ -568,6 +587,25 @@ set_shell_env_allowlist :: proc(allow: []string) {
 	cloned := make([]string, len(allow), heap)
 	for s, i in allow do cloned[i] = strings.clone(s, heap)
 	g_shell_env_allowlist = cloned
+}
+
+// #129 H1: warn loudly once per process the first time redin.shell is invoked
+// with no env allowlist set. Combined with the unrestricted argv surface and
+// the dev server's /events pivot, this is local code execution for any
+// holder of .redin-token.
+@(private) g_shell_open_warned: bool
+
+@(private)
+shell_warn_open_once :: proc() {
+	sync.lock(&g_shell_env_allowlist_mutex)
+	defer sync.unlock(&g_shell_env_allowlist_mutex)
+	if g_shell_env_allowlist != nil do return
+	if g_shell_open_warned do return
+	g_shell_open_warned = true
+	fmt.eprintln("[redin] WARNING: redin.shell called with no env allowlist (#129 H1).")
+	fmt.eprintln("[redin]   Child inherits the full parent env; argv is unrestricted by design.")
+	fmt.eprintln("[redin]   Call bridge.set_shell_env_allowlist([...]) from app.odin to restrict.")
+	fmt.eprintln("[redin]   Logged once per process.")
 }
 
 // shell_env_filtered returns the filtered env, or nil if the allowlist is
