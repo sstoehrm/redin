@@ -428,6 +428,11 @@ dispatch :: proc(event: string, payload: any) -> (ok: bool, err: string) {
 // (case-insensitive) or a CIDR (IPv4 or IPv6, applied only to
 // IP-literal hosts). Apps opt in by calling this setter at startup
 // from app.odin (--native projects) or via a registered cfunc.
+//
+// #129 L2: hostname comparison is ASCII-byte case-insensitive. IDN
+// hostnames must be passed in their punycode (xn--...) form;
+// `münchen.example` is not equivalent to `xn--mnchen-3ya.example`
+// for whitelist matching.
 
 @(private)
 g_http_whitelist:       []string
@@ -560,6 +565,11 @@ cidr6_match_bits :: proc(host: net.IP6_Address, net_addr: net.IP6_Address, bits:
 // full parent env (Process_Desc.env = nil is the documented "inherit"
 // sentinel; see core/os/process.odin). When set, only keys present in the
 // allowlist are passed through to the child. Exact match, case-sensitive.
+//
+// #129 L3: case-sensitive is intentional — Linux env keys are
+// case-sensitive (`PATH` ≠ `path`), so the allowlist matches the
+// underlying semantics. This is asymmetric to the HTTP host
+// whitelist (case-insensitive), which mirrors DNS rules.
 //
 // Storage uses runtime.heap_allocator() for the same reason as the HTTP
 // whitelist: the allowlist is read on the shell worker thread and written
