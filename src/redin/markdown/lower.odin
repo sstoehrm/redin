@@ -87,6 +87,12 @@ emit_block :: proc(
 	}
 }
 
+// #111: marker gets a fixed column width. Without it, the hbox treats
+// both children as fill (no preferred width) and splits the row 50/50,
+// pushing the body to the middle. 28px comfortably fits "•" through
+// "99." at the default md/body font size.
+MARKER_COLUMN_WIDTH :: 28.0
+
 emit_list_item :: proc(
 	nodes:   ^[dynamic]types.Node,
 	parents: ^[dynamic]i32,
@@ -99,7 +105,12 @@ emit_list_item :: proc(
 
 	marker_text := item.marker
 	if len(marker_text) == 0 do marker_text = "•"
-	emit_text(nodes, parents, "md/list-marker", marker_text, nil, hbox_idx)
+	append(nodes, types.NodeText{
+		aspect  = "md/list-marker",
+		content = marker_text,
+		width   = f32(MARKER_COLUMN_WIDTH),
+	})
+	append(parents, hbox_idx)
 	emit_text(nodes, parents, "md/body", "", item.spans, hbox_idx)
 }
 

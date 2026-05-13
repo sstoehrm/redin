@@ -57,6 +57,11 @@ test_lower_list :: proc(t: ^testing.T) {
 	mk, _ := tree.nodes[3].(types.NodeText)
 	testing.expect_value(t, mk.aspect, "md/list-marker")
 	testing.expect_value(t, mk.content, "•")
+	// #111: marker must carry a fixed column width so hbox doesn't split
+	// the row 50/50 between marker and body.
+	mw, mw_ok := mk.width.(f32)
+	testing.expect(t, mw_ok, "marker width must be a fixed f32")
+	testing.expect_value(t, mw, f32(MARKER_COLUMN_WIDTH))
 	cn, _ := tree.nodes[4].(types.NodeText)
 	testing.expect_value(t, cn.aspect, "md/body")
 }
