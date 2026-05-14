@@ -13,7 +13,7 @@ Reference for all element tags in redin frames.
 | `input` | Implemented |
 | `button` | Implemented |
 | `text` | Implemented |
-| `image` | Implemented |
+| `image` | Placeholder (themed rect — no texture loading yet) |
 | `popout` | Implemented |
 | `modal` | Implemented |
 
@@ -102,19 +102,21 @@ Typography (`font-size`, `weight`, `color`) comes from `aspect`.
 
 ### `image`
 
-Renders a texture loaded from a file path.
+Reserved leaf-node tag. Texture loading from a file path is not implemented yet — the renderer draws a themed rectangle with an `"image"` label so the slot is visible in layout. The element exists so that frames, themes, and the agent channel can reference image slots without breaking when texture support lands.
 
-**Required attrs:** `src`
+**Required attrs:** none
 
 **Optional attrs:**
 
 | Attribute | Type | Default | Notes |
 | --------- | ---- | ------- | ----- |
-| `src` | string | -- | File path to the image. **Required.** |
-| `:agent` | `:read \| :edit` | -- | Optional. Pairs with `:id` to expose the node to the agent channel (REDIN_AGENT only). |
+| `aspect` | string | -- | Theme entry used to draw the placeholder rectangle. |
+| `width` | size | -- | Layout width. |
+| `height` | size | -- | Layout height. |
+| `:agent` | `:read \| :edit` | -- | Optional. Pairs with `:id` to expose the node to the agent channel (REDIN_AGENT only). Writes set a `:src` attr, but the parser does not currently read it. |
 
 ```fennel
-[:image {:src "assets/logo.png" :width 120 :height 40}]
+[:image {:aspect :logo :width 120 :height 40}]
 ```
 
 ---
@@ -293,7 +295,7 @@ Main-axis centering only takes effect when every child has an explicit size (a s
 
 ```fennel
 [:hbox {}
-  [:image {:src "assets/avatar.png" :width 32 :height 32}]
+  [:image {:aspect :avatar :width 32 :height 32}]
   [:text {:aspect :body} "Alice"]]
 ```
 
@@ -413,7 +415,7 @@ The frame validator checks the following. Invalid frames are rejected before rea
 | Rule | Detail |
 | ---- | ------ |
 | **Known tag** | The tag must be one of the registered element names. |
-| **Required attributes present** | `image` needs `src`; `canvas` needs `provider`; `input` needs `value`; `button` needs `click`. |
+| **Required attributes present** | `canvas` needs `provider`; `input` needs `value`; `button` needs `click`. |
 | **No visual properties** | `bg`, `color`, `border`, `font-size`, `weight`, `radius`, `border-width`, `opacity` are rejected on any element. |
 | **Leaf nodes have no children** | `text`, `image`, `input`, `button`, `canvas` must not have child frames. |
 | **`modal` and `popout` not at root** | Both must be nested inside a container element. |

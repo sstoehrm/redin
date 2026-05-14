@@ -51,9 +51,11 @@ zero profile instrumentation, and zero tracking-allocator overhead.
 ./build/redin examples/kitchen-sink.fnl
 ```
 
-Whether the dev server starts depends on the build flags. A binary
-built with `./build-dev.sh` starts the dev server unconditionally; a
-bare `odin build` binary never does. There are no runtime CLI flags.
+Exactly one positional argument is accepted — the path to the app
+`.fnl` (or `.lua`) file. Extra positional args exit with status 2.
+There are no runtime CLI flags. Whether the dev server starts depends
+on the build flags: a binary built with `./build-dev.sh` starts it
+unconditionally; a bare `odin build` binary never does.
 
 ## Testing
 
@@ -117,7 +119,8 @@ walks upward (8801, 8802, ...) if busy, and writes the bound port to
 `./.redin-port`. A per-run random auth token is written to
 `./.redin-token` (0600). Every non-`OPTIONS` request must carry
 `Authorization: Bearer <token>`, and the `Host` header must be
-`localhost:<port>` / `127.0.0.1:<port>`.
+`localhost:<port>` / `127.0.0.1:<port>`. Requests are served by an
+acceptor plus a 4-handler worker pool (up to 4 in flight at a time).
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -125,10 +128,15 @@ walks upward (8801, 8802, ...) if busy, and writes the bound port to
 | `GET` | `/state` | Full app state |
 | `GET` | `/state/<dot.path>` | Nested state lookup (e.g. `/state/form.name`) |
 | `GET` | `/aspects` | Current theme map |
+| `GET` | `/selection` | Active text selection (`{kind, ...}`); `{"kind":"none"}` when nothing is selected |
+| `GET` | `/window` | Current window size (`{"width":N,"height":N}`) |
 | `GET` | `/profile` | Ring-buffered frame timings (requires `-define:REDIN_PROFILE=true`) |
 | `GET` | `/screenshot` | PNG screenshot of the window |
-| `POST` | `/events` | Dispatch an event (JSON body: `[:event-name, payload]`) |
+| `POST` | `/events` | Dispatch an event. JSON body is the event vector itself, e.g. `["counter/inc"]` or `["todo/add","Buy milk"]` |
 | `POST` | `/click` | Inject a mouse click (JSON body: `{"x":N,"y":N}`) |
+| `POST` | `/resize` | Resize the window (JSON body: `{"width":N,"height":N}`; each in `[100, 8192]`) |
+| `POST` | `/maximize` | Maximize the window |
+| `POST` | `/restore` | Restore the window from maximized |
 | `POST` | `/shutdown` | Request graceful shutdown |
 | `PUT` | `/aspects` | Replace the theme map (JSON body) |
 | `POST` | `/input/takeover` | Take over mouse polling for tests. Required before `/input/mouse/*`. |

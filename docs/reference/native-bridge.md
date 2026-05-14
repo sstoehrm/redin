@@ -113,9 +113,13 @@ ok, err := bridge.dispatch_tos(L, "combat/push")
 
 These setters install host-side policy for the built-in `redin.http` and `redin.shell` host functions. Both are global, take a slice of strings (cloned internally), and accept `nil` to clear back to the permissive default. Call before or after `redin.run`; changes apply to subsequent requests.
 
+**Open-default warning.** When the setter has not been called, the first invocation of the corresponding host function prints a one-shot `[redin] WARNING:` block to stderr explaining that the surface is unrestricted and pointing at the setter. Logged once per process. This is an intentional nudge — call the setter explicitly to acknowledge the open default and silence the warning.
+
 ### `bridge.set_http_whitelist(allow: []string)`
 
 When set, `redin.http` accepts only URLs whose host matches an entry. Entries are either hostname literals (case-insensitive — e.g. `"api.example.com"`) or CIDR blocks (IPv4 or IPv6 — e.g. `"127.0.0.0/8"`, `"::1/128"`). CIDR entries are matched only against IP-literal hosts, not DNS names. `nil` (the default) accepts any host.
+
+Hostname comparison is ASCII-byte case-insensitive. IDN hostnames must be passed in their punycode (`xn--...`) form — `münchen.example` is not equivalent to `xn--mnchen-3ya.example`, and the URL parser punycodes the request host before matching.
 
 Rejection failure (delivered to the `:http` effect's `on-error`): `{status: 0, error: "host <name> not in http whitelist"}`.
 

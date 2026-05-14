@@ -465,7 +465,7 @@ Theme is pushed to the host on `set-theme` via `redin.set_theme`.
 
 ## Canvas providers
 
-The `canvas` element supports a `:provider` attribute naming a registered canvas provider. Canvas providers are a planned extension point; the element is parsed by the host but the provider registry is not yet implemented.
+The `canvas` element supports a `:provider` attribute naming a registered canvas provider. The provider registry and lifecycle (`register` / `unregister`, start/update/suspend/stop) are implemented in `src/redin/canvas/canvas.odin`, and Fennel apps can register providers via `(require :canvas)`. See [`docs/reference/canvas.md`](reference/canvas.md) for the full API.
 
 ```fennel
 [:canvas {:provider "sparkline" :width 200 :height 40}]
@@ -485,6 +485,7 @@ The host (Odin + Raylib) exposes a `redin` global table with these functions:
 | `redin.now()`         | Current time as Unix seconds (float)              |
 | `redin.measure_text(text, size)` | Measure text dimensions, returns width, height |
 | `redin.http(id, url, method, headers, body, timeout)` | Queue async HTTP request |
+| `redin.shell(id, cmd_table, stdin)` | Queue async shell command (used by the `:shell` effect) |
 | `redin.json_encode(v)` | Encode Lua value to JSON string                 |
 | `redin.json_decode(s)` | Decode JSON string to Lua value                 |
 

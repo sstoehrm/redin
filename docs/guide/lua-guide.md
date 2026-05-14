@@ -236,7 +236,14 @@ Then run your Lua app:
 ./build/redin todo.lua
 ```
 
-To enable the dev server, build with `-define:REDIN_DEV=true`:
+To enable the dev server, use `./build-dev.sh` (bakes in `REDIN_DEV`, `REDIN_PROFILE`, and `REDIN_TRACK_MEM`):
+
+```sh
+./build-dev.sh
+./build/redin todo.lua
+```
+
+Equivalent manual command (only `REDIN_DEV`, no profiling or memory tracking):
 
 ```sh
 odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit \
