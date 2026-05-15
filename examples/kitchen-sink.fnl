@@ -11,37 +11,28 @@
                    (let [t (redin.now)
                          w ctx.width
                          h ctx.height]
-                     ;; Dark base
+                     ;; Polar night base
                      (ctx.rect 0 0 w h {:fill [30 34 46]})
-                     ;; Drifting orbs — slow sine/cosine motion, muted colors, low alpha
-                     (for [i 1 8]
-                       (let [speed (* 0.15 (+ 1 (* i 0.3)))
-                             phase (* i 1.7)
-                             r (+ 40 (* 30 i))
+                     ;; Three slow orbs — large radius, very low alpha, single hue.
+                     (for [i 1 3]
+                       (let [speed (* 0.08 (+ 1 (* i 0.4)))
+                             phase (* i 2.1)
+                             r     (+ 180 (* 40 i))
                              x (+ (* w 0.5)
-                                  (* (* w 0.4) (math.sin (+ (* t speed) phase))))
+                                  (* (* w 0.35) (math.sin (+ (* t speed) phase))))
                              y (+ (* h 0.5)
-                                  (* (* h 0.35)
+                                  (* (* h 0.3)
                                      (math.cos (+ (* t speed 0.7) (* phase 1.3)))))
-                             pulse (+ 0.7
-                                      (* 0.3 (math.sin (+ (* t 0.5) phase))))
-                             alpha (math.floor (* 18 pulse))]
-                         (ctx.circle x y r {:fill [67 76 94 alpha]})))
-                     ;; Subtle accent orbs — brighter, smaller
-                     (for [i 1 4]
-                       (let [speed (* 0.1 (+ 1 (* i 0.5)))
-                             phase (* i 2.3)
-                             r (+ 20 (* 15 i))
-                             x (+ (* w 0.3)
-                                  (* (* w 0.5) (math.cos (+ (* t speed) phase))))
-                             y (+ (* h 0.4)
-                                  (* (* h 0.4)
-                                     (math.sin (+ (* t speed 0.8) (* phase 0.9)))))
-                             alpha (math.floor (+ 10
-                                                  (* 8
-                                                     (math.sin (+ (* t 0.4)
-                                                                  phase)))))]
-                         (ctx.circle x y r {:fill [94 129 172 alpha]}))))))
+                             alpha 14]
+                         (ctx.circle x y r {:fill [94 129 172 alpha]})))
+                     ;; Cheap vignette: nested rect strokes from the edges in,
+                     ;; alpha ramping up toward the outside.
+                     (for [i 1 12]
+                       (let [inset (* 6 (- 12 i))
+                             a (math.floor (* 2.5 i))]
+                         (ctx.rect inset inset
+                                   (- w (* inset 2)) (- h (* inset 2))
+                                   {:stroke [0 0 0 a] :width 1}))))))
 
 ;; ===== Micro-animation =====
 ;; A small pulsing dot used as an :animate decoration on the Add button —
