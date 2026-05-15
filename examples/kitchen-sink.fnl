@@ -48,6 +48,21 @@
                      (ctx.circle (/ ctx.width 2) (/ ctx.height 2) r
                                  {:fill [235 203 139 alpha]}))))
 
+;; A six-dot grip pattern, drawn into a 24×42 canvas. Kept deliberately small
+;; and static — the row's own #hover variant carries the hover feedback.
+(canvas.register :grip-dots
+                 (fn [ctx]
+                   (let [cx (/ ctx.width 2)
+                         cy (/ ctx.height 2)
+                         gap 5
+                         r 1.5
+                         color [129 138 155]]
+                     (for [row -1 1]
+                       (for [col 0 1]
+                         (let [dx (* (- (* 2 col) 1) (* gap 0.5))
+                               dy (* row (+ gap (* 2 r)))]
+                           (ctx.circle (+ cx dx) (+ cy dy) r {:fill color})))))))
+
 ;; ===== Theme =====
 
 (theme-mod.set-theme {;; --- Surfaces / text ---
