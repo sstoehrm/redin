@@ -32,7 +32,7 @@
                              a (math.floor (* 2.5 i))]
                          (ctx.rect inset inset
                                    (- w (* inset 2)) (- h (* inset 2))
-                                   {:stroke [0 0 0 a] :width 1}))))))
+                                   {:stroke [0 0 0 a] :stroke-width 1}))))))
 
 ;; ===== Micro-animation =====
 ;; A small pulsing dot used as an :animate decoration on the Add button —
