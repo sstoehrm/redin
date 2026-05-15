@@ -202,71 +202,70 @@
 
 ;; ===== View =====
 
-(global main_view (fn []
-                    (let [items (subscribe :items)
-                          input-val (subscribe :input-value)]
-                      [:vbox
-                       {}
-                       [:stack
-                        {:viewport [[:top_left 0 0 :full :full]
-                                    [:top_left 0 0 :full :full]
-                                    [:bottom_center 0 0 :1_4 42]]}
-                        [:canvas
-                         {:provider :background :width :full :height :full}]
-                        [:vbox
-                         {:aspect :surface}
-                         [:text {:aspect :heading :layout :center} "Todo List"]
-                         [:input
-                          {:aspect :input
-                           :width 250
-                           :height 42
-                           :value input-val
-                           :change [:test/input]
-                           :key [:test/add]}]
-                         [:button
-                          {:width 250
-                           :height 42
-                           :aspect :button
-                           :click [:test/add]
-                           :animate {:provider :pulse-dot
-                                     :rect [:top_right -8 -8 16 16]
-                                     :z :above}}
-                          "Add"]
-                         [:vbox
-                          {:overflow :scroll-y
-                           :aspect :muted
-                           :drag-over [:row-drag
-                                       {:event :event/over
-                                        :aspect :muted-armed}]}
-                          (icollect [i item (ipairs (or items []))]
-                            [:hbox
-                             {:layout :center
-                              :aspect :row
-                              :height 42
-                              :draggable [:row-drag
-                                          {:mode :preview
-                                           :handle false
-                                           :event :event/drag
-                                           :aspect :row-dragging
-                                           :animate {:provider :pulse-dot
-                                                     :rect [:top_right -6 -6 12 12]
-                                                     :z :above}}
-                                          i]
-                              :dropable [:row-drag
-                                         {:event :event/drop
-                                          :aspect :row-drop-hot}
-                                         i]}
-                             [:vbox {:width 24
-                                     :aspect :drag-handle
-                                     :drag-handle true}]
-                             [:text {:aspect :body} item.text]
-                             [:button
-                              {:width 250
-                               :aspect :button
-                               :click [:test/remove i]}
-                              "remove"]])]]
-                        [:hbox
-                         {:height 42 :aspect :status-field :layout :center}
-                         [:text
-                          {:aspect :body :layout :center}
-                          (.. "Todos: " (length items))]]]])))
+(global main_view
+        (fn []
+          (let [items     (subscribe :items)
+                input-val (subscribe :input-value)
+                count     (length (or items []))]
+            [:stack
+             {:viewport [[:top_left 0 0 :full :full]
+                         [:top_center 0 32 480 :full]]}
+             [:canvas {:provider :background :width :full :height :full}]
+             [:vbox
+              {:aspect :surface}
+              ;; Header — title left, count right.
+              [:hbox
+               {:height 32 :layout :center}
+               [:text {:aspect :heading} "Todo List"]
+               [:vbox {:width :full}]
+               [:text {:aspect :count-badge} (.. count " items")]]
+              ;; Input + Add side by side.
+              [:hbox
+               {:height 42}
+               [:input {:aspect :input
+                        :width :full
+                        :height 42
+                        :value input-val
+                        :change [:test/input]
+                        :key [:test/add]}]
+               [:vbox {:width 8}]
+               [:button {:aspect :button-primary
+                         :width 72
+                         :height 42
+                         :click [:test/add]
+                         :animate {:provider :pulse-dot
+                                   :rect [:top_right -8 -8 16 16]
+                                   :z :above}}
+                "Add"]]
+              [:vbox {:height 8}]
+              ;; Scrollable list.
+              [:vbox
+               {:overflow :scroll-y
+                :drag-over [:row-drag
+                            {:event :event/over
+                             :aspect :muted-armed}]}
+               (icollect [i item (ipairs (or items []))]
+                 [:hbox {:layout :center
+                         :aspect :row
+                         :height 42
+                         :draggable [:row-drag
+                                     {:mode :preview
+                                      :handle false
+                                      :event :event/drag
+                                      :aspect :row-dragging}
+                                     i]
+                         :dropable [:row-drag
+                                    {:event :event/drop
+                                     :aspect :row-drop-hot}
+                                    i]}
+                  ;; Grip handle — fixed 24px column, canvas-drawn dots.
+                  [:vbox {:width 24 :height 42 :drag-handle true}
+                   [:canvas {:provider :grip-dots
+                             :width 24 :height 42}]]
+                  ;; Item text — fills remaining width.
+                  [:text {:aspect :body :width :full} item.text]
+                  ;; Remove icon button.
+                  [:button {:aspect :button-icon
+                            :width 32 :height 32
+                            :click [:test/remove i]}
+                   "×"]])]]])))
