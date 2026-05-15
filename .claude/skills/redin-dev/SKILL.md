@@ -257,9 +257,13 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:$PORT/state
 | GET | /state/path.to.value | Nested state lookup |
 | GET | /aspects | Current theme |
 | GET | /selection | Current text/input selection: `{kind: none\|input\|text, start, end, text}` |
+| GET | /window | Current window size: `{"width":N,"height":N}` |
 | GET | /screenshot | PNG screenshot |
-| POST | /events | Dispatch event (JSON: `["event-name", payload]`) |
+| POST | /events | Dispatch event. JSON body is the event vector itself, e.g. `["counter/inc"]` or `["todo/add","Buy milk"]` |
 | POST | /click | Inject click (JSON: `{"x":N,"y":N}`) |
+| POST | /resize | Resize window (JSON: `{"width":N,"height":N}`; each in `[100, 8192]`) |
+| POST | /maximize | Maximize the window |
+| POST | /restore | Restore the window from maximized |
 | POST | /shutdown | Graceful shutdown |
 | PUT | /aspects | Replace theme |
 | POST | /input/takeover | Take over mouse polling for tests. Required before `/input/mouse/*`. Returns 409 if already active. |

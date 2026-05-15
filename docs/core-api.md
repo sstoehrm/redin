@@ -149,7 +149,7 @@ The flattening is a single pass when the frame enters the pipeline. No fragment 
 | Tag       | Purpose                                                | Status        | Required attrs |
 | --------- | ------------------------------------------------------ | ------------- | -------------- |
 | `text`    | Text content. Last positional arg is the string.       | implemented   | --             |
-| `image`   | Texture from file.                                     | implemented   | `src`          |
+| `image`   | Placeholder slot — themed rect; texture loading TBD.   | placeholder   | --             |
 | `input`   | Editable text field.                                   | implemented   | --             |
 | `button`  | Clickable button. Last positional arg is the label.    | implemented   | --             |
 | `canvas`  | Independent render region. Runs a registered provider. | implemented   | `provider`     |
@@ -616,6 +616,17 @@ PUT calls into Lua (`theme.set-theme`) to replace the theme, which also updates 
 
 Click injects a `MouseEvent` into the input queue, which is processed on the next frame.
 
+### Window
+
+| Method | Path        | Body                              | Response                                |
+| ------ | ----------- | --------------------------------- | --------------------------------------- |
+| GET    | `/window`   | --                                | `{"width": N, "height": N}`             |
+| POST   | `/resize`   | `{"width": N, "height": N}`       | `{"ok": true}`; `400` if outside `[100, 8192]` on either axis |
+| POST   | `/maximize` | --                                | `{"ok": true}`                          |
+| POST   | `/restore`  | --                                | `{"ok": true}`                          |
+
+`GET /window` returns the current Raylib screen dimensions. `POST /resize` calls `rl.SetWindowSize` after JSON validation; `/maximize` and `/restore` are direct passes to the corresponding Raylib calls.
+
 ### Control
 
 | Method | Path        | Body | Response        |
@@ -692,7 +703,7 @@ Per-node-type semantics:
 | `:text` | text string | string → replaces text |
 | `:input` | current value (live) | string → sets value |
 | `:button` | label string | string → sets label |
-| `:image` | source path | string → sets source |
+| `:image` | (none — no source attr is read by the parser yet) | string → stored on the node but currently a no-op (texture loading TBD) |
 | `:vbox` `:hbox` `:stack` `:popout` `:modal` | children list as JSON array | JSON array → replaces children |
 
 #### Endpoints

@@ -41,6 +41,8 @@ The CLI downloads a pinned redin binary into `.redin/` — no build tools needed
 
 ### Building from source
 
+The one-step path is `./setup.sh`, which installs system packages (via apt / dnf / pacman / brew), pulls submodules, and runs `./build-dev.sh`. The manual equivalent is below.
+
 ```bash
 # Prerequisites (Ubuntu/Debian)
 sudo apt-get install -y luajit libssl-dev \
@@ -53,7 +55,8 @@ git submodule update --init --recursive
 # Dev build (bakes in REDIN_DEV / REDIN_PROFILE / REDIN_TRACK_MEM)
 ./build-dev.sh
 
-# Run — dev server starts because REDIN_DEV is compiled in
+# Run — dev server starts because REDIN_DEV is compiled in.
+# Exactly one positional argument is accepted; extra args exit 2.
 ./build/redin examples/kitchen-sink.fnl
 ```
 

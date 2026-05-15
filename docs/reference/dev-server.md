@@ -10,6 +10,8 @@ Starts when the binary was built with `-define:REDIN_DEV=true` (or `-define:REDI
 
 Read endpoints reflect the last state pushed to the host. Write endpoints queue events into the main input channel as if they came from real user input.
 
+The listener is an acceptor thread plus a fixed pool of 4 handler threads, so up to 4 requests can be in flight at once. Beyond that, new connections queue until a handler frees up.
+
 Implementation: `src/redin/bridge/devserver.odin`.
 
 ### Authentication
@@ -35,6 +37,8 @@ AUTH="Authorization: Bearer $TOKEN"
 ### Runtime caveats
 
 **When built with `-define:REDIN_DEV=true`, the framework trusts its filesystem.** The hot-reload watcher re-requires `src/runtime/*.fnl` whenever their mtimes advance. Anyone who can write to `src/runtime` gets code execution in the running process on the next tick. Don't run a dev build from a world-writable directory, and don't ship dev builds in production.
+
+Hot-reload (and the cwd-relative `src/runtime/?.fnl` / `vendor/fennel/?.lua` package paths it depends on) only activates when the dev binary is run from inside the redin source tree itself — detected by the presence of `src/cmd/redin/main.odin` in the working directory. A dev-flagged binary run from an external app directory still serves the HTTP endpoints, but does not watch any files.
 
 **The bearer token is a capability.** Any holder can dispatch events, which means any app-registered `:shell` or `:http` effect is one authenticated POST away from arbitrary shell execution or network access in the user's context. The token is 0600 and per-run, so this only matters if the token leaks — but plan accordingly when wiring `:shell` handlers.
 
@@ -73,6 +77,22 @@ curl -H "$AUTH" http://localhost:$PORT/aspects
 ```
 
 Response: full theme as JSON object (serialized from host-side `Theme` structs).
+
+### `GET /selection` -- active text selection
+
+```bash
+curl -H "$AUTH" http://localhost:$PORT/selection
+```
+
+Response: a JSON object describing the current text selection. When nothing is selected, returns `{"kind":"none"}`. Otherwise returns the selection kind plus its source node path and resolved text range.
+
+### `GET /window` -- current window size
+
+```bash
+curl -H "$AUTH" http://localhost:$PORT/window
+```
+
+Response: `{"width": N, "height": N}` — the current Raylib screen dimensions in pixels.
 
 ### `GET /profile` -- frame timing ring buffer
 
@@ -117,15 +137,21 @@ Returns binary PNG. Content-Type: `image/png`. Captures the current Raylib windo
 
 ### `POST /events` -- dispatch an event
 
+The JSON body is the event vector itself — the first element is the event name, and any remaining elements are positional args. The handler decodes it, wraps it in a one-element list, and hands it to the Fennel-side `view.deliver-events`.
+
 ```bash
 curl -X POST -H "$AUTH" http://localhost:$PORT/events \
   -H 'Content-Type: application/json' \
-  -d '{"event": ["event/increment"]}'
+  -d '["counter/inc"]'
+```
+
+```bash
+curl -X POST -H "$AUTH" http://localhost:$PORT/events \
+  -H 'Content-Type: application/json' \
+  -d '["todo/add","Buy milk"]'
 ```
 
 Response: `{"ok": true}`
-
-The JSON body is decoded into a Lua value and passed to the event system.
 
 ### `POST /click` -- synthetic click
 
@@ -140,6 +166,31 @@ curl -X POST -H "$AUTH" http://localhost:$PORT/click \
 Response: `{"ok": true}`
 
 Queues a `MouseEvent` with `button = LEFT` into the input event queue.
+
+### `POST /resize` -- resize the window
+
+```bash
+curl -X POST -H "$AUTH" -d '{"width":1280,"height":800}' \
+  http://localhost:$PORT/resize
+```
+
+Response: `{"ok": true}` on success; `400` if the body is not a JSON object or either dimension is outside `[100, 8192]`. Calls `rl.SetWindowSize`.
+
+### `POST /maximize` -- maximize the window
+
+```bash
+curl -X POST -H "$AUTH" http://localhost:$PORT/maximize
+```
+
+Response: `{"ok": true}`. Calls `rl.MaximizeWindow`.
+
+### `POST /restore` -- restore the window from maximized
+
+```bash
+curl -X POST -H "$AUTH" http://localhost:$PORT/restore
+```
+
+Response: `{"ok": true}`. Calls `rl.RestoreWindow`.
 
 ### `POST /shutdown` -- graceful shutdown
 
