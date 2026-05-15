@@ -268,4 +268,4 @@
                   [:button {:aspect :button-icon
                             :width 32 :height 32
                             :click [:test/remove i]}
-                   "×"]])]]])))
+                   "x"]])]]])))
