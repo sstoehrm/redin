@@ -99,6 +99,8 @@
 
 ;; ===== State =====
 
+(global redin_get_state (. dataflow :_get-raw-db))
+
 (dataflow.init {:items [{:text "Test 1"}
                         {:text "Test 2"}
                         {:text "Test 3"}
@@ -160,21 +162,15 @@
                                  from-idx ctx.from
                                  to-idx ctx.to
                                  items (get db :items [])]
-                             (when (and from-idx to-idx (> from-idx 0)
-                                        (<= from-idx (length items))
-                                        (> to-idx 0) (<= to-idx (length items))
+                             (when (and from-idx to-idx
+                                        (> from-idx 0) (<= from-idx (length items))
+                                        (> to-idx   0) (<= to-idx   (length items))
                                         (not= from-idx to-idx))
                                (let [item (. items from-idx)
                                      new-items (icollect [i v (ipairs items)]
                                                  (when (not= i from-idx) v))]
-                                 (let [insert-at (if (> from-idx to-idx) to-idx
-                                                     (- to-idx 1))]
-                                   (table.insert new-items
-                                                 (math.min insert-at
-                                                           (+ (length new-items)
-                                                              1))
-                                                 item)
-                                   (assoc db :items new-items)))))
+                                 (table.insert new-items to-idx item)
+                                 (assoc db :items new-items))))
                            db))
 
 ;; ===== Subscriptions =====
