@@ -63,12 +63,8 @@
                       :surface       {:bg [46 52 64]
                                       :padding [20 20 20 20]
                                       :radius 8}
-                      :surface-elev  {:bg [59 66 82]
-                                      :padding [12 16 12 16]
-                                      :radius 6}
                       :heading       {:font-size 22 :weight 1 :color [236 239 244]}
                       :body          {:font-size 14 :color [216 222 233]}
-                      :muted         {:font-size 13 :color [129 138 155]}
                       :count-badge   {:font-size 12 :color [129 138 155]}
 
                       ;; --- Rows ---
@@ -81,7 +77,7 @@
                                       :shadow [0 4 16 [0 0 0 120]]}
                       :row-drop-hot  {:bg [59 66 82]
                                       :border [136 192 208]
-                                      :border_width 2
+                                      :border-width 2
                                       :radius 4
                                       :padding [4 4 4 4]}
 
@@ -114,7 +110,7 @@
                                              :radius 6
                                              :padding [4 4 4 4]
                                              :font-size 16}
-                      :button-icon#hover    {:bg [59 66 82] :color [191 97 106]}
+                      :button-icon#hover    {:color [191 97 106]}
                       :button-icon#active   {:bg [76 86 106]}})
 
 ;; ===== State =====
