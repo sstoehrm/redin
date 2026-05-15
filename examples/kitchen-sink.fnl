@@ -74,17 +74,13 @@
                       :count-badge   {:font-size 12 :color [129 138 155]}
 
                       ;; --- Rows ---
-                      :row           {:padding [4 4 4 4] :radius 4}
-                      :row#hover     {:bg [59 66 82] :padding [4 4 4 4] :radius 4}
+                      :row           {:padding [4 4 4 4]}
+                      :row#hover     {:bg [59 66 82] :padding [4 4 4 4]}
                       :row-dragging  {:bg [94 129 172]
                                       :color [30 34 46]
                                       :padding [4 4 4 4]
-                                      :radius 4
                                       :shadow [0 4 16 [0 0 0 120]]}
-                      :row-drop-hot  {:bg [59 66 82]
-                                      :border [136 192 208]
-                                      :border-width 2
-                                      :radius 4
+                      :row-drop-hot  {:bg [60 90 110]
                                       :padding [4 4 4 4]}
 
                       ;; --- Drag-over list zone ---
@@ -217,7 +213,7 @@
               [:hbox
                {:height 32 :layout :center}
                [:text {:aspect :heading} "Todo List"]
-               [:vbox {:width :full}]
+               [:vbox {:width :full}] ; flex spacer
                [:text {:aspect :count-badge} (.. count " items")]]
               ;; Input + Add side by side.
               [:hbox
@@ -228,7 +224,7 @@
                         :value input-val
                         :change [:test/input]
                         :key [:test/add]}]
-               [:vbox {:width 8}]
+               [:vbox {:width 8}] ; 8px gap
                [:button {:aspect :button-primary
                          :width 72
                          :height 42
@@ -237,7 +233,7 @@
                                    :rect [:top_right -8 -8 16 16]
                                    :z :above}}
                 "Add"]]
-              [:vbox {:height 8}]
+              [:vbox {:height 8}] ; 8px gap before list
               ;; Scrollable list.
               [:vbox
                {:overflow :scroll-y
