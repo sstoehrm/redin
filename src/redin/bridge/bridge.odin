@@ -46,6 +46,7 @@ Bridge :: struct {
 	shell_client:    Shell_Client,
 	hot_reload:      Hot_Reload,
 	dev_server:      Dev_Server,
+	dev_mode:        bool,
 	frame_changed:   bool,
 	source_tree:     bool,
 }
@@ -125,6 +126,9 @@ init :: proc(b: ^Bridge) {
 // otherwise the first /frames request queues up against load_app and
 // can take seconds to respond, which breaks bb-side test timeouts (#132).
 start_devserver :: proc(b: ^Bridge) {
+	when REDIN_DEV {
+		b.dev_mode = true
+	}
 	when REDIN_DEV || REDIN_AGENT {
 		devserver_init(&b.dev_server, b)
 	}

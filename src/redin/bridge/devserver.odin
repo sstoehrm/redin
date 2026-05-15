@@ -758,16 +758,28 @@ process_request :: proc(ds: ^Dev_Server, req: ^Pending_Request) {
 		} else if req.path == "/input/key" {
 			handle_post_input_key(ds, ch, req.body)
 		} else if req.path == "/shutdown" {
-			ds.shutdown_requested = true
-			respond_json_ok(ch)
+			if ds.bridge.dev_mode {
+				ds.shutdown_requested = true
+				respond_json_ok(ch)
+			} else {
+				respond_text(ch, 404, "Not found")
+			}
 		} else if req.path == "/resize" {
 			handle_post_resize(ds, ch, req.body)
 		} else if req.path == "/maximize" {
-			rl.MaximizeWindow()
-			respond_json_ok(ch)
+			if ds.bridge.dev_mode {
+				rl.MaximizeWindow()
+				respond_json_ok(ch)
+			} else {
+				respond_text(ch, 404, "Not found")
+			}
 		} else if req.path == "/restore" {
-			rl.RestoreWindow()
-			respond_json_ok(ch)
+			if ds.bridge.dev_mode {
+				rl.RestoreWindow()
+				respond_json_ok(ch)
+			} else {
+				respond_text(ch, 404, "Not found")
+			}
 		} else {
 			respond_text(ch, 404, "Not found")
 		}
@@ -1589,6 +1601,10 @@ theme_to_json :: proc(b: ^strings.Builder, t: types.Theme) {
 // --- POST handlers ---
 
 handle_post_events :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string) {
+	if !ds.bridge.dev_mode {
+		respond_text(ch, 404, "Not found")
+		return
+	}
 	L := ds.bridge.L
 	lua_getglobal(L, "redin_events")
 	if lua_isnil(L, -1) {
@@ -1615,6 +1631,10 @@ handle_post_events :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string)
 }
 
 handle_post_click :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string) {
+	if !ds.bridge.dev_mode {
+		respond_text(ch, 404, "Not found")
+		return
+	}
 	// Issue #78 finding L2: previously this enqueued any (x,y) the
 	// client sent, including NaN, Infinity, negative, and screen-out-of-
 	// bounds values. /resize already validates and returns 400 on bad
@@ -1649,6 +1669,10 @@ handle_post_click :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string) 
 }
 
 handle_post_input_takeover :: proc(ds: ^Dev_Server, ch: ^Response_Channel) {
+	if !ds.bridge.dev_mode {
+		respond_text(ch, 404, "Not found")
+		return
+	}
 	if input.override.active {
 		respond_json_error(ch, 409, `{"error":"takeover already active"}`)
 		return
@@ -1658,6 +1682,10 @@ handle_post_input_takeover :: proc(ds: ^Dev_Server, ch: ^Response_Channel) {
 }
 
 handle_post_input_release :: proc(ds: ^Dev_Server, ch: ^Response_Channel) {
+	if !ds.bridge.dev_mode {
+		respond_text(ch, 404, "Not found")
+		return
+	}
 	if !input.override.active {
 		respond_json_error(ch, 409, `{"error":"takeover not active"}`)
 		return
@@ -1681,6 +1709,10 @@ read_mouse_button :: proc(L: ^Lua_State) -> (rl.MouseButton, bool) {
 }
 
 handle_post_input_mouse_move :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string) {
+	if !ds.bridge.dev_mode {
+		respond_text(ch, 404, "Not found")
+		return
+	}
 	if !input.override.active {
 		respond_json_error(ch, 409, `{"error":"takeover not active"}`)
 		return
@@ -1711,6 +1743,10 @@ handle_post_input_mouse_move :: proc(ds: ^Dev_Server, ch: ^Response_Channel, bod
 }
 
 handle_post_input_mouse_down :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string) {
+	if !ds.bridge.dev_mode {
+		respond_text(ch, 404, "Not found")
+		return
+	}
 	if !input.override.active {
 		respond_json_error(ch, 409, `{"error":"takeover not active"}`)
 		return
@@ -1761,6 +1797,10 @@ handle_post_input_mouse_down :: proc(ds: ^Dev_Server, ch: ^Response_Channel, bod
 }
 
 handle_post_input_mouse_up :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string) {
+	if !ds.bridge.dev_mode {
+		respond_text(ch, 404, "Not found")
+		return
+	}
 	if !input.override.active {
 		respond_json_error(ch, 409, `{"error":"takeover not active"}`)
 		return
@@ -1839,6 +1879,10 @@ key_string_to_raylib :: proc(s: string) -> (rl.KeyboardKey, bool) {
 }
 
 handle_post_input_key :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string) {
+	if !ds.bridge.dev_mode {
+		respond_text(ch, 404, "Not found")
+		return
+	}
 	L := ds.bridge.L
 	pos := 0
 	if !json_decode_value(L, body, &pos) {
@@ -1888,6 +1932,10 @@ handle_get_window :: proc(ch: ^Response_Channel) {
 }
 
 handle_post_resize :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string) {
+	if !ds.bridge.dev_mode {
+		respond_text(ch, 404, "Not found")
+		return
+	}
 	// Proper JSON decode. The previous `strings.index(body, "\"width\"")`
 	// approach parsed `{"widthless":999,"width":150}` as width=999 —
 	// still bounded by the 100..8192 clamp, but fragile enough that a
@@ -1927,6 +1975,10 @@ handle_post_resize :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string)
 // --- PUT handlers ---
 
 handle_put_aspects :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string) {
+	if !ds.bridge.dev_mode {
+		respond_text(ch, 404, "Not found")
+		return
+	}
 	L := ds.bridge.L
 	lua_getglobal(L, "require")
 	lua_pushstring(L, "theme")
