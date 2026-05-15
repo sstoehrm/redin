@@ -59,43 +59,63 @@
 
 ;; ===== Theme =====
 
-(theme-mod.set-theme {:surface {:bg [46 52 64]
-                                :padding [24 24 24 24]
-                                :opacity 0.5}
-                      :heading {:font-size 24 :color [236 239 244] :weight 1}
-                      :body {:font-size 14 :color [216 222 233]}
-                      :status-field {:font-size 14
-                                     :bg [26 32 34]
-                                     :color [216 222 233]
-                                     :border [255 255 255]
-                                     :border_width 2
-                                     :radius 4}
-                      :row {:padding [4 4 4 4]}
-                      :row-dragging {:bg [136 46 106]
-                                     :padding [4 4 4 4]
-                                     :radius 4}
-                      :row-drop-hot {:bg [76 86 106]
-                                     :padding [4 4 4 4]}
-                      :muted {:font-size 13 :color [76 86 106]}
-                      :muted-armed {:font-size 13
-                                    :color [76 86 106]
-                                    :bg [54 60 72]}
-                      :drag-handle {:bg [66 66 86]}
-                      :input {:bg [59 66 82]
-                              :color [236 239 244]
-                              :border [76 86 106]
-                              :border-width 1
-                              :radius 4
-                              :padding [8 12 8 12]
-                              :font-size 14}
-                      :input#focus {:border [136 192 208]}
-                      :button {:bg [76 86 106]
-                               :color [236 239 244]
-                               :radius 6
-                               :padding [6 14 6 14]
-                               :font-size 13}
-                      :button#hover {:bg [94 105 126]}
-                      :button#active {:bg [59 66 82]}})
+(theme-mod.set-theme {;; --- Surfaces / text ---
+                      :surface       {:bg [46 52 64]
+                                      :padding [20 20 20 20]
+                                      :radius 8}
+                      :surface-elev  {:bg [59 66 82]
+                                      :padding [12 16 12 16]
+                                      :radius 6}
+                      :heading       {:font-size 22 :weight 1 :color [236 239 244]}
+                      :body          {:font-size 14 :color [216 222 233]}
+                      :muted         {:font-size 13 :color [129 138 155]}
+                      :count-badge   {:font-size 12 :color [129 138 155]}
+
+                      ;; --- Rows ---
+                      :row           {:padding [4 4 4 4] :radius 4}
+                      :row#hover     {:bg [59 66 82] :padding [4 4 4 4] :radius 4}
+                      :row-dragging  {:bg [94 129 172]
+                                      :color [30 34 46]
+                                      :padding [4 4 4 4]
+                                      :radius 4
+                                      :shadow [0 4 16 [0 0 0 120]]}
+                      :row-drop-hot  {:bg [59 66 82]
+                                      :border [136 192 208]
+                                      :border_width 2
+                                      :radius 4
+                                      :padding [4 4 4 4]}
+
+                      ;; --- Drag-over list zone ---
+                      :muted-armed   {:font-size 13
+                                      :color [129 138 155]
+                                      :bg [54 60 72]}
+
+                      ;; --- Input ---
+                      :input         {:bg [59 66 82]
+                                      :color [236 239 244]
+                                      :border [76 86 106]
+                                      :border-width 1
+                                      :radius 4
+                                      :padding [8 12 8 12]
+                                      :font-size 14}
+                      :input#focus   {:border [136 192 208]}
+
+                      ;; --- Buttons ---
+                      :button-primary       {:bg [136 192 208]
+                                             :color [30 34 46]
+                                             :radius 6
+                                             :padding [6 14 6 14]
+                                             :font-size 13
+                                             :weight 1}
+                      :button-primary#hover {:bg [143 188 187]}
+                      :button-primary#active {:bg [122 162 175]}
+                      :button-icon          {:bg [59 66 82]
+                                             :color [129 138 155]
+                                             :radius 6
+                                             :padding [4 4 4 4]
+                                             :font-size 16}
+                      :button-icon#hover    {:bg [59 66 82] :color [191 97 106]}
+                      :button-icon#active   {:bg [76 86 106]}})
 
 ;; ===== State =====
 
