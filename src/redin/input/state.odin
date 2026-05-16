@@ -44,6 +44,8 @@ state_destroy :: proc() {
 	state.selection_path = {}
 	delete(gesture.anchor_path)
 	gesture.anchor_path = {}
+	delete(hovered_indices)
+	hovered_indices = {}
 }
 
 // Called when an input gains focus. Copies the node's value into the editing buffer.

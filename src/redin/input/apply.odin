@@ -13,6 +13,11 @@ apply_listeners :: proc(
 	if focused_idx >= len(node_rects) {
 		focused_idx = -1
 	}
+	if active_idx >= len(node_rects) {
+		active_idx = -1
+	}
+
+	press_this_frame := false
 
 	for event in events {
 		switch e in event {
@@ -43,11 +48,19 @@ apply_listeners :: proc(
 				append(&applied, types.ApplyEvents(types.ApplyFocus{idx = new_focus}))
 			}
 			if has_active {
-				append(&applied, types.ApplyEvents(types.ApplyActive{idx = winner}))
+				active_idx = winner
+				press_this_frame = true
 			}
 
 		case types.KeyEvent, types.CharEvent, types.ScrollEvent, types.ResizeEvent:
 		}
+	}
+
+	// Clear active_idx the frame the button comes up, but never on the
+	// same frame as the press (so a single-frame click still shows
+	// active for at least one rendered frame).
+	if !press_this_frame && !is_mouse_button_down(.LEFT) {
+		active_idx = -1
 	}
 
 	return applied
