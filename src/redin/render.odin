@@ -699,11 +699,11 @@ draw_subtree_translated :: proc(
 		draw_subtree_children_translated(idx, delta, nodes, children_list, theme)
 	case types.NodeVbox:
 		aspect := is_root ? override_aspect_for_root : n.aspect
-		draw_box_chrome(idx, rect, aspect, theme)
+		draw_box_chrome(-1, rect, aspect, theme)
 		draw_subtree_children_translated(idx, delta, nodes, children_list, theme)
 	case types.NodeHbox:
 		aspect := is_root ? override_aspect_for_root : n.aspect
-		draw_box_chrome(idx, rect, aspect, theme)
+		draw_box_chrome(-1, rect, aspect, theme)
 		draw_subtree_children_translated(idx, delta, nodes, children_list, theme)
 	case types.NodeButton:
 		b := n
