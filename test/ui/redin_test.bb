@@ -422,17 +422,11 @@
       (throw (ex-info "screenshot is not a PNG" {:byte-idx i}))))
   [(read-be-int bytes 16) (read-be-int bytes 20)])
 
-(defn- png-read-be-int [^bytes b offset]
-  (bit-or (bit-shift-left (bit-and (aget b offset) 0xff) 24)
-          (bit-shift-left (bit-and (aget b (+ offset 1)) 0xff) 16)
-          (bit-shift-left (bit-and (aget b (+ offset 2)) 0xff) 8)
-          (bit-and (aget b (+ offset 3)) 0xff)))
-
 (defn- png-collect-idat [^bytes b]
   (let [baos (java.io.ByteArrayOutputStream.)]
     (loop [pos 8]
       (when (< pos (alength b))
-        (let [chunk-len (png-read-be-int b pos)
+        (let [chunk-len (read-be-int b pos)
               chunk-type (subs (String. b (+ pos 4) 4 "ASCII") 0 4)]
           (when (= chunk-type "IDAT")
             (.write baos b (+ pos 8) chunk-len))
@@ -440,7 +434,7 @@
     (.toByteArray baos)))
 
 (defn- png-paeth [a b c]
-  (let [p  (+ (- a b) c)
+  (let [p  (- (+ a b) c)
         pa (Math/abs (- p a))
         pb (Math/abs (- p b))
         pc (Math/abs (- p c))]
@@ -454,8 +448,8 @@
    large screenshots. Raylib encodes screenshots as RGBA PNGs. Uses
    java.util.zip (Babashka built-in) — no external dependencies."
   [^bytes png-bytes x y]
-  (let [width  (png-read-be-int png-bytes 16)
-        height (png-read-be-int png-bytes 20)
+  (let [width  (read-be-int png-bytes 16)
+        height (read-be-int png-bytes 20)
         bpp    4   ; Raylib screenshot PNGs are RGBA
         stride (+ 1 (* width bpp))
         idat   (png-collect-idat png-bytes)
