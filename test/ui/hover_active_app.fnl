@@ -11,7 +11,8 @@
 (local dataflow (require :dataflow))
 (local theme-mod (require :theme))
 
-(theme-mod.set-theme {:bg-fill {:bg [0 0 0]}
+(theme-mod.set-theme {:bg-fill {:bg [0 0 0]
+                               :padding [50 0 0 50]}
                       :btn         {:bg [50 50 50]
                                     :color [255 255 255]
                                     :radius 0
