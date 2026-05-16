@@ -372,7 +372,7 @@
          (fn)
          (println "PASS")
          (swap! results update :passed inc)
-         (catch Exception e
+         (catch Throwable e
            (println "FAIL")
            (println (str "    " (.getMessage e)))
            (swap! results update :failed inc)
@@ -421,6 +421,76 @@
     (when (not= (aget bytes i) (aget png-signature i))
       (throw (ex-info "screenshot is not a PNG" {:byte-idx i}))))
   [(read-be-int bytes 16) (read-be-int bytes 20)])
+
+(defn- png-read-be-int [^bytes b offset]
+  (bit-or (bit-shift-left (bit-and (aget b offset) 0xff) 24)
+          (bit-shift-left (bit-and (aget b (+ offset 1)) 0xff) 16)
+          (bit-shift-left (bit-and (aget b (+ offset 2)) 0xff) 8)
+          (bit-and (aget b (+ offset 3)) 0xff)))
+
+(defn- png-collect-idat [^bytes b]
+  (let [baos (java.io.ByteArrayOutputStream.)]
+    (loop [pos 8]
+      (when (< pos (alength b))
+        (let [chunk-len (png-read-be-int b pos)
+              chunk-type (subs (String. b (+ pos 4) 4 "ASCII") 0 4)]
+          (when (= chunk-type "IDAT")
+            (.write baos b (+ pos 8) chunk-len))
+          (recur (+ pos 4 4 chunk-len 4)))))
+    (.toByteArray baos)))
+
+(defn- png-paeth [a b c]
+  (let [p  (+ (- a b) c)
+        pa (Math/abs (- p a))
+        pb (Math/abs (- p b))
+        pc (Math/abs (- p c))]
+    (cond (<= pa (min pb pc)) a
+          (<= pb pc)          b
+          :else               c)))
+
+(defn screenshot-pixel
+  "Read RGB at (x,y) from PNG bytes. Returns [r g b].
+   Only decompresses and unfilters rows 0..y, so it is fast even for
+   large screenshots. Raylib encodes screenshots as RGBA PNGs. Uses
+   java.util.zip (Babashka built-in) — no external dependencies."
+  [^bytes png-bytes x y]
+  (let [width  (png-read-be-int png-bytes 16)
+        height (png-read-be-int png-bytes 20)
+        bpp    4   ; Raylib screenshot PNGs are RGBA
+        stride (+ 1 (* width bpp))
+        idat   (png-collect-idat png-bytes)
+        n-rows (inc (int y))
+        need   (* n-rows stride)
+        bais   (java.io.ByteArrayInputStream. idat)
+        iis    (java.util.zip.InflaterInputStream. bais)
+        raw    (byte-array need)
+        _      (.readNBytes iis raw 0 need)
+        out    (byte-array (* n-rows (* width bpp)))
+        ub     (fn [v] (bit-and v 0xff))]
+    (doseq [row (range n-rows)]
+      (let [row-start    (* row stride)
+            filter-type  (ub (aget raw row-start))
+            out-row-off  (* row (* width bpp))]
+        (doseq [i (range (* width bpp))]
+          (let [raw-idx (+ row-start 1 i)
+                out-idx (+ out-row-off i)
+                xv      (ub (aget raw raw-idx))
+                a       (if (>= i bpp)     (ub (aget out (- out-idx bpp))) 0)
+                b       (if (> row 0)      (ub (aget out (- out-idx (* width bpp)))) 0)
+                c       (if (and (>= i bpp) (> row 0))
+                          (ub (aget out (- out-idx (+ (* width bpp) bpp)))) 0)
+                val     (case filter-type
+                          0 xv
+                          1 (mod (+ xv a) 256)
+                          2 (mod (+ xv b) 256)
+                          3 (mod (+ xv (quot (+ a b) 2)) 256)
+                          4 (mod (+ xv (png-paeth a b c)) 256)
+                          xv)]
+            (aset out out-idx (unchecked-byte val))))))
+    (let [idx (* (+ (* (int y) width) (int x)) bpp)]
+      [(ub (aget out idx))
+       (ub (aget out (+ idx 1)))
+       (ub (aget out (+ idx 2)))])))
 
 (defn wait-ms
   "Sleep for n milliseconds. Prefer wait-for."
