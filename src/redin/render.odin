@@ -581,25 +581,24 @@ draw_node :: proc(
 		draw_box_children(idx, content_rect, n.overflow, false, nodes, children_list, theme)
 	case types.NodeCanvas:
 		if len(n.aspect) > 0 {
-			if t, ok := theme[n.aspect]; ok {
-				draw_shadow(rect, t.shadow, t.radius)
-				if t.bg != {} {
-					bg := rl.Color{t.bg[0], t.bg[1], t.bg[2], 255}
-					if t.radius > 0 {
-						roundness := f32(t.radius) / min(rect.width, rect.height) * 2
-						rl.DrawRectangleRounded(rect, roundness, 6, bg)
-					} else {
-						rl.DrawRectangleRec(rect, bg)
-					}
+			t := resolve_themed_aspect(idx, n.aspect, theme)
+			draw_shadow(rect, t.shadow, t.radius)
+			if t.bg != {} {
+				bg := rl.Color{t.bg[0], t.bg[1], t.bg[2], 255}
+				if t.radius > 0 {
+					roundness := f32(t.radius) / min(rect.width, rect.height) * 2
+					rl.DrawRectangleRounded(rect, roundness, 6, bg)
+				} else {
+					rl.DrawRectangleRec(rect, bg)
 				}
-				if t.border != {} && t.border_width > 0 {
-					border := rl.Color{t.border[0], t.border[1], t.border[2], 255}
-					if t.radius > 0 {
-						roundness := f32(t.radius) / min(rect.width, rect.height) * 2
-						rl.DrawRectangleRoundedLinesEx(rect, roundness, 6, f32(t.border_width), border)
-					} else {
-						rl.DrawRectangleLinesEx(rect, f32(t.border_width), border)
-					}
+			}
+			if t.border != {} && t.border_width > 0 {
+				border := rl.Color{t.border[0], t.border[1], t.border[2], 255}
+				if t.radius > 0 {
+					roundness := f32(t.radius) / min(rect.width, rect.height) * 2
+					rl.DrawRectangleRoundedLinesEx(rect, roundness, 6, f32(t.border_width), border)
+				} else {
+					rl.DrawRectangleLinesEx(rect, f32(t.border_width), border)
 				}
 			}
 		}
@@ -1204,16 +1203,6 @@ draw_input :: proc(
 	// Theme selection color; fall back to the legacy blue when the aspect
 	// does not set :selection (sentinel is all-zero).
 	selection_color := rl.Color{51, 153, 255, 100}
-	if len(n.aspect) > 0 {
-		if aspect, ok := theme[n.aspect]; ok {
-			if aspect.selection != ([4]u8{}) {
-				selection_color = rl.Color{
-					aspect.selection[0], aspect.selection[1],
-					aspect.selection[2], aspect.selection[3],
-				}
-			}
-		}
-	}
 	font_size: f32 = 14
 	padding_l: f32 = 4
 	padding_r: f32 = 4
@@ -1226,6 +1215,12 @@ draw_input :: proc(
 
 	if len(n.aspect) > 0 {
 		t := resolve_themed_aspect(idx, n.aspect, theme)
+		if t.selection != ([4]u8{}) {
+			selection_color = rl.Color{
+				t.selection[0], t.selection[1],
+				t.selection[2], t.selection[3],
+			}
+		}
 		if t.border != {} do border_color = rl.Color{t.border[0], t.border[1], t.border[2], 255}
 		if t.bg != {} do bg_color = rl.Color{t.bg[0], t.bg[1], t.bg[2], 255}
 		if t.color != {} do text_color = rl.Color{t.color[0], t.color[1], t.color[2], 255}
