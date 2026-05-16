@@ -443,13 +443,17 @@
           :else               c)))
 
 (defn screenshot-pixel
-  "Read RGB at (x,y) from PNG bytes. Returns [r g b].
-   Only decompresses and unfilters rows 0..y, so it is fast even for
-   large screenshots. Raylib encodes screenshots as RGBA PNGs. Uses
-   java.util.zip (Babashka built-in) — no external dependencies."
+  "Read RGB at (x,y) from a PNG byte array. Returns [r g b].
+   Lightweight, partial decoder (Babashka doesn't ship javax.imageio):
+   concatenates IDAT chunks, then short-circuits the inflate + unfilter
+   loop after row y. Supports PNG colour types 2 (RGB) and 6 (RGBA),
+   8-bit. Throws on out-of-bounds coordinates."
   [^bytes png-bytes x y]
   (let [width  (read-be-int png-bytes 16)
         height (read-be-int png-bytes 20)
+        _      (when (or (< x 0) (< y 0) (>= x width) (>= y height))
+                 (throw (ex-info "screenshot-pixel: coordinate out of bounds"
+                                 {:x x :y y :width width :height height})))
         bpp    4   ; Raylib screenshot PNGs are RGBA
         stride (+ 1 (* width bpp))
         idat   (png-collect-idat png-bytes)
