@@ -22,6 +22,7 @@ apply_listeners :: proc(
 	for event in events {
 		switch e in event {
 		case types.MouseEvent:
+			if scrollbar_consumed_press do continue
 			if e.button != .LEFT do continue
 			mouse := rl.Vector2{e.x, e.y}
 

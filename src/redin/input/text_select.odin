@@ -32,6 +32,7 @@ process_text_selection :: proc(
 	for event in input_events {
 		me, is_mouse := event.(types.MouseEvent)
 		if !is_mouse || me.button != .LEFT do continue
+		if scrollbar_consumed_press do continue
 		pt := rl.Vector2{me.x, me.y}
 
 		hit := false

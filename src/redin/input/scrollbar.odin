@@ -22,6 +22,13 @@ Scrollbar_State :: union { Scrollbar_Hovering, Scrollbar_Dragging }
 
 scrollbar: Scrollbar_State
 
+// True for the rest of the frame after apply_scrollbar consumed a
+// press. Other consumers (apply_listeners, process_text_selection,
+// drag_update) skip their MouseEvent paths so a press on the bar
+// doesn't also fire clicks / selections / app-drags on whatever sits
+// behind the scrollbar.
+scrollbar_consumed_press: bool
+
 // container_idx of the scrollbar state, regardless of variant.
 // Returns -1 if scrollbar is idle.
 scrollbar_container_idx :: proc() -> int {
@@ -40,6 +47,8 @@ apply_scrollbar :: proc(
 	scroll_offsets: ^map[int]f32,
 	theme:          map[string]types.Theme,
 ) -> (consumed_press: bool) {
+	scrollbar_consumed_press = false
+
 	// Re-flatten safety.
 	if idx := scrollbar_container_idx(); idx >= 0 && idx >= len(node_rects) {
 		scrollbar = nil
@@ -186,6 +195,7 @@ apply_scrollbar :: proc(
 		}
 	}
 
+	scrollbar_consumed_press = consumed_press
 	return consumed_press
 }
 
