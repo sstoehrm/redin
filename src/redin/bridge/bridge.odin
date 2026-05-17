@@ -686,8 +686,8 @@ lua_canvas_draw :: proc(b: ^Bridge, name: string, rect: rl.Rectangle) {
 }
 
 execute_canvas_commands :: proc(L: ^Lua_State, buf_idx: i32, rect: rl.Rectangle) {
-	rl.BeginScissorMode(i32(rect.x), i32(rect.y), i32(rect.width), i32(rect.height))
-	defer rl.EndScissorMode()
+	push_scissor(rect)
+	defer pop_scissor()
 
 	n := i32(lua_objlen(L, buf_idx))
 	for i: i32 = 1; i <= n; i += 1 {
