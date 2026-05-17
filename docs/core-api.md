@@ -621,7 +621,7 @@ Click injects a `MouseEvent` into the input queue, which is processed on the nex
 | Method | Path           | Body | Response                                                                 |
 | ------ | -------------- | ---- | ------------------------------------------------------------------------ |
 | GET    | `/scroll-info` | --   | Per-node scroll state: `{"<idx>":{"total":N,"off":N}, ...}`. Empty when no scrollable nodes. |
-| GET    | `/cursor`      | --   | Current mouse-cursor kind: `{"kind":"default\|resize-ns\|resize-ew\|pointing-hand\|ibeam\|resize-all"}`. |
+| GET    | `/cursor`      | --   | Current mouse-cursor kind: `{"kind":"<name>"}` where `<name>` is one of `default`, `arrow`, `ibeam`, `crosshair`, `pointing-hand`, `resize-ew`, `resize-ns`, `resize-nwse`, `resize-nesw`, `resize-all`, `not-allowed`. |
 
 `GET /scroll-info` returns the clamped scroll offset and total child size for every scrollable container that was laid out in the last frame. `GET /cursor` returns the name of the cursor most recently passed to `rl.SetMouseCursor`.
 

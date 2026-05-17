@@ -147,7 +147,7 @@ acceptor plus a 4-handler worker pool (up to 4 in flight at a time).
 | `POST` | `/input/key` | Synthesise one KeyEvent (`{key, mods?}`). Does not require takeover. |
 | `POST` | `/input/scroll` | Synthesise one ScrollEvent (`{x,y,delta_x,delta_y}`). Drives `scroll-y` / `scroll-x` containers; does not require takeover. |
 | `GET`  | `/scroll-info` | Per-node scroll state: `{"<idx>":{"total":N,"off":N}, ...}`. Empty when no scrollable nodes. |
-| `GET`  | `/cursor` | Current mouse-cursor kind: `{"kind":"default\|resize-ns\|resize-ew\|pointing-hand\|ibeam\|resize-all"}`. |
+| `GET`  | `/cursor` | Current mouse-cursor kind: `{"kind":"<name>"}` where `<name>` is one of `default`, `arrow`, `ibeam`, `crosshair`, `pointing-hand`, `resize-ew`, `resize-ns`, `resize-nwse`, `resize-nesw`, `resize-all`, `not-allowed`. |
 | `GET`  | `/agent/nodes` | List `:agent`-tagged nodes (REDIN_AGENT only). |
 | `GET`  | `/agent/content/<id>` | Read content (REDIN_AGENT only). |
 | `PUT`  | `/agent/content/<id>` | Write content; node must be `:agent :edit` (REDIN_AGENT only). |

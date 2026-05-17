@@ -84,7 +84,7 @@ Dev_Server :: struct {
 	current_rects:       []rl.Rectangle,          // borrowed during a poll cycle, nil otherwise
 	current_scroll_info: map[int]types.Scroll_Info, // borrowed during a poll cycle, nil otherwise
 	running:             bool,
-	shutdown_requested: bool,
+	shutdown_requested:  bool,
 }
 
 PORT_FILE  :: ".redin-port"
