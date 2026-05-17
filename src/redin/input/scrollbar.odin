@@ -111,3 +111,18 @@ scrollbar_bar_thickness :: proc(theme: map[string]types.Theme) -> int {
 	}
 	return 4
 }
+
+// Pure drag-math: map a new thumb top-y (relative to gutter top) to the
+// corresponding scroll offset. Clamps both endpoints. Pure function;
+// tested in scrollbar_test.odin.
+drag_offset_for_thumb_y :: proc(
+	new_thumb_y_in_gutter: f32,
+	max_thumb_travel: f32,
+	max_scroll: f32,
+) -> f32 {
+	if max_thumb_travel <= 0 || max_scroll <= 0 do return 0
+	y := new_thumb_y_in_gutter
+	if y < 0                 do y = 0
+	if y > max_thumb_travel  do y = max_thumb_travel
+	return y / max_thumb_travel * max_scroll
+}
