@@ -174,6 +174,33 @@ Base aspects are applied first, then state variants for each in the same order.
 
 ---
 
+## Scrollbar aspect
+
+The `:scrollbar` aspect family controls the appearance of scrollbars in scrollable containers (`:overflow :scroll-y` on vbox, `:overflow :scroll-x` on hbox).
+
+#### `:scrollbar`
+
+Bar drawn at the right (`scroll-y`) or bottom (`scroll-x`) edge of a scrollable container. Supported state variants: `#hover` and `#active`.
+
+| Field          | Meaning |
+|----------------|---------|
+| `:bg`          | Thumb fill colour (`[r g b]`). |
+| `:opacity`     | Thumb alpha (0..1). Default 0.47 — light grey, sits visually quiet on most backgrounds. |
+| `:radius`      | Thumb corner radius. Default 2. |
+| `:border-width`| Bar thickness in pixels. Default 4. |
+
+`#hover` fires while the cursor is over the bar gutter (visible bar + 4px each side). `#active` fires while the bar is being dragged. Active wins over hover when both apply, CSS-style.
+
+Defaults bundled in `src/runtime/markdown.fnl`:
+
+```fennel
+:scrollbar         {:bg [200 200 200] :opacity 0.47 :radius 2 :border-width 4}
+:scrollbar#hover   {:bg [200 200 200] :opacity 0.71}
+:scrollbar#active  {:bg [230 230 230] :opacity 0.78}
+```
+
+---
+
 ## Naming conventions
 
 Aspects should be named by role, not by appearance.

@@ -25,7 +25,14 @@
 
    ;; Inline code (read by span renderer; only font is consumed here —
    ;; bg / color come through resolve too if user overrides).
-   :md/code         {:font :mono :font-size 16 :color [240 240 240] :bg [60 60 70]}})
+   :md/code         {:font :mono :font-size 16 :color [240 240 240] :bg [60 60 70]}
+
+   ;; Scrollbar track/thumb defaults.  Rendered by draw_box_children;
+   ;; override via :scrollbar, :scrollbar#hover, :scrollbar#active in
+   ;; the app theme.  border-width doubles as thumb thickness here.
+   :scrollbar        {:bg [200 200 200] :opacity 0.47 :radius 2 :border-width 4}
+   :scrollbar#hover  {:bg [200 200 200] :opacity 0.71}
+   :scrollbar#active {:bg [230 230 230] :opacity 0.78}})
 
 (fn M.install []
   (theme.set-defaults defaults))

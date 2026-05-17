@@ -118,11 +118,7 @@ scroll_offsets_x: map[int]f32
 // Scroll metadata captured during layout_box for scrollable containers.
 // Read in draw_box_children to position the scrollbar without re-running
 // the recursive size pass.
-Scroll_Info :: struct {
-	total: f32, // sum of child sizes on the scroll axis
-	off:   f32, // clamped scroll offset
-}
-node_scroll_info: map[int]Scroll_Info
+node_scroll_info: map[int]types.Scroll_Info
 
 // Intrinsic-height cache lives in text_pkg, keyed by node idx. It
 // serves both roles: same-frame dedup (layout_box size + emission
@@ -420,7 +416,7 @@ layout_box :: proc(
 	}
 
 	if scrollable {
-		node_scroll_info[idx] = Scroll_Info{total = fixed_total, off = scroll_off}
+		node_scroll_info[idx] = types.Scroll_Info{total = fixed_total, off = scroll_off}
 	}
 
 	anchor_h: int = 0; anchor_v: int = 0
@@ -843,6 +839,51 @@ effective_aspect_for_drag :: proc(idx: int, base_aspect: string, n: types.Node) 
 	return base_aspect
 }
 
+// Resolve :scrollbar with #hover / #active overlays based on the
+// current input.scrollbar state. Active wins over hover, CSS-style.
+resolve_scrollbar_theme :: proc(idx: int, theme: map[string]types.Theme) -> types.Theme {
+	result: types.Theme
+	if base, ok := theme["scrollbar"]; ok do result = base
+	if input.scrollbar_container_idx() == idx {
+		switch s in input.scrollbar {
+		case input.Scrollbar_Hovering:
+			if t, ok := theme["scrollbar#hover"]; ok do overlay_theme(&result, t)
+		case input.Scrollbar_Dragging:
+			if t, ok := theme["scrollbar#hover"]; ok do overlay_theme(&result, t)
+			if t, ok := theme["scrollbar#active"]; ok do overlay_theme(&result, t)
+		}
+	}
+	return result
+}
+
+scrollbar_color :: proc(t: types.Theme) -> rl.Color {
+	r := t.bg[0] if t.bg != {} else u8(200)
+	g := t.bg[1] if t.bg != {} else u8(200)
+	b := t.bg[2] if t.bg != {} else u8(200)
+	alpha: u8 = 120
+	if t.opacity > 0 && t.opacity < 1 do alpha = u8(t.opacity * 255)
+	return rl.Color{r, g, b, alpha}
+}
+
+// Field-by-field non-zero overlay, same shape as resolve_themed_aspect's
+// inner `overlay` proc. Lifted out for reuse here.
+overlay_theme :: proc(out: ^types.Theme, src: types.Theme) {
+	if src.bg != {}            do out.bg = src.bg
+	if src.color != {}         do out.color = src.color
+	if src.border != {}        do out.border = src.border
+	if src.border_width > 0    do out.border_width = src.border_width
+	if src.radius > 0          do out.radius = src.radius
+	if src.padding != {}       do out.padding = src.padding
+	if src.font_size > 0       do out.font_size = src.font_size
+	if len(src.font) > 0       do out.font = src.font
+	if src.weight > 0          do out.weight = src.weight
+	if src.line_height > 0     do out.line_height = src.line_height
+	if src.opacity > 0         do out.opacity = src.opacity
+	if src.shadow != {}        do out.shadow = src.shadow
+	if src.selection != {}     do out.selection = src.selection
+	if src.text_align != .Auto do out.text_align = src.text_align
+}
+
 draw_box_children :: proc(
 	idx: int,
 	content_rect: rl.Rectangle,
@@ -889,26 +930,32 @@ draw_box_children :: proc(
 		scroll_off := info.off
 
 		if scrollable_y && fixed_total > content_rect.height {
-			bar_w: f32 = 4
+			t := resolve_scrollbar_theme(idx, theme)
+			bar_w := f32(t.border_width if t.border_width > 0 else 4)
 			bar_x := content_rect.x + content_rect.width - bar_w
 			visible_ratio := content_rect.height / fixed_total
 			bar_h := max(content_rect.height * visible_ratio, 20)
 			max_scroll := fixed_total - content_rect.height
 			scroll_ratio := scroll_off / max_scroll if max_scroll > 0 else 0
 			bar_y := content_rect.y + scroll_ratio * (content_rect.height - bar_h)
+			roundness := f32(t.radius * 2) / bar_w if bar_w > 0 else 1
 			rl.DrawRectangleRounded(
-				{bar_x, bar_y, bar_w, bar_h}, 1, 4, rl.Color{200, 200, 200, 120},
+				{bar_x, bar_y, bar_w, bar_h}, roundness, 4,
+				scrollbar_color(t),
 			)
 		} else if scrollable_x && fixed_total > content_rect.width {
-			bar_h: f32 = 4
+			t := resolve_scrollbar_theme(idx, theme)
+			bar_h := f32(t.border_width if t.border_width > 0 else 4)
 			bar_y := content_rect.y + content_rect.height - bar_h
 			visible_ratio := content_rect.width / fixed_total
 			bar_w := max(content_rect.width * visible_ratio, 20)
 			max_scroll := fixed_total - content_rect.width
 			scroll_ratio := scroll_off / max_scroll if max_scroll > 0 else 0
 			bar_x := content_rect.x + scroll_ratio * (content_rect.width - bar_w)
+			roundness := f32(t.radius * 2) / bar_h if bar_h > 0 else 1
 			rl.DrawRectangleRounded(
-				{bar_x, bar_y, bar_w, bar_h}, 1, 4, rl.Color{200, 200, 200, 120},
+				{bar_x, bar_y, bar_w, bar_h}, roundness, 4,
+				scrollbar_color(t),
 			)
 		}
 	}

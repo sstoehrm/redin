@@ -616,6 +616,15 @@ PUT calls into Lua (`theme.set-theme`) to replace the theme, which also updates 
 
 Click injects a `MouseEvent` into the input queue, which is processed on the next frame.
 
+### Scroll & cursor inspection
+
+| Method | Path           | Body | Response                                                                 |
+| ------ | -------------- | ---- | ------------------------------------------------------------------------ |
+| GET    | `/scroll-info` | --   | Per-node scroll state: `{"<idx>":{"total":N,"off":N}, ...}`. Empty when no scrollable nodes. |
+| GET    | `/cursor`      | --   | Current mouse-cursor kind: `{"kind":"<name>"}` where `<name>` is one of `default`, `arrow`, `ibeam`, `crosshair`, `pointing-hand`, `resize-ew`, `resize-ns`, `resize-nwse`, `resize-nesw`, `resize-all`, `not-allowed`. |
+
+`GET /scroll-info` returns the clamped scroll offset and total child size for every scrollable container that was laid out in the last frame. `GET /cursor` returns the name of the cursor most recently passed to `rl.SetMouseCursor`.
+
 ### Window
 
 | Method | Path        | Body                              | Response                                |

@@ -270,6 +270,18 @@
   ([x y delta-x delta-y]
    (post-json "/input/scroll" {:x x :y y :delta_x delta-x :delta_y delta-y})))
 
+(defn scroll-info
+  "Fetch the per-node scroll state via GET /scroll-info.
+   Returns a map keyed by node idx (string) → {:total N :off N}."
+  []
+  (get-json "/scroll-info"))
+
+(defn cursor-kind
+  "Fetch the current mouse cursor kind via GET /cursor.
+   Returns a keyword like :default, :resize-ns, :pointing-hand."
+  []
+  (keyword (:kind (get-json "/cursor"))))
+
 (defn rect-of
   "Read the :rect attr from a frame node and return {:x :y :w :h}.
    Returns nil if the node has no :rect (e.g. layout not yet computed)."

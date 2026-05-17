@@ -169,6 +169,7 @@ process_drag :: proc(
 
 	switch &s in drag {
 	case nil, Drag_Idle:
+		if scrollbar_consumed_press do return dispatch
 		// Mouse-down on a DragListener → Pending.
 		for event in input_events {
 			me, is_mouse := event.(types.MouseEvent)

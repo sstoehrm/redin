@@ -219,7 +219,7 @@ run :: proc(cfg: Config) {
 
 		// --- Devserver: drain pending HTTP requests ---
 		s_ds := profile.begin(.Devserver)
-		bridge.poll_devserver(&b, &input_events, node_rects[:])
+		bridge.poll_devserver(&b, &input_events, node_rects[:], node_scroll_info)
 		profile.end(s_ds)
 
 		// --- Bridge: all Lua-side work ---
@@ -271,6 +271,13 @@ run :: proc(cfg: Config) {
 		defer delete(drag_events)
 
 		input.process_text_selection(input_events[:], listeners[:], b.nodes[:], b.paths[:], node_rects[:], b.theme)
+
+		scrollbar_consumed := input.apply_scrollbar(
+			input_events[:], b.nodes[:], node_rects[:],
+			node_scroll_info, &scroll_offsets, b.theme,
+		)
+		_ = scrollbar_consumed // hooked up by gating tasks (10) later
+
 		input.set_hover_cursor(listeners[:], node_rects[:])
 		profile.end(s_input2a)
 

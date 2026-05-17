@@ -81,9 +81,10 @@ Dev_Server :: struct {
 	handler_threads:    [HANDLER_POOL_SIZE]^thread.Thread,
 	incoming:           Sync_Queue,
 	event_queue:        [dynamic]types.InputEvent,
-	current_rects:      []rl.Rectangle, // borrowed during a poll cycle, nil otherwise
-	running:            bool,
-	shutdown_requested: bool,
+	current_rects:       []rl.Rectangle,          // borrowed during a poll cycle, nil otherwise
+	current_scroll_info: map[int]types.Scroll_Info, // borrowed during a poll cycle, nil otherwise
+	running:             bool,
+	shutdown_requested:  bool,
 }
 
 PORT_FILE  :: ".redin-port"
@@ -737,6 +738,10 @@ process_request :: proc(ds: ^Dev_Server, req: ^Pending_Request) {
 			handle_screenshot(ch)
 		} else if req.path == "/window" {
 			handle_get_window(ch)
+		} else if req.path == "/scroll-info" {
+			handle_get_scroll_info(ds, ch)
+		} else if req.path == "/cursor" {
+			handle_get_cursor(ds, ch)
 		} else {
 			respond_text(ch, 404, "Not found")
 		}
@@ -1959,6 +1964,41 @@ handle_post_input_scroll :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: s
 		x = x, y = y, delta_x = dx, delta_y = dy,
 	}))
 	respond_json_ok(ch)
+}
+
+handle_get_scroll_info :: proc(ds: ^Dev_Server, ch: ^Response_Channel) {
+	b := strings.builder_make()
+	defer strings.builder_destroy(&b)
+	strings.write_string(&b, "{")
+	first := true
+	for idx, info in ds.current_scroll_info {
+		if !first do strings.write_string(&b, ",")
+		first = false
+		fmt.sbprintf(&b, `"%d":{{"total":%g,"off":%g}}`, idx, info.total, info.off)
+	}
+	strings.write_string(&b, "}")
+	respond_json(ch, strings.to_string(b))
+}
+
+handle_get_cursor :: proc(ds: ^Dev_Server, ch: ^Response_Channel) {
+	name := "default"
+	switch input.current_cursor {
+	case .DEFAULT:       name = "default"
+	case .ARROW:         name = "arrow"
+	case .IBEAM:         name = "ibeam"
+	case .CROSSHAIR:     name = "crosshair"
+	case .POINTING_HAND: name = "pointing-hand"
+	case .RESIZE_EW:     name = "resize-ew"
+	case .RESIZE_NS:     name = "resize-ns"
+	case .RESIZE_NWSE:   name = "resize-nwse"
+	case .RESIZE_NESW:   name = "resize-nesw"
+	case .RESIZE_ALL:    name = "resize-all"
+	case .NOT_ALLOWED:   name = "not-allowed"
+	}
+	b := strings.builder_make()
+	defer strings.builder_destroy(&b)
+	fmt.sbprintf(&b, `{{"kind":"%s"}}`, name)
+	respond_json(ch, strings.to_string(b))
 }
 
 handle_get_window :: proc(ch: ^Response_Channel) {
