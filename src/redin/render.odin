@@ -860,10 +860,7 @@ draw_box_children :: proc(
 	scrollable := scrollable_y || scrollable_x
 
 	if scrollable {
-		rl.BeginScissorMode(
-			i32(content_rect.x), i32(content_rect.y),
-			i32(content_rect.width), i32(content_rect.height),
-		)
+		bridge.push_scissor(content_rect)
 	}
 
 	// Visibility culling for scrollable containers: skip children whose
@@ -885,7 +882,7 @@ draw_box_children :: proc(
 	}
 
 	if scrollable {
-		rl.EndScissorMode()
+		bridge.pop_scissor()
 
 		info := node_scroll_info[idx]
 		fixed_total := info.total
@@ -1283,7 +1280,7 @@ draw_input :: proc(
 	}
 
 	// Scissor clip to content area
-	rl.BeginScissorMode(i32(content_x), i32(content_y), i32(content_w), i32(content_h))
+	bridge.push_scissor(rl.Rectangle{content_x, content_y, content_w, content_h})
 
 	// Vertical alignment, resolved from the theme's :text-align.
 	// Auto centres single-line content and top-aligns multi-line
@@ -1346,7 +1343,7 @@ draw_input :: proc(
 		}
 	}
 
-	rl.EndScissorMode()
+	bridge.pop_scissor()
 }
 
 draw_button :: proc(idx: int, rect: rl.Rectangle, n: types.NodeButton, theme: map[string]types.Theme) {
@@ -1485,7 +1482,7 @@ draw_text :: proc(idx: int, rect: rl.Rectangle, n: types.NodeText, theme: map[st
 	// Clip when content may overflow the rect
 	needs_clip := scrollable_y || scrollable_x || (len(lines) > 1 && f32(len(lines)) * lh > rect.height)
 	if needs_clip {
-		rl.BeginScissorMode(i32(rect.x), i32(rect.y), i32(rect.width), i32(rect.height))
+		bridge.push_scissor(rect)
 	}
 
 	// Vertical alignment
@@ -1557,6 +1554,6 @@ draw_text :: proc(idx: int, rect: rl.Rectangle, n: types.NodeText, theme: map[st
 	}
 
 	if needs_clip {
-		rl.EndScissorMode()
+		bridge.pop_scissor()
 	}
 }

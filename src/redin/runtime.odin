@@ -162,6 +162,7 @@ run :: proc(cfg: Config) {
 	// lifetime, but still tracked allocations).
 	defer render_destroy()
 	defer text.destroy_intrinsic_cache()
+	defer bridge.destroy_scissor()
 
 	bridge.load_app(&b, cfg.app)
 
@@ -193,6 +194,7 @@ run :: proc(cfg: Config) {
 		profile.begin_frame()
 
 		free_all(context.temp_allocator)
+		bridge.reset_scissor()
 		bridge.check_hotreload(&b)
 
 		if b.frame_changed {
