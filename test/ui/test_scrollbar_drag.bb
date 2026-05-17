@@ -83,6 +83,9 @@
       (input-release))))
 
 (deftest click-below-thumb-pages-down
+  ;; Reset scroll offset to 0 (positive delta-y scrolls content up/back).
+  (input-scroll 640 150 100)
+  (wait-ms 100)
   (input-takeover)
   (try
     (let [{:keys [y1]} (thumb-rect)
