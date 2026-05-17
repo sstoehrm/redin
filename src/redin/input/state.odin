@@ -46,6 +46,9 @@ state_destroy :: proc() {
 	gesture.anchor_path = {}
 	delete(hovered_indices)
 	hovered_indices = {}
+	scrollbar = nil
+	scrollbar_consumed_press = false
+	current_cursor = .DEFAULT
 }
 
 // Called when an input gains focus. Copies the node's value into the editing buffer.
