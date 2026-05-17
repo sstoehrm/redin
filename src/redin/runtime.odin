@@ -257,7 +257,6 @@ run :: proc(cfg: Config) {
 						input.focus_leave()
 					}
 				}
-			case types.ApplyActive:
 			}
 		}
 		if input.state.active && input.focused_idx < 0 {

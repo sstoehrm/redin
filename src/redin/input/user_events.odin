@@ -16,10 +16,12 @@ get_user_events :: proc(
 
 	mouse := mouse_pos()
 
+	clear(&hovered_indices)
 	for listener in listeners {
 		if hl, ok := listener.(types.HoverListener); ok {
 			if hl.node_idx < len(node_rects) &&
 			   rl.CheckCollisionPointRec(mouse, node_rects[hl.node_idx]) {
+				append(&hovered_indices, hl.node_idx)
 				append(
 					&user_events,
 					types.UserEvent{event = .HOVER, node_idx = hl.node_idx},

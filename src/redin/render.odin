@@ -14,6 +14,58 @@ import rl "vendor:raylib"
 // Snap to pixel grid for crisp text rendering
 px :: proc(v: f32) -> f32 { return math.round(v) }
 
+// Merge base aspect with #focus, #hover, #active state variants.
+// Later overrides earlier: base < #focus < #hover < #active. Matches
+// the order documented in docs/reference/theme.md.
+//
+// idx = -1 means "no state overlays" (used by the drag-preview draw
+// paths, where the source/clone aspect already encodes the dragging
+// visual and should not be further mutated).
+//
+// Returns a zero-value Theme if the base aspect is missing — every
+// caller already handles default values per-field with `t.<field> != {}`.
+resolve_themed_aspect :: proc(
+	idx: int,
+	aspect: string,
+	theme: map[string]types.Theme,
+) -> types.Theme {
+	result: types.Theme
+	if len(aspect) == 0 do return result
+	if base, ok := theme[aspect]; ok do result = base
+	if idx < 0 do return result
+
+	overlay :: proc(out: ^types.Theme, src: types.Theme) {
+		if src.bg != {}          do out.bg = src.bg
+		if src.color != {}       do out.color = src.color
+		if src.border != {}      do out.border = src.border
+		if src.border_width > 0  do out.border_width = src.border_width
+		if src.radius > 0        do out.radius = src.radius
+		if src.padding != {}     do out.padding = src.padding
+		if src.font_size > 0     do out.font_size = src.font_size
+		if len(src.font) > 0     do out.font = src.font
+		if src.weight > 0        do out.weight = src.weight
+		if src.line_height > 0   do out.line_height = src.line_height
+		if src.opacity > 0       do out.opacity = src.opacity
+		if src.shadow != {}      do out.shadow = src.shadow
+		if src.selection != {}   do out.selection = src.selection
+		if src.text_align != .Auto do out.text_align = src.text_align
+	}
+
+	if idx == input.focused_idx {
+		if t, ok := theme[strings.concatenate({aspect, "#focus"}, context.temp_allocator)]; ok do overlay(&result, t)
+	}
+	for hi in input.hovered_indices {
+		if hi == idx {
+			if t, ok := theme[strings.concatenate({aspect, "#hover"}, context.temp_allocator)]; ok do overlay(&result, t)
+			break
+		}
+	}
+	if idx == input.active_idx {
+		if t, ok := theme[strings.concatenate({aspect, "#active"}, context.temp_allocator)]; ok do overlay(&result, t)
+	}
+	return result
+}
+
 // Resolve a single ViewportValue to pixels given a window dimension.
 resolve_vp :: proc(v: types.ViewportValue, window_dim: f32) -> f32 {
 	switch val in v {
@@ -529,25 +581,24 @@ draw_node :: proc(
 		draw_box_children(idx, content_rect, n.overflow, false, nodes, children_list, theme)
 	case types.NodeCanvas:
 		if len(n.aspect) > 0 {
-			if t, ok := theme[n.aspect]; ok {
-				draw_shadow(rect, t.shadow, t.radius)
-				if t.bg != {} {
-					bg := rl.Color{t.bg[0], t.bg[1], t.bg[2], 255}
-					if t.radius > 0 {
-						roundness := f32(t.radius) / min(rect.width, rect.height) * 2
-						rl.DrawRectangleRounded(rect, roundness, 6, bg)
-					} else {
-						rl.DrawRectangleRec(rect, bg)
-					}
+			t := resolve_themed_aspect(idx, n.aspect, theme)
+			draw_shadow(rect, t.shadow, t.radius)
+			if t.bg != {} {
+				bg := rl.Color{t.bg[0], t.bg[1], t.bg[2], 255}
+				if t.radius > 0 {
+					roundness := f32(t.radius) / min(rect.width, rect.height) * 2
+					rl.DrawRectangleRounded(rect, roundness, 6, bg)
+				} else {
+					rl.DrawRectangleRec(rect, bg)
 				}
-				if t.border != {} && t.border_width > 0 {
-					border := rl.Color{t.border[0], t.border[1], t.border[2], 255}
-					if t.radius > 0 {
-						roundness := f32(t.radius) / min(rect.width, rect.height) * 2
-						rl.DrawRectangleRoundedLinesEx(rect, roundness, 6, f32(t.border_width), border)
-					} else {
-						rl.DrawRectangleLinesEx(rect, f32(t.border_width), border)
-					}
+			}
+			if t.border != {} && t.border_width > 0 {
+				border := rl.Color{t.border[0], t.border[1], t.border[2], 255}
+				if t.radius > 0 {
+					roundness := f32(t.radius) / min(rect.width, rect.height) * 2
+					rl.DrawRectangleRoundedLinesEx(rect, roundness, 6, f32(t.border_width), border)
+				} else {
+					rl.DrawRectangleLinesEx(rect, f32(t.border_width), border)
 				}
 			}
 		}
@@ -560,17 +611,17 @@ draw_node :: proc(
 	case types.NodeInput:
 		draw_input(idx, rect, n, theme)
 	case types.NodeButton:
-		draw_button(rect, n, theme)
+		draw_button(idx, rect, n, theme)
 	case types.NodeText:
 		draw_text(idx, rect, n, theme)
 	case types.NodeImage:
-		draw_themed_rect(rect, n.aspect, theme)
+		draw_themed_rect(idx, rect, n.aspect, theme)
 		rl.DrawRectangleLinesEx(rect, 1, rl.GRAY)
 		rl.DrawText("image", i32(rect.x) + 4, i32(rect.y) + 4, 14, rl.GRAY)
 	case types.NodePopout:
 		draw_children(idx, nodes, children_list, theme)
 	case types.NodeModal:
-		draw_themed_rect(rect, n.aspect, theme)
+		draw_themed_rect(idx, rect, n.aspect, theme)
 		draw_children(idx, nodes, children_list, theme)
 	}
 
@@ -647,16 +698,16 @@ draw_subtree_translated :: proc(
 		draw_subtree_children_translated(idx, delta, nodes, children_list, theme)
 	case types.NodeVbox:
 		aspect := is_root ? override_aspect_for_root : n.aspect
-		draw_box_chrome(idx, rect, aspect, theme)
+		draw_box_chrome(-1, rect, aspect, theme)
 		draw_subtree_children_translated(idx, delta, nodes, children_list, theme)
 	case types.NodeHbox:
 		aspect := is_root ? override_aspect_for_root : n.aspect
-		draw_box_chrome(idx, rect, aspect, theme)
+		draw_box_chrome(-1, rect, aspect, theme)
 		draw_subtree_children_translated(idx, delta, nodes, children_list, theme)
 	case types.NodeButton:
 		b := n
 		if is_root do b.aspect = override_aspect_for_root
-		draw_button(rect, b, theme)
+		draw_button(-1, rect, b, theme)
 	case types.NodeText:
 		// Pass idx = -1 — the proc treats negative idx as "no selection,
 		// no scroll-offset persistence" (see step 2 of this task).
@@ -665,14 +716,14 @@ draw_subtree_translated :: proc(
 		draw_text(-1, rect, t, theme)
 	case types.NodeImage:
 		aspect := is_root ? override_aspect_for_root : n.aspect
-		draw_themed_rect(rect, aspect, theme)
+		draw_themed_rect(-1, rect, aspect, theme)
 		rl.DrawRectangleLinesEx(rect, 1, rl.GRAY)
 	case types.NodeCanvas:
 		// Canvas providers paint into content_rect — translation is enough.
 		if len(n.provider) > 0 do canvas.process(n.provider, content_rect)
 	case types.NodeInput:
 		// Inputs in the preview clone aren't focusable; render as a styled rect.
-		draw_themed_rect(rect, n.aspect, theme)
+		draw_themed_rect(-1, rect, n.aspect, theme)
 	case types.NodePopout, types.NodeModal:
 		// Popouts/modals don't make sense inside a drag preview; skip.
 	}
@@ -703,18 +754,16 @@ draw_box_chrome :: proc(
 
 	bg_color: rl.Color
 	has_bg := false
-	shadow: types.Shadow
 
-	if t, ok := theme[aspect]; ok {
-		if t.bg != {} {
-			alpha := u8(255)
-			if t.opacity > 0 && t.opacity < 1 do alpha = u8(t.opacity * 255)
-			bg_color = rl.Color{t.bg[0], t.bg[1], t.bg[2], alpha}
-			has_bg = true
-		}
-		shadow = t.shadow
+	t := resolve_themed_aspect(idx, aspect, theme)
+	if t.bg != {} {
+		alpha := u8(255)
+		if t.opacity > 0 && t.opacity < 1 do alpha = u8(t.opacity * 255)
+		bg_color = rl.Color{t.bg[0], t.bg[1], t.bg[2], alpha}
+		has_bg = true
 	}
-	draw_shadow(rect, shadow, 0)
+
+	draw_shadow(rect, t.shadow, 0)
 	if has_bg do rl.DrawRectangleRec(rect, bg_color)
 }
 
@@ -1102,9 +1151,10 @@ draw_shadow :: proc(rect: rl.Rectangle, shadow: types.Shadow, radius: u8) {
 	}
 }
 
-draw_themed_rect :: proc(rect: rl.Rectangle, aspect: string, theme: map[string]types.Theme) {
+draw_themed_rect :: proc(idx: int, rect: rl.Rectangle, aspect: string, theme: map[string]types.Theme) {
 	if len(aspect) > 0 {
-		if t, ok := theme[aspect]; ok && t.bg != {} {
+		t := resolve_themed_aspect(idx, aspect, theme)
+		if t.bg != {} {
 			bg := rl.Color{t.bg[0], t.bg[1], t.bg[2], 255}
 			rl.DrawRectangleRec(rect, bg)
 		}
@@ -1153,16 +1203,6 @@ draw_input :: proc(
 	// Theme selection color; fall back to the legacy blue when the aspect
 	// does not set :selection (sentinel is all-zero).
 	selection_color := rl.Color{51, 153, 255, 100}
-	if len(n.aspect) > 0 {
-		if aspect, ok := theme[n.aspect]; ok {
-			if aspect.selection != ([4]u8{}) {
-				selection_color = rl.Color{
-					aspect.selection[0], aspect.selection[1],
-					aspect.selection[2], aspect.selection[3],
-				}
-			}
-		}
-	}
 	font_size: f32 = 14
 	padding_l: f32 = 4
 	padding_r: f32 = 4
@@ -1174,26 +1214,25 @@ draw_input :: proc(
 	text_align := types.Text_Align.Auto
 
 	if len(n.aspect) > 0 {
-		if t, ok := theme[n.aspect]; ok {
-			if t.border != {} do border_color = rl.Color{t.border[0], t.border[1], t.border[2], 255}
-			if t.bg != {} do bg_color = rl.Color{t.bg[0], t.bg[1], t.bg[2], 255}
-			if t.color != {} do text_color = rl.Color{t.color[0], t.color[1], t.color[2], 255}
-			if t.font_size > 0 do font_size = f32(t.font_size)
-			if t.border_width > 0 do border_width = f32(t.border_width)
-			if t.padding[3] > 0 do padding_l = f32(t.padding[3])
-			if t.padding[1] > 0 do padding_r = f32(t.padding[1])
-			if t.padding[0] > 0 do padding_t = f32(t.padding[0])
-			if len(t.font) > 0 do font_name = t.font
-			font_weight = t.weight
-			lh_ratio = t.line_height
-			text_align = t.text_align
-		}
-		if is_focused {
-			focus_key := strings.concatenate({n.aspect, "#focus"}, context.temp_allocator)
-			if ft, ok := theme[focus_key]; ok {
-				if ft.border != {} do border_color = rl.Color{ft.border[0], ft.border[1], ft.border[2], 255}
+		t := resolve_themed_aspect(idx, n.aspect, theme)
+		if t.selection != ([4]u8{}) {
+			selection_color = rl.Color{
+				t.selection[0], t.selection[1],
+				t.selection[2], t.selection[3],
 			}
 		}
+		if t.border != {} do border_color = rl.Color{t.border[0], t.border[1], t.border[2], 255}
+		if t.bg != {} do bg_color = rl.Color{t.bg[0], t.bg[1], t.bg[2], 255}
+		if t.color != {} do text_color = rl.Color{t.color[0], t.color[1], t.color[2], 255}
+		if t.font_size > 0 do font_size = f32(t.font_size)
+		if t.border_width > 0 do border_width = f32(t.border_width)
+		if t.padding[3] > 0 do padding_l = f32(t.padding[3])
+		if t.padding[1] > 0 do padding_r = f32(t.padding[1])
+		if t.padding[0] > 0 do padding_t = f32(t.padding[0])
+		if len(t.font) > 0 do font_name = t.font
+		font_weight = t.weight
+		lh_ratio = t.line_height
+		text_align = t.text_align
 	}
 
 	// Draw background and border
@@ -1310,7 +1349,7 @@ draw_input :: proc(
 	rl.EndScissorMode()
 }
 
-draw_button :: proc(rect: rl.Rectangle, n: types.NodeButton, theme: map[string]types.Theme) {
+draw_button :: proc(idx: int, rect: rl.Rectangle, n: types.NodeButton, theme: map[string]types.Theme) {
 	bg_color := rl.LIGHTGRAY
 	text_color := rl.BLACK
 	radius: f32 = 0
@@ -1321,16 +1360,15 @@ draw_button :: proc(rect: rl.Rectangle, n: types.NodeButton, theme: map[string]t
 	radius_u8: u8 = 0
 
 	if len(n.aspect) > 0 {
-		if t, ok := theme[n.aspect]; ok {
-			if t.bg != {} do bg_color = rl.Color{t.bg[0], t.bg[1], t.bg[2], 255}
-			if t.color != {} do text_color = rl.Color{t.color[0], t.color[1], t.color[2], 255}
-			if t.radius > 0 do radius = f32(t.radius)
-			if t.font_size > 0 do font_size = f32(t.font_size)
-			if len(t.font) > 0 do font_name = t.font
-			font_weight = t.weight
-			shadow = t.shadow
-			radius_u8 = t.radius
-		}
+		t := resolve_themed_aspect(idx, n.aspect, theme)
+		if t.bg != {} do bg_color = rl.Color{t.bg[0], t.bg[1], t.bg[2], 255}
+		if t.color != {} do text_color = rl.Color{t.color[0], t.color[1], t.color[2], 255}
+		if t.radius > 0 do radius = f32(t.radius)
+		if t.font_size > 0 do font_size = f32(t.font_size)
+		if len(t.font) > 0 do font_name = t.font
+		font_weight = t.weight
+		shadow = t.shadow
+		radius_u8 = t.radius
 	}
 
 	draw_shadow(rect, shadow, radius_u8)
@@ -1364,13 +1402,12 @@ draw_text :: proc(idx: int, rect: rl.Rectangle, n: types.NodeText, theme: map[st
 	lh_ratio: f32 = 0
 
 	if len(n.aspect) > 0 {
-		if t, ok := theme[n.aspect]; ok {
-			if t.font_size > 0 do font_size = f32(t.font_size)
-			if t.color != {} do text_color = rl.Color{t.color[0], t.color[1], t.color[2], 255}
-			if len(t.font) > 0 do font_name = t.font
-			font_weight = t.weight
-			lh_ratio = t.line_height
-		}
+		t := resolve_themed_aspect(idx, n.aspect, theme)
+		if t.font_size > 0 do font_size = f32(t.font_size)
+		if t.color != {} do text_color = rl.Color{t.color[0], t.color[1], t.color[2], 255}
+		if len(t.font) > 0 do font_name = t.font
+		font_weight = t.weight
+		lh_ratio = t.line_height
 	}
 
 	if len(n.inline_spans) > 0 {

@@ -58,6 +58,18 @@ collect_drag_handles_recur :: proc(
 // Currently focused node index, -1 means none.
 focused_idx: int = -1
 
+// Set of node indices currently under the mouse that carry a HoverListener.
+// Multiple ancestors can be hovered simultaneously (matches the deepest-
+// listener-but-hover-multi-fires policy documented above). Rebuilt every
+// frame in get_user_events; never cleared elsewhere.
+hovered_indices: [dynamic]int
+
+// Index of the node currently in the #active visual state. Set on
+// mousedown when the press lands on a winner with a ClickListener.
+// Cleared in apply_listeners when the left mouse button is no longer
+// down (CSS-like "stays active until mouseup"). -1 means none.
+active_idx: int = -1
+
 // Deepest event-listener-bearing node under `pt`, or -1 if none.
 // "Deepest" = highest node_idx among listener matches; nodes[] is
 // DFS-ordered, so a descendant always has a higher idx than its
