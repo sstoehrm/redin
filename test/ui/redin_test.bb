@@ -262,6 +262,14 @@
   ([k]      (post-json "/input/key" {:key (name k)}))
   ([k mods] (post-json "/input/key" {:key (name k) :mods mods})))
 
+(defn input-scroll
+  "Synthesise a ScrollEvent at (x, y) with the given wheel deltas.
+   Positive delta-y scrolls content up (mimics raylib's GetMouseWheelMoveV).
+   Does not require takeover."
+  ([x y delta-y]       (input-scroll x y 0 delta-y))
+  ([x y delta-x delta-y]
+   (post-json "/input/scroll" {:x x :y y :delta_x delta-x :delta_y delta-y})))
+
 (defn rect-of
   "Read the :rect attr from a frame node and return {:x :y :w :h}.
    Returns nil if the node has no :rect (e.g. layout not yet computed)."

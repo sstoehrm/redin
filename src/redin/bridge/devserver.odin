@@ -755,6 +755,8 @@ process_request :: proc(ds: ^Dev_Server, req: ^Pending_Request) {
 			handle_post_input_mouse_down(ds, ch, req.body)
 		} else if req.path == "/input/mouse/up" {
 			handle_post_input_mouse_up(ds, ch, req.body)
+		} else if req.path == "/input/scroll" {
+			handle_post_input_scroll(ds, ch, req.body)
 		} else if req.path == "/input/key" {
 			handle_post_input_key(ds, ch, req.body)
 		} else if req.path == "/shutdown" {
@@ -1924,6 +1926,37 @@ handle_post_input_key :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: stri
 	m := input.mouse_pos()
 	append(&ds.event_queue, types.InputEvent(types.KeyEvent{
 		x = m.x, y = m.y, key = key, mods = mods,
+	}))
+	respond_json_ok(ch)
+}
+
+handle_post_input_scroll :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string) {
+	if !ds.bridge.dev_mode {
+		respond_text(ch, 404, "Not found")
+		return
+	}
+	L := ds.bridge.L
+	pos := 0
+	if !json_decode_value(L, body, &pos) {
+		respond_json_error(ch, 400, `{"error":"invalid JSON"}`)
+		return
+	}
+	defer lua_pop(L, 1)
+	if !lua_istable(L, -1) {
+		respond_json_error(ch, 400, `{"error":"body must be an object"}`)
+		return
+	}
+	get_num :: proc(L: ^Lua_State, key: cstring) -> f32 {
+		lua_getfield(L, -1, key)
+		defer lua_pop(L, 1)
+		return f32(lua_tonumber(L, -1))
+	}
+	x := get_num(L, "x")
+	y := get_num(L, "y")
+	dx := get_num(L, "delta_x")
+	dy := get_num(L, "delta_y")
+	append(&ds.event_queue, types.InputEvent(types.ScrollEvent{
+		x = x, y = y, delta_x = dx, delta_y = dy,
 	}))
 	respond_json_ok(ch)
 }
