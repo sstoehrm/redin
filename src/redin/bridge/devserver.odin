@@ -1771,28 +1771,32 @@ handle_post_input_mouse_down :: proc(ds: ^Dev_Server, ch: ^Response_Channel, bod
 	switch btn {
 	case .LEFT:
 		already_down = input.override.button_left
-		if !already_down {
-			input.override.button_left = true
-			input.override.pending_press_left = true
-		}
+		if !already_down do input.override.button_left = true
 	case .RIGHT:
 		already_down = input.override.button_right
-		if !already_down {
-			input.override.button_right = true
-			input.override.pending_press_right = true
-		}
+		if !already_down do input.override.button_right = true
 	case .MIDDLE:
 		already_down = input.override.button_middle
-		if !already_down {
-			input.override.button_middle = true
-			input.override.pending_press_middle = true
-		}
+		if !already_down do input.override.button_middle = true
 	case .SIDE, .EXTRA, .FORWARD, .BACK:
 	}
 	if already_down {
 		respond_json_error(ch, 409, `{"error":"button already down"}`)
 		return
 	}
+	// Inject the MouseEvent directly into the dev-server event queue
+	// (matching /click at the press call site). The override's
+	// pending_press_* flag is intentionally NOT set: canvases poll
+	// is_mouse_button_pressed eagerly during render_tick, which would
+	// consume the pending flag before apply_listeners sees it (#139).
+	// Going through the queue means apply_listeners always gets the
+	// press; canvases under takeover see mouse-down (held state) but
+	// not mouse-pressed, matching /click semantics.
+	append(&ds.event_queue, types.InputEvent(types.MouseEvent{
+		x = input.override.pos.x,
+		y = input.override.pos.y,
+		button = btn,
+	}))
 	respond_json_ok(ch)
 }
 

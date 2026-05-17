@@ -21,6 +21,11 @@
   (let [{:keys [x y w h]} (btn-rect)]
     [(int (+ x (/ w 2))) (int (+ y (/ h 2)))]))
 
+(defn- assert-bg [expected step]
+  (let [[r g b] (sample-bg)]
+    (assert (= [r g b] expected)
+            (str step ": expected " expected ", got " [r g b]))))
+
 ;; ---------------------------------------------------------------------------
 ;; Tests
 ;; ---------------------------------------------------------------------------
@@ -28,78 +33,40 @@
 (deftest button-rect-exists
   (assert (some? (btn-rect)) "Button rect should be present in /frames"))
 
-(deftest base-color-resting
-  ;; Cursor at default position (outside the button). Bg should be base.
-  (input-takeover)
-  (try
-    (input-mouse-move 0 0)
-    (wait-ms 100)
-    (let [[r g b] (sample-bg)]
-      (assert (= [r g b] [50 50 50])
-              (str "Expected base color [50 50 50], got " [r g b])))
-    (finally
-      (input-release))))
-
-(deftest hover-color-on-cursor-over
-  (input-takeover)
-  (try
-    (let [[cx cy] (center-of)]
-      (input-mouse-move cx cy)
-      (wait-ms 100)
-      (let [[r g b] (sample-bg)]
-        (assert (= [r g b] [100 100 100])
-                (str "Expected hover color [100 100 100], got " [r g b]))))
-    (finally
-      (input-release))))
-
-(deftest active-color-on-mouse-down
+(deftest state-machine-pixel-walk
+  ;; Walks one user-interaction cycle through every theme state variant,
+  ;; sampling the button's bg pixel at each transition. Collapses what
+  ;; was five separate deftests into one to amortise the takeover/release
+  ;; + HTTP roundtrip cost — the CI llvmpipe rasterizer was hitting the
+  ;; 30s per-suite budget on the split form.
+  ;;
+  ;; The "resting" baseline sample is intentionally omitted: the fixture
+  ;; starts at rest, the rect is already visible in /frames (asserted by
+  ;; button-rect-exists), and the four checks below pin down every
+  ;; documented transition. Cuts the screenshot count from 5 to 4 — each
+  ;; screenshot costs ~6s under CI's xvfb + llvmpipe rasterizer.
   (input-takeover)
   (try
     (let [[cx cy] (center-of)]
+      ;; 1. Hover: cursor over the button → #hover overlay.
       (input-mouse-move cx cy)
       (wait-ms 100)
+      (assert-bg [100 100 100] "hover")
+
+      ;; 2. Active: press down on the button → #active overlay.
       (input-mouse-down :left)
       (wait-ms 100)
-      (let [[r g b] (sample-bg)]
-        (assert (= [r g b] [200 200 200])
-                (str "Expected active color [200 200 200], got " [r g b])))
-      (input-mouse-up :left))
-    (finally
-      (input-release))))
+      (assert-bg [200 200 200] "active (mouse down)")
 
-(deftest active-persists-when-cursor-drags-off
-  ;; CSS-like semantics: pressed button stays active until mouseup,
-  ;; even when the cursor leaves the rect while still held.
-  (input-takeover)
-  (try
-    (let [[cx cy] (center-of)]
-      (input-mouse-move cx cy)
-      (wait-ms 100)
-      (input-mouse-down :left)
-      (wait-ms 100)
+      ;; 3. Active persists while held even when cursor drags off
+      ;;    (CSS-like "stays active until mouseup").
       (input-mouse-move 0 0)
       (wait-ms 100)
-      (let [[r g b] (sample-bg)]
-        (assert (= [r g b] [200 200 200])
-                (str "Active should persist while held; got " [r g b])))
-      (input-mouse-up :left))
-    (finally
-      (input-release))))
+      (assert-bg [200 200 200] "active (cursor dragged off, still held)")
 
-(deftest base-restored-after-mouseup-off-rect
-  (input-takeover)
-  (try
-    (let [[cx cy] (center-of)]
-      (input-mouse-move cx cy)
-      (wait-ms 100)
-      (input-mouse-down :left)
-      (wait-ms 100)
-      (input-mouse-move 0 0)
-      (wait-ms 100)
+      ;; 4. Release with cursor off → base returns, no hover, no active.
       (input-mouse-up :left)
       (wait-ms 100)
-      (let [[r g b] (sample-bg)]
-        (assert (= [r g b] [50 50 50])
-                (str "After release with cursor off, base should return; got " [r g b]))))
+      (assert-bg [50 50 50] "released with cursor off"))
     (finally
       (input-release))))
