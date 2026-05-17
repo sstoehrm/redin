@@ -158,12 +158,19 @@ destroy :: proc(b: ^Bridge) {
 	lua_close(b.L)
 }
 
-poll_devserver :: proc(b: ^Bridge, events: ^[dynamic]types.InputEvent, node_rects: []rl.Rectangle) {
+poll_devserver :: proc(
+	b: ^Bridge,
+	events: ^[dynamic]types.InputEvent,
+	node_rects: []rl.Rectangle,
+	scroll_info: map[int]types.Scroll_Info,
+) {
 	when !(REDIN_DEV || REDIN_AGENT) do return
 	b.dev_server.current_rects = node_rects
+	b.dev_server.current_scroll_info = scroll_info
 	devserver_poll(&b.dev_server)
 	devserver_drain_events(&b.dev_server, events)
 	b.dev_server.current_rects = nil
+	b.dev_server.current_scroll_info = nil
 }
 
 is_shutdown_requested :: proc(b: ^Bridge) -> bool {

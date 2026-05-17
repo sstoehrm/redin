@@ -70,6 +70,11 @@ hovered_indices: [dynamic]int
 // down (CSS-like "stays active until mouseup"). -1 means none.
 active_idx: int = -1
 
+// Cursor most recently passed to rl.SetMouseCursor. Tracked here so
+// the dev-server /cursor endpoint can echo it without raylib needing
+// a getter. Updated by set_hover_cursor.
+current_cursor: rl.MouseCursor = .DEFAULT
+
 // Deepest event-listener-bearing node under `pt`, or -1 if none.
 // "Deepest" = highest node_idx among listener matches; nodes[] is
 // DFS-ordered, so a descendant always has a higher idx than its
@@ -529,10 +534,16 @@ key_to_string_input :: proc(key: rl.KeyboardKey) -> string {
 //   2. Mouse over a DragListener (handle or container) → POINTING_HAND.
 //   3. Mouse over a Text_Select_Listener → IBEAM.
 //   4. Otherwise DEFAULT.
+@(private="file")
+set_cursor :: proc(c: rl.MouseCursor) {
+	current_cursor = c
+	rl.SetMouseCursor(c)
+}
+
 set_hover_cursor :: proc(listeners: []types.Listener, node_rects: []rl.Rectangle) {
 	switch _ in drag {
 	case Drag_Pending, Drag_Active:
-		rl.SetMouseCursor(.RESIZE_ALL)
+		set_cursor(.RESIZE_ALL)
 		return
 	case nil, Drag_Idle:
 	}
@@ -542,7 +553,7 @@ set_hover_cursor :: proc(listeners: []types.Listener, node_rects: []rl.Rectangle
 		if !ok do continue
 		if dl.node_idx < 0 || dl.node_idx >= len(node_rects) do continue
 		if rl.CheckCollisionPointRec(mouse, node_rects[dl.node_idx]) {
-			rl.SetMouseCursor(.POINTING_HAND)
+			set_cursor(.POINTING_HAND)
 			return
 		}
 	}
@@ -551,9 +562,9 @@ set_hover_cursor :: proc(listeners: []types.Listener, node_rects: []rl.Rectangle
 		if !ok do continue
 		if tl.node_idx < 0 || tl.node_idx >= len(node_rects) do continue
 		if rl.CheckCollisionPointRec(mouse, node_rects[tl.node_idx]) {
-			rl.SetMouseCursor(.IBEAM)
+			set_cursor(.IBEAM)
 			return
 		}
 	}
-	rl.SetMouseCursor(.DEFAULT)
+	set_cursor(.DEFAULT)
 }

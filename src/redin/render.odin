@@ -118,11 +118,7 @@ scroll_offsets_x: map[int]f32
 // Scroll metadata captured during layout_box for scrollable containers.
 // Read in draw_box_children to position the scrollbar without re-running
 // the recursive size pass.
-Scroll_Info :: struct {
-	total: f32, // sum of child sizes on the scroll axis
-	off:   f32, // clamped scroll offset
-}
-node_scroll_info: map[int]Scroll_Info
+node_scroll_info: map[int]types.Scroll_Info
 
 // Intrinsic-height cache lives in text_pkg, keyed by node idx. It
 // serves both roles: same-frame dedup (layout_box size + emission
@@ -420,7 +416,7 @@ layout_box :: proc(
 	}
 
 	if scrollable {
-		node_scroll_info[idx] = Scroll_Info{total = fixed_total, off = scroll_off}
+		node_scroll_info[idx] = types.Scroll_Info{total = fixed_total, off = scroll_off}
 	}
 
 	anchor_h: int = 0; anchor_v: int = 0
