@@ -541,6 +541,14 @@ set_cursor :: proc(c: rl.MouseCursor) {
 }
 
 set_hover_cursor :: proc(listeners: []types.Listener, node_rects: []rl.Rectangle) {
+	switch s in scrollbar {
+	case Scrollbar_Hovering:
+		set_cursor(s.axis == .Y ? .RESIZE_NS : .RESIZE_EW)
+		return
+	case Scrollbar_Dragging:
+		set_cursor(s.axis == .Y ? .RESIZE_NS : .RESIZE_EW)
+		return
+	}
 	switch _ in drag {
 	case Drag_Pending, Drag_Active:
 		set_cursor(.RESIZE_ALL)
