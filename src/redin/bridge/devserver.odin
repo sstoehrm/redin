@@ -1974,7 +1974,7 @@ handle_get_scroll_info :: proc(ds: ^Dev_Server, ch: ^Response_Channel) {
 	for idx, info in ds.current_scroll_info {
 		if !first do strings.write_string(&b, ",")
 		first = false
-		fmt.sbprintf(&b, `"%d":{"total":%g,"off":%g}`, idx, info.total, info.off)
+		fmt.sbprintf(&b, `"%d":{{"total":%g,"off":%g}}`, idx, info.total, info.off)
 	}
 	strings.write_string(&b, "}")
 	respond_json(ch, strings.to_string(b))
