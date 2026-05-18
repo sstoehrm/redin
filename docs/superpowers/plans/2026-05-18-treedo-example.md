@@ -656,36 +656,44 @@ git commit -m "feat(example): treedo sprout-in pixel pop on add"
 
 ---
 
-## Task 7: Falling leaves + cleanup tick
+## Task 7: Falling leaves (lazy prune on remove)
 
 **Files:**
 - Modify: `examples/treedo.fnl`
 
-- [ ] **Step 1: Add the cleanup handler**
+> **Design note:** the original plan used a `:tick/clear-fallen` dispatch-later
+> self-rearm for cleanup. That hangs the app because of a clock-source mismatch
+> in `src/runtime/effect.fnl` (CPU time scheduling vs wall-time polling). Until
+> that framework bug is fixed, we prune lazily inside `:test/remove` instead —
+> simpler design, no background tick.
 
-Add after the existing `:test/remove` handler:
+- [ ] **Step 1: Modify `:test/remove` to prune-then-push**
+
+Replace the existing `:test/remove` handler (added in Task 2) with:
 
 ```fennel
-(reg-handler :tick/clear-fallen
+(reg-handler :test/remove
              (fn [db event]
-               (let [now (redin.now)]
-                 (update db :falling-leaves
-                         (fn [leaves]
-                           (icollect [_ l (ipairs leaves)]
-                             (when (< (- now l.spawn) 2) l)))))
-               {:dispatch-later {:ms 2000 :dispatch [:tick/clear-fallen]}}))
+               (let [idx (. event 2)
+                     items (get db :items [])
+                     now (redin.now)]
+                 (when (and idx (> idx 0) (<= idx (length items)))
+                   (update db :items
+                           (fn [items]
+                             (icollect [i item (ipairs items)]
+                               (when (not= i idx) item))))
+                   ;; Prune stale falling-leaf entries (>2s old) and push a
+                   ;; fresh one for the removed item. Lazy cleanup avoids a
+                   ;; background tick.
+                   (update db :falling-leaves
+                           (fn [leaves]
+                             (let [kept (icollect [_ l (ipairs leaves)]
+                                          (when (< (- now l.spawn) 2) l))]
+                               (table.insert kept {:slot (- idx 1)
+                                                   :spawn now})
+                               kept)))))
+               db))
 ```
-
-- [ ] **Step 2: Bootstrap the tick**
-
-At the very bottom of the file, after `main_view`, add:
-
-```fennel
-;; Kick off the falling-leaf cleanup loop.
-(dispatch [:tick/clear-fallen])
-```
-
-- [ ] **Step 3: Add a fading-leaf helper, then draw falling leaves**
 
 Add this helper next to `draw-leaf` (so all three rect fills fade together, not just the body):
 
@@ -720,7 +728,7 @@ Then add this block inside the `:tree-of-life` provider, **after** the live-leaf
               (draw-leaf-fading ctx draw-x draw-y body lean alpha)))))
 ```
 
-- [ ] **Step 4: Verify a falling leaf is observable**
+- [ ] **Step 3: Verify a falling leaf is observable**
 
 ```bash
 ./build/redin examples/treedo.fnl &
@@ -747,9 +755,9 @@ curl -s -X POST -H "$H" http://localhost:$PORT/shutdown
 wait $APP 2>/dev/null
 ```
 
-Expected: immediately after the remove, `/state/falling-leaves` has one entry; the screenshot shows a leaf below the original slot position (falling). After 2.2 seconds, `/state/falling-leaves` returns `[]`.
+Expected: immediately after the remove, `/state/falling-leaves` has one entry; the screenshot shows a leaf below the original slot position (falling). The array stays around until the *next* remove, which prunes stale (>2s old) entries before pushing.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add examples/treedo.fnl
