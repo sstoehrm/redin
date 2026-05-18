@@ -316,24 +316,32 @@
 (reg-handler :test/remove
              (fn [db event]
                (let [idx (. event 2)
-                     items (get db :items [])
-                     now (redin.now)]
+                     items (get db :items [])]
                  (when (and idx (> idx 0) (<= idx (length items)))
                    (update db :items
                            (fn [items]
                              (icollect [i item (ipairs items)]
                                (when (not= i idx) item))))
-                   ;; Prune stale falling-leaf entries (>2s old) and push a
-                   ;; fresh one for the removed item. Lazy cleanup avoids a
-                   ;; background tick.
                    (update db :falling-leaves
                            (fn [leaves]
-                             (let [kept (icollect [_ l (ipairs leaves)]
-                                          (when (< (- now l.spawn) 2) l))]
-                               (table.insert kept {:slot (- idx 1)
-                                                   :spawn now})
-                               kept)))))
+                             (table.insert leaves {:slot (- idx 1)
+                                                   :spawn (redin.now)})
+                             leaves))))
                db))
+
+;; Periodic prune of falling-leaf entries older than 2 seconds.
+;; Re-arms itself via :dispatch-later, so the loop runs forever at
+;; ~2s intervals. The handler returns {:db ... :dispatch-later ...}
+;; — both keys are required: the runtime only delivers effects when
+;; the result table carries :db (src/runtime/dataflow.fnl).
+(reg-handler :tick/clear-fallen
+             (fn [db event]
+               (let [now (redin.now)]
+                 {:db (update db :falling-leaves
+                              (fn [leaves]
+                                (icollect [_ l (ipairs leaves)]
+                                  (when (< (- now l.spawn) 2) l))))
+                  :dispatch-later {:ms 2000 :dispatch [:tick/clear-fallen]}})))
 
 (reg-handler :event/drag
              (fn [db event]
@@ -415,3 +423,7 @@
                   [:button {:aspect :mushroom
                             :width 32 :height 32
                             :click [:test/remove i]} "x"]])]]])))
+
+;; Bootstrap the falling-leaf cleanup loop. The handler re-arms itself
+;; via :dispatch-later, so this single dispatch is enough.
+(dispatch [:tick/clear-fallen])

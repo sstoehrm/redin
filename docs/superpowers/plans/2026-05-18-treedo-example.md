@@ -656,44 +656,42 @@ git commit -m "feat(example): treedo sprout-in pixel pop on add"
 
 ---
 
-## Task 7: Falling leaves (lazy prune on remove)
+## Task 7: Falling leaves + cleanup tick
 
 **Files:**
 - Modify: `examples/treedo.fnl`
 
-> **Design note:** the original plan used a `:tick/clear-fallen` dispatch-later
-> self-rearm for cleanup. That hangs the app because of a clock-source mismatch
-> in `src/runtime/effect.fnl` (CPU time scheduling vs wall-time polling). Until
-> that framework bug is fixed, we prune lazily inside `:test/remove` instead —
-> simpler design, no background tick.
+- [ ] **Step 1: Add the `:tick/clear-fallen` handler**
 
-- [ ] **Step 1: Modify `:test/remove` to prune-then-push**
-
-Replace the existing `:test/remove` handler (added in Task 2) with:
+Add **after** the existing `:test/remove` handler (the Task 2 version, unchanged):
 
 ```fennel
-(reg-handler :test/remove
+;; Periodic prune of falling-leaf entries older than 2 seconds.
+;; Re-arms itself via :dispatch-later, so the loop runs forever at
+;; ~2s intervals. The handler returns {:db ... :dispatch-later ...}
+;; — both keys are required: the runtime only delivers effects when
+;; the result table carries :db (src/runtime/dataflow.fnl).
+(reg-handler :tick/clear-fallen
              (fn [db event]
-               (let [idx (. event 2)
-                     items (get db :items [])
-                     now (redin.now)]
-                 (when (and idx (> idx 0) (<= idx (length items)))
-                   (update db :items
-                           (fn [items]
-                             (icollect [i item (ipairs items)]
-                               (when (not= i idx) item))))
-                   ;; Prune stale falling-leaf entries (>2s old) and push a
-                   ;; fresh one for the removed item. Lazy cleanup avoids a
-                   ;; background tick.
-                   (update db :falling-leaves
-                           (fn [leaves]
-                             (let [kept (icollect [_ l (ipairs leaves)]
-                                          (when (< (- now l.spawn) 2) l))]
-                               (table.insert kept {:slot (- idx 1)
-                                                   :spawn now})
-                               kept)))))
-               db))
+               (let [now (redin.now)]
+                 {:db (update db :falling-leaves
+                              (fn [leaves]
+                                (icollect [_ l (ipairs leaves)]
+                                  (when (< (- now l.spawn) 2) l))))
+                  :dispatch-later {:ms 2000 :dispatch [:tick/clear-fallen]}})))
 ```
+
+- [ ] **Step 2: Bootstrap the tick**
+
+At the end of the file (after `main_view`), append:
+
+```fennel
+;; Bootstrap the falling-leaf cleanup loop. The handler re-arms itself
+;; via :dispatch-later, so this single dispatch is enough.
+(dispatch [:tick/clear-fallen])
+```
+
+- [ ] **Step 3: Add a fading-leaf helper, then draw falling leaves**
 
 Add this helper next to `draw-leaf` (so all three rect fills fade together, not just the body):
 
@@ -728,7 +726,7 @@ Then add this block inside the `:tree-of-life` provider, **after** the live-leaf
               (draw-leaf-fading ctx draw-x draw-y body lean alpha)))))
 ```
 
-- [ ] **Step 3: Verify a falling leaf is observable**
+- [ ] **Step 4: Verify a falling leaf is observable + the tick prunes it**
 
 ```bash
 ./build/redin examples/treedo.fnl &
@@ -741,23 +739,28 @@ for w in maple birch; do
   curl -s -X POST -H "$H" -d "[\"test/input\",{\"value\":\"$w\"}]" http://localhost:$PORT/events
   curl -s -X POST -H "$H" -d '["test/add"]' http://localhost:$PORT/events
 done
-sleep 0.4
+sleep 0.3
 # remove the first
 curl -s -X POST -H "$H" -d '["test/remove",1]' http://localhost:$PORT/events
 sleep 0.1
+echo "immediately after remove (1 entry):"
 curl -s -H "$H" http://localhost:$PORT/state/falling-leaves
 curl -s -H "$H" http://localhost:$PORT/screenshot -o /tmp/treedo-falling.png
-sleep 2.2
-# entry must have been pruned
+
+# The first :tick/clear-fallen fires ~2s after module load. By then the
+# entry is ~1.7s old — not yet stale. The SECOND tick fires at ~4s;
+# entry is then ~3.7s old → pruned.
+sleep 4.5
+echo "after ~4.6s (expect empty — 2nd tick pruned):"
 curl -s -H "$H" http://localhost:$PORT/state/falling-leaves
 
 curl -s -X POST -H "$H" http://localhost:$PORT/shutdown
 wait $APP 2>/dev/null
 ```
 
-Expected: immediately after the remove, `/state/falling-leaves` has one entry; the screenshot shows a leaf below the original slot position (falling). The array stays around until the *next* remove, which prunes stale (>2s old) entries before pushing.
+Expected: immediately after the remove, `/state/falling-leaves` has one entry; the screenshot shows a leaf below the original slot position (falling). After ~4.5s, the second cleanup tick has fired and the entry is gone. App must not hang — requires the `redin.now`-based dispatch-later scheduler from #146.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add examples/treedo.fnl
