@@ -106,10 +106,37 @@
     (paint 112 130  60  80)
     (paint 128 130 180  80)))
 
+;; Three rotating leaf body colors.
+(local leaf-cycle [(. pal :leaf-deep)
+                   (. pal :leaf-mid)
+                   (. pal :leaf-bright)])
+
+;; Draw one leaf at (x, y), full size, with the given body color.
+;; "Lean" alternates by slot parity: even slots lean right, odd left.
+(fn draw-leaf [ctx x y body lean]
+  (let [dx (if (= lean :right) 0 -8)]
+    ;; outline (3×3 cluster of dark green tiles)
+    (ctx.rect (+ x dx)     y     12 8 {:fill (. pal :leaf-deep)})
+    ;; body fill (slightly inset)
+    (ctx.rect (+ x dx 1)   (+ y 1) 10 6 {:fill body})
+    ;; highlight pixel
+    (ctx.rect (+ x dx 2) (+ y 1) 2 2 {:fill (. pal :leaf-bright)})))
+
 (canvas.register
   :tree-of-life
   (fn [ctx]
-    (draw-trunk-and-branches ctx)))
+    (draw-trunk-and-branches ctx)
+    (let [items (subscribe :items)
+          now   (redin.now)]
+      (each [i _item (ipairs items)]
+        (let [slot-idx (% (- i 1) 32)
+              slot     (. leaf-slots (+ slot-idx 1))
+              sx       (. slot 1)
+              sy       (. slot 2)
+              sway     (math.floor (* 1 (math.sin (+ (* now 1.3) i))))
+              body     (. leaf-cycle (+ 1 (% (- i 1) 3)))
+              lean     (if (= (% i 2) 0) :right :left)]
+          (draw-leaf ctx (+ sx sway) sy body lean))))))
 
 ;; ===== Theme =====
 
