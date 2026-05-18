@@ -222,6 +222,19 @@
               (set dist (+ dist step))
               (set t (+ t step)))))))))
 
+;; ===== Canvas: vine-grip (grab affordance) =====
+;; A vertical run of 3 small mushroom dots — the grab affordance.
+
+(canvas.register
+  :vine-grip
+  (fn [ctx]
+    (let [cx (/ ctx.width 2)
+          cy (/ ctx.height 2)]
+      (for [row -1 1]
+        (let [y (math.floor (+ cy (* row 8)))]
+          (ctx.rect (- cx 3) y 2 2 {:fill (. pal :moss)})
+          (ctx.rect (+ cx 1) y 2 2 {:fill (. pal :moss)}))))))
+
 ;; ===== Theme =====
 
 (theme-mod.set-theme
@@ -266,7 +279,10 @@
 
 (global redin_get_state (. dataflow :_get-raw-db))
 
-(dataflow.init {:items []
+(dataflow.init {:items [{:text "Plant the seed"        :born 0}
+                        {:text "Water the sapling"     :born 0}
+                        {:text "Watch the canopy grow" :born 0}
+                        {:text "Sweep the leaves"      :born 0}]
                 :input-value ""
                 :drag-start-time nil
                 :falling-leaves []})
@@ -393,7 +409,8 @@
                                     {:event :event/drop
                                      :aspect :row-drop-hot}
                                     i]}
-                  [:vbox {:width 24 :height 42 :drag-handle true}]
+                  [:vbox {:width 24 :height 42 :drag-handle true}
+                   [:canvas {:provider :vine-grip :width 24 :height 42}]]
                   [:text {:aspect :body :width :full} item.text]
                   [:button {:aspect :mushroom
                             :width 32 :height 32
