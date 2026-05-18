@@ -17,6 +17,49 @@
             :mushroom    [180 60 70]
             :bone-white  [232 224 196]})
 
+;; ===== Canvas: forest-floor (static backdrop) =====
+;;
+;; Deterministic pseudo-random fleck pattern via an LCG seeded with
+;; a constant, so the floor renders identically every frame and across
+;; runs. Two passes: moss flecks then mushroom dots, then a centered
+;; dirt path with sunset-gold stones.
+
+(local FLOOR-MOSS-COUNT 120)
+(local FLOOR-MUSHROOM-COUNT 80)
+
+(fn lcg [seed]
+  (% (+ (* seed 1103515245) 12345) 2147483648))
+
+(canvas.register
+  :forest-floor
+  (fn [ctx]
+    (let [w ctx.width
+          h ctx.height]
+      (ctx.rect 0 0 w h {:fill (. pal :night-soil)})
+      ;; moss flecks
+      (var s 42)
+      (for [_ 1 FLOOR-MOSS-COUNT]
+        (set s (lcg s))
+        (let [x (* 2 (math.floor (/ (% s w) 2)))]
+          (set s (lcg s))
+          (let [y (* 2 (math.floor (/ (% s h) 2)))]
+            (ctx.rect x y 2 2 {:fill (. pal :moss)}))))
+      ;; mushroom dots
+      (for [_ 1 FLOOR-MUSHROOM-COUNT]
+        (set s (lcg s))
+        (let [x (* 2 (math.floor (/ (% s w) 2)))]
+          (set s (lcg s))
+          (let [y (* 2 (math.floor (/ (% s h) 2)))]
+            (ctx.rect x y 2 2 {:fill (. pal :mushroom)}))))
+      ;; central dirt path (slightly darker band)
+      (let [px (- (math.floor (/ w 2)) 30)]
+        (ctx.rect px 0 60 h {:fill [18 22 18]})
+        ;; sunset-gold stones every 24px
+        (for [i 0 (math.floor (/ h 24))]
+          (let [sy (* i 24)
+                sx (+ px 26)]
+            (ctx.rect sx sy 8 4 {:fill (. pal :sunset-gold)})))))))
+
 ;; ===== Theme =====
 
 (theme-mod.set-theme
@@ -118,6 +161,7 @@
             [:stack
              {:viewport [[:top_left 0 0 :full :full]
                          [:top_center 0 32 480 :full]]}
+             [:canvas {:provider :forest-floor :width :full :height :full}]
              [:vbox {:aspect :canopy}
               [:hbox {:height 32 :layout :center}
                [:text {:aspect :heading} "treedo"]
