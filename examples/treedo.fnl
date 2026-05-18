@@ -274,6 +274,29 @@
                                kept)))))
                db))
 
+(reg-handler :event/drag
+             (fn [db event] db))
+
+(reg-handler :event/over
+             (fn [db event] db))
+
+(reg-handler :event/drop
+             (fn [db event]
+               (let [ctx (. event 2)
+                     from-idx ctx.from
+                     to-idx   ctx.to
+                     items    (get db :items [])]
+                 (when (and from-idx to-idx
+                            (> from-idx 0) (<= from-idx (length items))
+                            (> to-idx   0) (<= to-idx   (length items))
+                            (not= from-idx to-idx))
+                   (let [item (. items from-idx)
+                         new-items (icollect [i v (ipairs items)]
+                                     (when (not= i from-idx) v))]
+                     (table.insert new-items to-idx item)
+                     (assoc db :items new-items))))
+               db))
+
 ;; ===== View =====
 
 (global main_view
@@ -306,9 +329,22 @@
                          :height 42
                          :click [:test/add]} "Plant"]]
               [:vbox {:height 12}]
-              [:vbox {:overflow :scroll-y}
+              [:vbox
+               {:overflow :scroll-y
+                :drag-over [:row-drag {:event :event/over :aspect :muted-armed}]}
                (icollect [i item (ipairs items)]
-                 [:hbox {:layout :center :aspect :trail :height 42}
+                 [:hbox {:layout :center :aspect :trail :height 42
+                         :draggable [:row-drag
+                                     {:mode :preview
+                                      :handle false
+                                      :event :event/drag
+                                      :aspect :row-vining}
+                                     i]
+                         :dropable [:row-drag
+                                    {:event :event/drop
+                                     :aspect :row-drop-hot}
+                                    i]}
+                  [:vbox {:width 24 :height 42 :drag-handle true}]
                   [:text {:aspect :body :width :full} item.text]
                   [:button {:aspect :mushroom
                             :width 32 :height 32
