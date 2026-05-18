@@ -73,12 +73,48 @@
 (reg-sub :drag-start-time (fn [db] (get db :drag-start-time)))
 (reg-sub :falling-leaves (fn [db] (get db :falling-leaves [])))
 
+;; ===== Handlers =====
+
+(reg-handler :test/input
+             (fn [db event]
+               (let [ctx (. event 2)]
+                 (assoc db :input-value (or ctx.value "")))
+               db))
+
+(reg-handler :test/add
+             (fn [db event]
+               (let [val (get db :input-value "")]
+                 (when (> (string.len val) 0)
+                   (update db :items
+                           (fn [items]
+                             (table.insert items {:text val :born (redin.now)})
+                             items))
+                   (assoc db :input-value "")))
+               db))
+
+(reg-handler :test/remove
+             (fn [db event]
+               (let [idx (. event 2)
+                     items (get db :items [])]
+                 (when (and idx (> idx 0) (<= idx (length items)))
+                   (update db :items
+                           (fn [items]
+                             (icollect [i item (ipairs items)]
+                               (when (not= i idx) item))))
+                   (update db :falling-leaves
+                           (fn [leaves]
+                             (table.insert leaves {:slot (- idx 1)
+                                                   :spawn (redin.now)})
+                             leaves))))
+               db))
+
 ;; ===== View =====
 
 (global main_view
         (fn []
-          (let [items (subscribe :items)
-                count (length items)]
+          (let [items     (subscribe :items)
+                input-val (subscribe :input-value)
+                count     (length items)]
             [:stack
              {:viewport [[:top_left 0 0 :full :full]
                          [:top_center 0 32 480 :full]]}
@@ -86,4 +122,25 @@
               [:hbox {:height 32 :layout :center}
                [:text {:aspect :heading} "treedo"]
                [:vbox {:width :full}]
-               [:text {:aspect :count-badge} (.. count " items")]]]])))
+               [:text {:aspect :count-badge} (.. count " items")]]
+              [:vbox {:height 16}]
+              [:hbox {:height 42}
+               [:input {:aspect :bark
+                        :width :full
+                        :height 42
+                        :value input-val
+                        :change [:test/input]
+                        :key [:test/add]}]
+               [:vbox {:width 8}]
+               [:button {:aspect :leaf
+                         :width 72
+                         :height 42
+                         :click [:test/add]} "Plant"]]
+              [:vbox {:height 12}]
+              [:vbox {:overflow :scroll-y}
+               (icollect [i item (ipairs items)]
+                 [:hbox {:layout :center :aspect :trail :height 42}
+                  [:text {:aspect :body :width :full} item.text]
+                  [:button {:aspect :mushroom
+                            :width 32 :height 32
+                            :click [:test/remove i]} "x"]])]]])))
