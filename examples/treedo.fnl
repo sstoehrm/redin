@@ -212,7 +212,9 @@
           start (subscribe :drag-start-time)
           now (redin.now)
           age (if start (- now start) 0)
-          growth (math.min 1 (* age 2.5))
+          ;; Perimeter wraps over the first 1.0s of the drag; tendrils
+          ;; then grow from 1.0s to ~2.0s.
+          growth (math.min 1 age)
           ;; Halo box around the row — 4px margin on top + sides.
           halo-x 4
           halo-y 4
@@ -243,7 +245,7 @@
               (ctx.rect (+ px 2) (+ py 2) 2 2 {:fill (. pal :leaf-mid)})
               (when (= 0 (% tuft-i tuft-every))
                 (let [bob (if (>= growth 1)
-                              (math.floor (* 2 (math.sin (+ (* now 2) tuft-i))))
+                              (math.floor (* 2 (math.sin (+ now tuft-i))))
                               0)
                       tx (- px 2)
                       ty (+ py bob -3)]
@@ -262,7 +264,7 @@
       (when (>= growth 1)
         (let [drop-top (+ halo-y halo-h)
               drop-room (- h drop-top)
-              reach (math.floor (* (math.min 1 (- (* age 2.5) 1)) drop-room))
+              reach (math.floor (* (math.min 1 (- age 1)) drop-room))
               steps (math.floor (/ reach 4))
               cols [(+ halo-x 20)
                     (+ halo-x (math.floor (/ halo-w 3)))
@@ -270,7 +272,7 @@
                     (+ halo-x halo-w -20)]]
           (each [col-i cx (ipairs cols)]
             ;; Each tendril sways independently for a touch of life.
-            (let [sway-amp (math.sin (+ (* now 2.4) col-i))]
+            (let [sway-amp (math.sin (+ (* now 1.2) col-i))]
               (for [j 0 steps]
                 (let [ty (+ drop-top (* j 4))
                       tx (+ cx (math.floor (* sway-amp (* j 0.6))))]
