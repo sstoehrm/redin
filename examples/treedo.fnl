@@ -129,10 +129,11 @@
   (let [stage (math.min 4 (math.floor (+ 1 (* growth 4))))]
     (if (>= stage 4)
         (draw-leaf ctx x y body lean)
-        ;; smaller cluster: stage square at slot center
         (let [size (* stage 2)
-              dx (if (= lean :right) 0 (- (- 0 size)))]
-          (ctx.rect (+ x dx 4) y size size {:fill body})))))
+              dx-full (if (= lean :right) 0 -8)
+              cx (+ x dx-full 6)
+              bx (- cx (math.floor (/ size 2)))]
+          (ctx.rect bx y size size {:fill body})))))
 
 (canvas.register
   :tree-of-life
