@@ -122,6 +122,15 @@
     ;; highlight pixel
     (ctx.rect (+ x dx 2) (+ y 1) 2 2 {:fill (. pal :leaf-bright)})))
 
+(fn draw-leaf-fading [ctx x y body lean alpha]
+  (let [dx (if (= lean :right) 0 -8)
+        outline (. pal :leaf-deep)
+        hilight (. pal :leaf-bright)
+        with-a (fn [c] [(. c 1) (. c 2) (. c 3) alpha])]
+    (ctx.rect (+ x dx)     y       12 8 {:fill (with-a outline)})
+    (ctx.rect (+ x dx 1)   (+ y 1) 10 6 {:fill (with-a body)})
+    (ctx.rect (+ x dx 2)   (+ y 1) 2  2 {:fill (with-a hilight)})))
+
 ;; Draws a leaf at `growth` ∈ [0,1] of its full size. Below 1.0 we draw
 ;; a smaller pixel-art "bud" using fewer big-pixels — four discrete
 ;; growth stages give the chunky pop.
@@ -151,7 +160,22 @@
               lean     (if (= (% i 2) 0) :right :left)
               age      (- now (or item.born 0))
               growth   (math.min 1 (/ age 0.3))]
-          (draw-leaf-growing ctx (+ sx sway) sy body lean growth))))))
+          (draw-leaf-growing ctx (+ sx sway) sy body lean growth)))
+      (let [fallen (subscribe :falling-leaves)]
+        (each [_ entry (ipairs (or fallen []))]
+          (let [slot-idx (% entry.slot 32)
+                slot     (. leaf-slots (+ slot-idx 1))
+                sx       (. slot 1)
+                sy       (. slot 2)
+                age      (- now entry.spawn)
+                t        (/ age 1.6)
+                body     (. leaf-cycle (+ 1 (% entry.slot 3)))
+                draw-x   (math.floor (+ sx (* (math.sin (* age 4)) 8)))
+                draw-y   (math.floor (+ sy (* 250 t t)))
+                alpha    (math.max 0 (math.floor (* 255 (- 1 t))))
+                lean     (if (= (% (+ entry.slot 1) 2) 0) :right :left)]
+            (when (< t 1)
+              (draw-leaf-fading ctx draw-x draw-y body lean alpha))))))))
 
 ;; ===== Theme =====
 
@@ -231,17 +255,23 @@
 (reg-handler :test/remove
              (fn [db event]
                (let [idx (. event 2)
-                     items (get db :items [])]
+                     items (get db :items [])
+                     now (redin.now)]
                  (when (and idx (> idx 0) (<= idx (length items)))
                    (update db :items
                            (fn [items]
                              (icollect [i item (ipairs items)]
                                (when (not= i idx) item))))
+                   ;; Prune stale falling-leaf entries (>2s old) and push a
+                   ;; fresh one for the removed item. Lazy cleanup avoids a
+                   ;; background tick.
                    (update db :falling-leaves
                            (fn [leaves]
-                             (table.insert leaves {:slot (- idx 1)
-                                                   :spawn (redin.now)})
-                             leaves))))
+                             (let [kept (icollect [_ l (ipairs leaves)]
+                                          (when (< (- now l.spawn) 2) l))]
+                               (table.insert kept {:slot (- idx 1)
+                                                   :spawn now})
+                               kept)))))
                db))
 
 ;; ===== View =====
