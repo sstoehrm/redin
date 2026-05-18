@@ -122,21 +122,35 @@
     ;; highlight pixel
     (ctx.rect (+ x dx 2) (+ y 1) 2 2 {:fill (. pal :leaf-bright)})))
 
+;; Draws a leaf at `growth` ∈ [0,1] of its full size. Below 1.0 we draw
+;; a smaller pixel-art "bud" using fewer big-pixels — four discrete
+;; growth stages give the chunky pop.
+(fn draw-leaf-growing [ctx x y body lean growth]
+  (let [stage (math.min 4 (math.floor (+ 1 (* growth 4))))]
+    (if (>= stage 4)
+        (draw-leaf ctx x y body lean)
+        ;; smaller cluster: stage square at slot center
+        (let [size (* stage 2)
+              dx (if (= lean :right) 0 (- (- 0 size)))]
+          (ctx.rect (+ x dx 4) y size size {:fill body})))))
+
 (canvas.register
   :tree-of-life
   (fn [ctx]
     (draw-trunk-and-branches ctx)
     (let [items (subscribe :items)
           now   (redin.now)]
-      (each [i _item (ipairs items)]
+      (each [i item (ipairs items)]
         (let [slot-idx (% (- i 1) 32)
               slot     (. leaf-slots (+ slot-idx 1))
               sx       (. slot 1)
               sy       (. slot 2)
               sway     (math.floor (* 1 (math.sin (+ (* now 1.3) i))))
               body     (. leaf-cycle (+ 1 (% (- i 1) 3)))
-              lean     (if (= (% i 2) 0) :right :left)]
-          (draw-leaf ctx (+ sx sway) sy body lean))))))
+              lean     (if (= (% i 2) 0) :right :left)
+              age      (- now (or item.born 0))
+              growth   (math.min 1 (/ age 0.3))]
+          (draw-leaf-growing ctx (+ sx sway) sy body lean growth))))))
 
 ;; ===== Theme =====
 
