@@ -17,6 +17,30 @@
             :mushroom    [180 60 70]
             :bone-white  [232 224 196]})
 
+;; ===== Tree geometry =====
+;; Canvas size: 240×320. Trunk at x=120, base at y=320.
+;; Four diagonal branches; 8 leaf slots per branch = 32 total.
+
+(local leaf-slots
+       (let [slots []]
+         (for [i 0 7]
+           (let [t (/ i 7)]
+             (table.insert slots [(- 112 (math.floor (* 72 t)))
+                                  (- 200 (math.floor (* 60 t)))])))
+         (for [i 0 7]
+           (let [t (/ i 7)]
+             (table.insert slots [(+ 128 (math.floor (* 72 t)))
+                                  (- 200 (math.floor (* 60 t)))])))
+         (for [i 0 7]
+           (let [t (/ i 7)]
+             (table.insert slots [(- 112 (math.floor (* 52 t)))
+                                  (- 130 (math.floor (* 50 t)))])))
+         (for [i 0 7]
+           (let [t (/ i 7)]
+             (table.insert slots [(+ 128 (math.floor (* 52 t)))
+                                  (- 130 (math.floor (* 50 t)))])))
+         slots))
+
 ;; ===== Canvas: forest-floor (static backdrop) =====
 ;;
 ;; Deterministic pseudo-random fleck pattern via an LCG seeded with
@@ -59,6 +83,33 @@
           (let [sy (* i 24)
                 sx (+ px 26)]
             (ctx.rect sx sy 8 4 {:fill (. pal :sunset-gold)})))))))
+
+;; ===== Canvas: tree-of-life =====
+;; Static trunk + four diagonal branches drawn as rect segments.
+;; Leaves come in the next task.
+
+(fn draw-trunk-and-branches [ctx]
+  ;; trunk: vertical column 16px wide, base at bottom
+  (ctx.rect 112 100 16 220 {:fill (. pal :bark-dark)})
+  (ctx.rect 124 100 4  220 {:fill (. pal :bark-mid)})    ; lit edge
+  ;; four diagonal branches drawn as a chain of 4×4 rects
+  (let [paint (fn [x0 y0 x1 y1]
+                (let [steps 18]
+                  (for [i 0 steps]
+                    (let [t (/ i steps)
+                          x (math.floor (+ x0 (* (- x1 x0) t)))
+                          y (math.floor (+ y0 (* (- y1 y0) t)))]
+                      (ctx.rect x y 6 6 {:fill (. pal :bark-dark)})
+                      (ctx.rect (+ x 4) y 2 6 {:fill (. pal :bark-mid)})))))]
+    (paint 112 200  40 140)
+    (paint 128 200 200 140)
+    (paint 112 130  60  80)
+    (paint 128 130 180  80)))
+
+(canvas.register
+  :tree-of-life
+  (fn [ctx]
+    (draw-trunk-and-branches ctx)))
 
 ;; ===== Theme =====
 
@@ -160,8 +211,10 @@
                 count     (length items)]
             [:stack
              {:viewport [[:top_left 0 0 :full :full]
+                         [:bottom_left 16 -16 240 320]
                          [:top_center 0 32 480 :full]]}
              [:canvas {:provider :forest-floor :width :full :height :full}]
+             [:canvas {:provider :tree-of-life :width 240 :height 320}]
              [:vbox {:aspect :canopy}
               [:hbox {:height 32 :layout :center}
                [:text {:aspect :heading} "treedo"]
