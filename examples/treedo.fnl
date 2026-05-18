@@ -92,15 +92,24 @@
   ;; trunk: vertical column 16px wide, base at bottom
   (ctx.rect 112 100 16 220 {:fill (. pal :bark-dark)})
   (ctx.rect 124 100 4  220 {:fill (. pal :bark-mid)})    ; lit edge
-  ;; four diagonal branches drawn as a chain of 4×4 rects
+  ;; A few knot markers on the trunk for texture (pure pixel-art flair).
+  (ctx.rect 114 150 4 4 {:fill (. pal :bark-mid)})
+  (ctx.rect 120 240 4 4 {:fill (. pal :bark-mid)})
+  ;; Branches as discrete tapered chunks: 8×8 at the base shrinking to 4×4
+  ;; at the tip, spaced one chunk-length apart so they don't overlap into
+  ;; stripes. This is what gives the chunky pixel-art feel.
   (let [paint (fn [x0 y0 x1 y1]
-                (let [steps 18]
+                (let [steps 9]
                   (for [i 0 steps]
                     (let [t (/ i steps)
                           x (math.floor (+ x0 (* (- x1 x0) t)))
-                          y (math.floor (+ y0 (* (- y1 y0) t)))]
-                      (ctx.rect x y 6 6 {:fill (. pal :bark-dark)})
-                      (ctx.rect (+ x 4) y 2 6 {:fill (. pal :bark-mid)})))))]
+                          y (math.floor (+ y0 (* (- y1 y0) t)))
+                          ;; taper 8 → 4 from base to tip
+                          thick (math.max 4 (- 8 (math.floor (* t 4))))]
+                      (ctx.rect x y thick thick {:fill (. pal :bark-dark)})
+                      ;; lit edge on the right side of each chunk
+                      (ctx.rect (+ x thick -2) y 2 thick
+                                {:fill (. pal :bark-mid)})))))]
     (paint 112 200  40 140)
     (paint 128 200 200 140)
     (paint 112 130  60  80)
@@ -182,6 +191,9 @@
 ;; drag preview only, so we always know we're being drawn around a
 ;; cloned, dragged row.
 
+;; The canvas is intentionally larger than the row (set via :animate :rect
+;; below) so the vine can grow well above and around it. The perimeter walk
+;; thus traces the canvas border, giving the vine room to breathe.
 (canvas.register
   :vine
   (fn [ctx]
@@ -193,7 +205,10 @@
           growth (math.min 1 (* age 2.5))
           perimeter (* 2 (+ w h))
           drawn-len (* perimeter growth)
-          step 4]
+          step 6
+          stem-size 6
+          tuft-size 12
+          tuft-every 5]
       (var dist 0)
       (var tuft-i 0)
       (each [i edge (ipairs [[0 0 1 0]      ; top
@@ -209,18 +224,44 @@
           (while (and (< t len) (< dist drawn-len))
             (let [px (math.floor (+ ex (* dx t)))
                   py (math.floor (+ ey (* dy t)))]
-              (ctx.rect px py 3 3 {:fill (. pal :leaf-deep)})
-              (when (= 0 (% tuft-i 6))
+              ;; thick chunky stem segment
+              (ctx.rect px py stem-size stem-size {:fill (. pal :leaf-deep)})
+              ;; lit edge: a 2px highlight on the outer side
+              (ctx.rect (+ px 2) (+ py 2) 2 2 {:fill (. pal :leaf-mid)})
+              (when (= 0 (% tuft-i tuft-every))
                 (let [bob (if (>= growth 1)
-                              (math.floor (* 1 (math.sin (+ (* now 2) tuft-i))))
-                              0)]
-                  (ctx.rect (- px 1) (+ py bob -1) 5 5
+                              (math.floor (* 2 (math.sin (+ (* now 2) tuft-i))))
+                              0)
+                      tx (- px 2)
+                      ty (+ py bob -3)]
+                  ;; outer dark outline
+                  (ctx.rect tx ty tuft-size tuft-size {:fill (. pal :leaf-deep)})
+                  ;; main leaf body
+                  (ctx.rect (+ tx 2) (+ ty 2) (- tuft-size 4) (- tuft-size 4)
                             {:fill (. pal :leaf-mid)})
-                  (ctx.rect (+ px 1) (+ py bob)   1 1
-                            {:fill (. pal :leaf-bright)})))
+                  ;; bright highlight
+                  (ctx.rect (+ tx 4) (+ ty 3) 3 3 {:fill (. pal :leaf-bright)})))
               (set tuft-i (+ tuft-i 1))
               (set dist (+ dist step))
-              (set t (+ t step)))))))))
+              (set t (+ t step))))))
+      ;; Hanging tendrils — short vertical drops from the top edge of
+      ;; the canvas into the upper margin, only after the perimeter
+      ;; is fully grown. Gives the eye something to read as "the vine
+      ;; sprouted leaves once it wrapped the dragged row".
+      (when (>= growth 1)
+        (let [reach (math.floor (* (math.min 1 (- (* age 2.5) 1)) 36))
+              sway (math.floor (* 3 (math.sin (* now 3))))]
+          (each [_ cx (ipairs [24 (math.floor (/ w 3))
+                               (math.floor (/ (* w 2) 3)) (- w 28)])]
+            (for [j 0 (math.floor (/ reach 4))]
+              (let [ty (* j 4)
+                    tx (+ cx (math.floor (* sway (/ j 12))))]
+                (ctx.rect tx ty 4 4 {:fill (. pal :leaf-deep)})
+                (when (and (= (% j 3) 0) (> j 0))
+                  (ctx.rect (- tx 2) (+ ty 2) 8 8
+                            {:fill (. pal :leaf-mid)})
+                  (ctx.rect tx (+ ty 4) 2 2
+                            {:fill (. pal :leaf-bright)}))))))))))
 
 ;; ===== Canvas: vine-grip (grab affordance) =====
 ;; A vertical run of 3 small mushroom dots — the grab affordance.
@@ -409,8 +450,12 @@
                                       :handle false
                                       :event :event/drag
                                       :aspect :row-vining
+                                      ;; Vine canvas extends ~64px above
+                                      ;; the row and ~28px below, so the
+                                      ;; vine has dramatic vertical reach
+                                      ;; with room for hanging tendrils.
                                       :animate {:provider :vine
-                                                :rect [:top_left -6 -6 :full :full]
+                                                :rect [:top_left -24 -64 488 134]
                                                 :z :above}}
                                      i]
                          :dropable [:row-drag
