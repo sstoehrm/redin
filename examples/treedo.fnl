@@ -177,6 +177,51 @@
             (when (< t 1)
               (draw-leaf-fading ctx draw-x draw-y body lean alpha))))))))
 
+;; ===== Canvas: vine (drag overlay) =====
+;; Decoration on :draggable {:animate ...}. The host gates this to the
+;; drag preview only, so we always know we're being drawn around a
+;; cloned, dragged row.
+
+(canvas.register
+  :vine
+  (fn [ctx]
+    (let [w ctx.width
+          h ctx.height
+          start (subscribe :drag-start-time)
+          now (redin.now)
+          age (if start (- now start) 0)
+          growth (math.min 1 (* age 2.5))
+          perimeter (* 2 (+ w h))
+          drawn-len (* perimeter growth)
+          step 4]
+      (var dist 0)
+      (var tuft-i 0)
+      (each [i edge (ipairs [[0 0 1 0]      ; top
+                             [w 0 0 1]      ; right
+                             [w h -1 0]     ; bottom
+                             [0 h 0 -1]])]  ; left
+        (let [ex (. edge 1)
+              ey (. edge 2)
+              dx (. edge 3)
+              dy (. edge 4)
+              len (if (= 0 dx) h w)]
+          (var t 0)
+          (while (and (< t len) (< dist drawn-len))
+            (let [px (math.floor (+ ex (* dx t)))
+                  py (math.floor (+ ey (* dy t)))]
+              (ctx.rect px py 3 3 {:fill (. pal :leaf-deep)})
+              (when (= 0 (% tuft-i 6))
+                (let [bob (if (>= growth 1)
+                              (math.floor (* 1 (math.sin (+ (* now 2) tuft-i))))
+                              0)]
+                  (ctx.rect (- px 1) (+ py bob -1) 5 5
+                            {:fill (. pal :leaf-mid)})
+                  (ctx.rect (+ px 1) (+ py bob)   1 1
+                            {:fill (. pal :leaf-bright)})))
+              (set tuft-i (+ tuft-i 1))
+              (set dist (+ dist step))
+              (set t (+ t step)))))))))
+
 ;; ===== Theme =====
 
 (theme-mod.set-theme
@@ -275,7 +320,8 @@
                db))
 
 (reg-handler :event/drag
-             (fn [db event] db))
+             (fn [db event]
+               (assoc db :drag-start-time (redin.now))))
 
 (reg-handler :event/over
              (fn [db event] db))
@@ -295,7 +341,7 @@
                                      (when (not= i from-idx) v))]
                      (table.insert new-items to-idx item)
                      (assoc db :items new-items))))
-               db))
+               (assoc db :drag-start-time nil)))
 
 ;; ===== View =====
 
@@ -338,7 +384,10 @@
                                      {:mode :preview
                                       :handle false
                                       :event :event/drag
-                                      :aspect :row-vining}
+                                      :aspect :row-vining
+                                      :animate {:provider :vine
+                                                :rect [:top_left -6 -6 :full :full]
+                                                :z :above}}
                                      i]
                          :dropable [:row-drag
                                     {:event :event/drop
