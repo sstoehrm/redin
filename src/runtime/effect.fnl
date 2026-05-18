@@ -84,7 +84,12 @@
           (dispatch-fn event)))))
   (M.reg-fx :dispatch-later
     (fn [params]
-      (let [now (* (os.clock) 1000)]
+      ;; Wall-clock ms when the bridge is present, falling back to
+      ;; CPU time for pure-Lua tests. The host polls with wall-clock,
+      ;; so the two clocks must agree in production. See issue #146.
+      (let [now (if (and _G.redin _G.redin.now)
+                  (* (_G.redin.now) 1000)
+                  (* (os.clock) 1000))]
         (if (and (= (type params) "table") (. params :ms))
           (table.insert timer-queue {:at (+ now params.ms) :event params.dispatch})
           (each [_ timer-spec (ipairs params)]

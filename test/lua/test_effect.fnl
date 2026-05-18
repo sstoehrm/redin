@@ -104,6 +104,39 @@
   (effect.clear-timers)
   (assert (= (effect.pending-timers) 0) "timers cleared"))
 
+;; Regression test for issue #146.
+;;
+;; In production the host calls poll-timers with wall-clock ms
+;; (`time.to_unix_nanoseconds(time.now()) / 1e6`, which is on the order
+;; of 1.78e12). The scheduler must record `:at` on the same scale,
+;; otherwise every timer fires instantly the next frame and any
+;; self-rearming dispatch-later loop hangs the app.
+;;
+;; The scheduler reads wall-clock ms from `_G.redin.now` (the bridge's
+;; cfunc, units of seconds). When `_G.redin` is not present (pure-Lua
+;; tests above), it falls back to `os.clock` so legacy tests keep
+;; working.
+(fn t.test-dispatch-later-uses-wall-clock-when-bridge-present []
+  (setup)
+  (dataflow.init {:counter 0})
+  (dataflow.register-globals)
+  (dataflow.reg-handler :event/tick
+    (fn [db event]
+      (dataflow.update db :counter #(+ $1 1))))
+  ;; Simulate the bridge: redin.now returns wall-clock seconds.
+  (set _G.redin {:now (fn [] 1000000)})
+  (effect.execute {:db nil :dispatch-later {:ms 100 :dispatch [:event/tick]}})
+  ;; The host polls with wall-clock ms. Before the timer's :at, no fire.
+  (effect.poll-timers (+ (* 1000000 1000) 50))
+  (assert (= (rawget (dataflow._get-raw-db) :counter) 0)
+          "timer not fired before scheduled :at")
+  ;; After :at, fires exactly once.
+  (effect.poll-timers (+ (* 1000000 1000) 150))
+  (assert (= (rawget (dataflow._get-raw-db) :counter) 1)
+          "timer fired after scheduled :at")
+  ;; Restore so later tests are not polluted.
+  (set _G.redin nil))
+
 (fn t.test-globals-registered []
   (setup)
   (effect.register-globals)
