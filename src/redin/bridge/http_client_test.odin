@@ -522,13 +522,14 @@ test_http_timeout_fires :: proc(t: ^testing.T) {
 }
 
 @(test)
-// Known leak: the 64 in-flight workers are blocked in odin-http's
-// http_client.request, which has no cancellation knob. http_client_destroy
-// waits 3 s for them to drain via the timeout sweep, then logs and gives up.
-// The tracking allocator reports each worker's scanner buffer (~4 KiB) as
-// leaked. Eliminating this requires either modifying odin-http (vendored,
-// out of scope) or tracking + closing pending sockets from destroy
-// (substantial change). The leak is bounded and shutdown-only.
+// Known leak (tracked in #156): the 64 in-flight workers are blocked in
+// odin-http's http_client.request, which has no cancellation knob.
+// http_client_destroy waits 3 s for them to drain via the timeout sweep,
+// then logs and gives up. The tracking allocator reports each worker's
+// scanner buffer (~4 KiB, allocated in lib/odin-http/client/
+// communication.odin:141) as leaked. Bounded at MAX_INFLIGHT_HTTP × ~4 KiB
+// = 256 KiB; shutdown-only. Eliminating it requires either an upstream
+// cancellation API or tracking + closing pending sockets from destroy.
 test_http_inflight_cap_rejects :: proc(t: ^testing.T) {
 	sync.lock(&g_test_http_state_mutex)
 	defer sync.unlock(&g_test_http_state_mutex)
