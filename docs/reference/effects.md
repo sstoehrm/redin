@@ -104,7 +104,7 @@ Make an async HTTP request. The response is routed back as an event.
 | `"http header contains invalid character"` | A header key or value contained `\r`, `\n`, or `\x00`. |
 | `"http timeout exceeded"` | Wall-clock timeout (per-call `:timeout`, default 30000 ms) elapsed. |
 | `"too many concurrent http requests (cap 64)"` | Submitted while 64 in-flight requests were already running. |
-| `"host <name> not in http whitelist"` | Whitelist is set (`bridge.set_http_whitelist`) and the URL host is not on it. See [native bridge](native-bridge.md). |
+| `"host <name> not in http whitelist"` | Whitelist denies this host. Deny-by-default since #136 H2 — set `bridge.set_http_whitelist([]string{"*"})` to allow any host. See [native bridge](native-bridge.md). |
 
 **Success handler** receives `[event-name response]`:
 
@@ -161,7 +161,7 @@ Spawn a child process. The result is routed back as an event.
 | `"shell timeout exceeded N ms"` | Wall-clock timeout (per-call `:timeout`, default 30000 ms) elapsed; child killed. |
 | `"shell output exceeded N MiB cap"` | Combined stdout + stderr exceeded the cap (per-call `:max-output`, default 16 MiB); child killed. |
 
-The shell-env allowlist (`bridge.set_shell_env_allowlist`, see [native bridge](native-bridge.md)) is applied at spawn time and does not produce a runtime failure — children just see a stripped environment when it is set.
+The shell-env allowlist (`bridge.set_shell_env_allowlist`, see [native bridge](native-bridge.md)) is applied at spawn time and does not produce a runtime failure. **Deny-by-default since #136 H3:** with no allowlist set the child gets an empty environment. Pass `[]string{"*"}` for full parent-env passthrough, or list specific KEYs (`{"PATH", "HOME", ...}`). Tools that resolve their executable via `$PATH` will fail with "command not found" unless you list `"PATH"` or pass absolute paths in `:cmd`.
 
 ---
 

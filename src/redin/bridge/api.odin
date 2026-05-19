@@ -460,36 +460,25 @@ set_http_whitelist :: proc(allow: []string) {
 	g_http_whitelist = cloned
 }
 
-// #129 H1: warn loudly once per process the first time redin.http is invoked
-// with no whitelist set. Fail-open is intentional (keeps the framework usable
-// as a scripting toolkit), but combined with the dev server's /events pivot
-// this grants any holder of .redin-token outbound HTTP. The warning surfaces
-// the choice so app authors can opt in to restriction.
-@(private) g_http_open_warned: bool
-
-@(private)
-http_warn_open_once :: proc() {
-	sync.lock(&g_http_whitelist_mutex)
-	defer sync.unlock(&g_http_whitelist_mutex)
-	if g_http_whitelist != nil do return
-	if g_http_open_warned do return
-	g_http_open_warned = true
-	fmt.eprintln("[redin] WARNING: redin.http called with no host whitelist (#129 H1).")
-	fmt.eprintln("[redin]   Outbound HTTP is unrestricted. Call bridge.set_http_whitelist([...])")
-	fmt.eprintln("[redin]   from app.odin to restrict. Logged once per process.")
-}
-
 // http_whitelist_check returns ("", true) if allowed, ("<rejected host>", false)
 // otherwise. host must already be the URL host (no port, no scheme).
+//
+// Defaults (#136 H2): an unset or empty whitelist denies every outbound
+// host. To re-enable the historical open-by-default behaviour, call
+// `bridge.set_http_whitelist([]string{"*"})` from app.odin — the `"*"`
+// entry is a sentinel wildcard that matches any host.
 @(private)
 http_whitelist_check :: proc(host: string) -> (rejected: string, ok: bool) {
 	sync.lock(&g_http_whitelist_mutex)
 	defer sync.unlock(&g_http_whitelist_mutex)
 
-	if g_http_whitelist == nil do return "", true
+	if len(g_http_whitelist) == 0 do return host, false
 
 	host_lower := strings.to_lower(host, context.temp_allocator)
 	for entry in g_http_whitelist {
+		// Sentinel wildcard — matches any host. Explicit opt-out of
+		// the deny-by-default policy.
+		if entry == "*" do return "", true
 		// CIDR entry?
 		if strings.contains(entry, "/") {
 			if cidr_match(host, entry) do return "", true
@@ -599,37 +588,50 @@ set_shell_env_allowlist :: proc(allow: []string) {
 	g_shell_env_allowlist = cloned
 }
 
-// #129 H1: warn loudly once per process the first time redin.shell is invoked
-// with no env allowlist set. Combined with the unrestricted argv surface and
-// the dev server's /events pivot, this is local code execution for any
-// holder of .redin-token.
-@(private) g_shell_open_warned: bool
-
-@(private)
-shell_warn_open_once :: proc() {
-	sync.lock(&g_shell_env_allowlist_mutex)
-	defer sync.unlock(&g_shell_env_allowlist_mutex)
-	if g_shell_env_allowlist != nil do return
-	if g_shell_open_warned do return
-	g_shell_open_warned = true
-	fmt.eprintln("[redin] WARNING: redin.shell called with no env allowlist (#129 H1).")
-	fmt.eprintln("[redin]   Child inherits the full parent env; argv is unrestricted by design.")
-	fmt.eprintln("[redin]   Call bridge.set_shell_env_allowlist([...]) from app.odin to restrict.")
-	fmt.eprintln("[redin]   Logged once per process.")
+// Shell_Env_Disposition tells the caller what to put in Process_Desc.env.
+// Returned by shell_env_filtered.
+Shell_Env_Disposition :: enum {
+	// Pass Process_Desc.env = nil — child inherits the full parent env.
+	// Only reached when the allowlist contains the sentinel "*" entry.
+	Inherit,
+	// Pass Process_Desc.env = <non-nil zero-length slice> — child gets
+	// an empty environment. Reached when the allowlist is nil or empty
+	// (the deny-by-default case from #136 H3).
+	Empty,
+	// Pass Process_Desc.env = filtered (returned slice). Child sees only
+	// the env vars whose KEYs match an allowlist entry.
+	Filtered,
 }
 
-// shell_env_filtered returns the filtered env, or nil if the allowlist is
-// unset (caller should leave Process_Desc.env = nil for full passthrough).
-// Returned slice is owned by the caller (free each entry + the slice
-// itself, both with the same allocator that the heap_allocator yields).
+// shell_env_filtered returns:
+//   - Inherit, nil          → caller sets env = nil (full passthrough)
+//   - Empty, nil            → caller substitutes a non-nil zero-length
+//                              slice (e.g. a stack-backed slice) so
+//                              Process_Desc.env != nil and the child
+//                              gets an empty environment
+//   - Filtered, owned-slice → caller assigns env directly. The slice's
+//                              entries + the slice itself are owned by
+//                              the caller and must be freed with the
+//                              heap allocator after process_start.
+//
+// Defaults (#136 H3): an unset or empty allowlist gives the child an
+// empty environment. To re-enable the historical full-passthrough
+// behaviour, call `bridge.set_shell_env_allowlist([]string{"*"})` from
+// app.odin — the `"*"` entry is a sentinel wildcard.
 @(private)
-shell_env_filtered :: proc() -> []string {
+shell_env_filtered :: proc() -> (env: []string, disposition: Shell_Env_Disposition) {
 	sync.lock(&g_shell_env_allowlist_mutex)
 	defer sync.unlock(&g_shell_env_allowlist_mutex)
 
-	if g_shell_env_allowlist == nil do return nil
-
 	heap := runtime.heap_allocator()
+
+	// Sentinel wildcard — explicit opt-out of the deny-by-default policy.
+	for entry in g_shell_env_allowlist {
+		if entry == "*" do return nil, .Inherit
+	}
+
+	// Unset or empty allowlist → empty env.
+	if len(g_shell_env_allowlist) == 0 do return nil, .Empty
 
 	// os.environ allocates a fresh []string + cloned KEY=VALUE entries
 	// using the supplied allocator. Free the unused entries below.
@@ -638,7 +640,7 @@ shell_env_filtered :: proc() -> []string {
 		// Fall back to an explicit "no env" rather than passthrough; if the
 		// caller set an allowlist they explicitly opted into restriction,
 		// so a fetch failure must not silently widen the surface.
-		return make([]string, 0, heap)
+		return nil, .Empty
 	}
 	defer delete(all_env, heap)
 
@@ -664,5 +666,5 @@ shell_env_filtered :: proc() -> []string {
 			delete(entry, heap)
 		}
 	}
-	return out[:]
+	return out[:], .Filtered
 }
