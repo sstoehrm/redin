@@ -92,15 +92,24 @@
   ;; trunk: vertical column 16px wide, base at bottom
   (ctx.rect 112 100 16 220 {:fill (. pal :bark-dark)})
   (ctx.rect 124 100 4  220 {:fill (. pal :bark-mid)})    ; lit edge
-  ;; four diagonal branches drawn as a chain of 4×4 rects
+  ;; A few knot markers on the trunk for texture (pure pixel-art flair).
+  (ctx.rect 114 150 4 4 {:fill (. pal :bark-mid)})
+  (ctx.rect 120 240 4 4 {:fill (. pal :bark-mid)})
+  ;; Branches as discrete tapered chunks: 8×8 at the base shrinking to 4×4
+  ;; at the tip, spaced one chunk-length apart so they don't overlap into
+  ;; stripes. This is what gives the chunky pixel-art feel.
   (let [paint (fn [x0 y0 x1 y1]
-                (let [steps 18]
+                (let [steps 9]
                   (for [i 0 steps]
                     (let [t (/ i steps)
                           x (math.floor (+ x0 (* (- x1 x0) t)))
-                          y (math.floor (+ y0 (* (- y1 y0) t)))]
-                      (ctx.rect x y 6 6 {:fill (. pal :bark-dark)})
-                      (ctx.rect (+ x 4) y 2 6 {:fill (. pal :bark-mid)})))))]
+                          y (math.floor (+ y0 (* (- y1 y0) t)))
+                          ;; taper 8 → 4 from base to tip
+                          thick (math.max 4 (- 8 (math.floor (* t 4))))]
+                      (ctx.rect x y thick thick {:fill (. pal :bark-dark)})
+                      ;; lit edge on the right side of each chunk
+                      (ctx.rect (+ x thick -2) y 2 thick
+                                {:fill (. pal :bark-mid)})))))]
     (paint 112 200  40 140)
     (paint 128 200 200 140)
     (paint 112 130  60  80)
@@ -182,6 +191,19 @@
 ;; drag preview only, so we always know we're being drawn around a
 ;; cloned, dragged row.
 
+;; The canvas (sized via :animate :rect below) hugs the row tightly on
+;; three sides and reserves a strip beneath for hanging tendrils.
+;; Layout in canvas-local coords:
+;;
+;;     ┌─────────────────────────────────┐  ← canvas top  (y=0)
+;;     │  halo  ┌───────────────────┐    │
+;;     │        │   dragged  row    │    │
+;;     │  halo  └───────────────────┘    │
+;;     │        ↓ tendrils hang here ↓   │
+;;     └─────────────────────────────────┘  ← canvas bottom (y=h)
+;;
+;; The perimeter walk traces the halo box (not the full canvas), and the
+;; tendrils drop from the halo's bottom edge into the strip below.
 (canvas.register
   :vine
   (fn [ctx]
@@ -190,37 +212,90 @@
           start (subscribe :drag-start-time)
           now (redin.now)
           age (if start (- now start) 0)
-          growth (math.min 1 (* age 2.5))
-          perimeter (* 2 (+ w h))
+          ;; Perimeter wraps over the first 1.0s of the drag; tendrils
+          ;; then grow from 1.0s to ~2.0s.
+          growth (math.min 1 age)
+          ;; Halo box around the row — 4px margin on top + sides.
+          halo-x 4
+          halo-y 4
+          halo-w (- w (* 2 halo-x))
+          halo-h 50                          ; row 42 + 4 top + 4 bottom
+          perimeter (* 2 (+ halo-w halo-h))
           drawn-len (* perimeter growth)
-          step 4]
+          step 6
+          stem-size 6
+          tuft-size 12
+          tuft-every 5]
       (var dist 0)
       (var tuft-i 0)
-      (each [i edge (ipairs [[0 0 1 0]      ; top
-                             [w 0 0 1]      ; right
-                             [w h -1 0]     ; bottom
-                             [0 h 0 -1]])]  ; left
+      (each [_ edge (ipairs [[halo-x halo-y 1 0]                          ; top
+                             [(+ halo-x halo-w) halo-y 0 1]               ; right
+                             [(+ halo-x halo-w) (+ halo-y halo-h) -1 0]   ; bottom
+                             [halo-x (+ halo-y halo-h) 0 -1]])]           ; left
         (let [ex (. edge 1)
               ey (. edge 2)
               dx (. edge 3)
               dy (. edge 4)
-              len (if (= 0 dx) h w)]
+              len (if (= 0 dx) halo-h halo-w)]
           (var t 0)
           (while (and (< t len) (< dist drawn-len))
             (let [px (math.floor (+ ex (* dx t)))
                   py (math.floor (+ ey (* dy t)))]
-              (ctx.rect px py 3 3 {:fill (. pal :leaf-deep)})
-              (when (= 0 (% tuft-i 6))
+              (ctx.rect px py stem-size stem-size {:fill (. pal :leaf-deep)})
+              (ctx.rect (+ px 2) (+ py 2) 2 2 {:fill (. pal :leaf-mid)})
+              (when (= 0 (% tuft-i tuft-every))
                 (let [bob (if (>= growth 1)
-                              (math.floor (* 1 (math.sin (+ (* now 2) tuft-i))))
-                              0)]
-                  (ctx.rect (- px 1) (+ py bob -1) 5 5
+                              (math.floor (* 2 (math.sin (+ now tuft-i))))
+                              0)
+                      tx (- px 2)
+                      ty (+ py bob -3)]
+                  (ctx.rect tx ty tuft-size tuft-size {:fill (. pal :leaf-deep)})
+                  (ctx.rect (+ tx 2) (+ ty 2) (- tuft-size 4) (- tuft-size 4)
                             {:fill (. pal :leaf-mid)})
-                  (ctx.rect (+ px 1) (+ py bob)   1 1
-                            {:fill (. pal :leaf-bright)})))
+                  (ctx.rect (+ tx 4) (+ ty 3) 3 3 {:fill (. pal :leaf-bright)})))
               (set tuft-i (+ tuft-i 1))
               (set dist (+ dist step))
-              (set t (+ t step)))))))))
+              (set t (+ t step))))))
+      ;; Tendrils hang from the halo's bottom edge into the strip below
+      ;; the row. They sprout AFTER the perimeter wrap completes, so the
+      ;; eye reads it as the vine "dripping" once it has hugged the row.
+      ;; Each tendril is a 5px-wide chunky stem with a leaf cluster
+      ;; budding every 12px and a heavier leaf at the dangling tip.
+      (when (>= growth 1)
+        (let [drop-top (+ halo-y halo-h)
+              drop-room (- h drop-top)
+              reach (math.floor (* (math.min 1 (- age 1)) drop-room))
+              steps (math.floor (/ reach 4))
+              cols [(+ halo-x 20)
+                    (+ halo-x (math.floor (/ halo-w 3)))
+                    (+ halo-x (math.floor (/ (* halo-w 2) 3)))
+                    (+ halo-x halo-w -20)]]
+          (each [col-i cx (ipairs cols)]
+            ;; Each tendril sways independently for a touch of life.
+            (let [sway-amp (math.sin (+ (* now 1.2) col-i))]
+              (for [j 0 steps]
+                (let [ty (+ drop-top (* j 4))
+                      tx (+ cx (math.floor (* sway-amp (* j 0.6))))]
+                  ;; Chunky 5×5 stem segment.
+                  (ctx.rect tx ty 5 5 {:fill (. pal :leaf-deep)})
+                  (ctx.rect (+ tx 1) (+ ty 1) 2 2 {:fill (. pal :leaf-mid)})
+                  ;; Leaf cluster every 3 segments.
+                  (when (and (= (% j 3) 0) (> j 0))
+                    (let [side (if (= (% (+ col-i j) 2) 0) 5 -8)]
+                      (ctx.rect (+ tx side) (+ ty 1) 8 6
+                                {:fill (. pal :leaf-deep)})
+                      (ctx.rect (+ tx side 1) (+ ty 2) 6 4
+                                {:fill (. pal :leaf-mid)})
+                      (ctx.rect (+ tx side 2) (+ ty 2) 2 2
+                                {:fill (. pal :leaf-bright)})))))
+              ;; Heavier "berry" leaf at the very tip of the tendril.
+              (when (> steps 2)
+                (let [ty (+ drop-top (* steps 4))
+                      tx (+ cx (math.floor (* sway-amp (* steps 0.6))))]
+                  (ctx.rect (- tx 4) ty 12 8 {:fill (. pal :leaf-deep)})
+                  (ctx.rect (- tx 3) (+ ty 1) 10 6 {:fill (. pal :leaf-mid)})
+                  (ctx.rect (- tx 1) (+ ty 2) 3 3
+                            {:fill (. pal :leaf-bright)}))))))))))
 
 ;; ===== Canvas: vine-grip (grab affordance) =====
 ;; A vertical run of 3 small mushroom dots — the grab affordance.
@@ -409,8 +484,12 @@
                                       :handle false
                                       :event :event/drag
                                       :aspect :row-vining
+                                      ;; Vine canvas hugs the row tightly
+                                      ;; (8px halo top + sides) and adds a
+                                      ;; 70px strip below for the hanging
+                                      ;; tendrils to drip into.
                                       :animate {:provider :vine
-                                                :rect [:top_left -6 -6 :full :full]
+                                                :rect [:top_left -8 -8 456 120]
                                                 :z :above}}
                                      i]
                          :dropable [:row-drag
