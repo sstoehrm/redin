@@ -147,10 +147,11 @@ http_client_destroy :: proc(hc: ^Http_Client) {
 
 	// Final cleanup. Anything still alive is a worker we couldn't drain
 	// — log and leak (better than UAF when the worker eventually
-	// returns).
+	// returns). Each stuck worker leaks ~4 KiB (its scanner buffer in
+	// odin-http's parse_response); bounded by MAX_INFLIGHT_HTTP. See #156.
 	leaked := sync.atomic_load(&hc.workers_alive)
 	if leaked > 0 {
-		fmt.eprintfln("redin: warning: %d HTTP worker(s) still in flight at shutdown; leaking their state", leaked)
+		fmt.eprintfln("redin: warning: %d HTTP worker(s) still in flight at shutdown; leaking their state (~4 KiB each, see #156)", leaked)
 	}
 
 	sync.lock(&hc.results_mutex)

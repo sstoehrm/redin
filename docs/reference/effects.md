@@ -106,6 +106,8 @@ Make an async HTTP request. The response is routed back as an event.
 | `"too many concurrent http requests (cap 64)"` | Submitted while 64 in-flight requests were already running. |
 | `"host <name> not in http whitelist"` | Whitelist denies this host. Deny-by-default since #136 H2 — set `bridge.set_http_whitelist([]string{"*"})` to allow any host. See [native bridge](native-bridge.md). |
 
+**Shutdown behavior.** `http_client_destroy` waits up to 3 s for in-flight workers to drain. Workers parked inside the underlying socket read can't be cancelled (odin-http has no cancellation knob), so on timeout the bridge logs `"redin: warning: N HTTP worker(s) still in flight at shutdown"` and leaks each stuck worker's ~4 KiB response-scanner buffer. The leak is bounded (cap 64 workers × 4 KiB = 256 KiB) and shutdown-only. Tracked in #156.
+
 **Success handler** receives `[event-name response]`:
 
 ```fennel
