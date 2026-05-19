@@ -41,6 +41,7 @@ test_conn_queue_nil_sentinel :: proc(t: ^testing.T) {
 @(test)
 test_handler_pool_size_constant :: proc(t: ^testing.T) {
 	// Pool size is part of the contract — fix the value here so an
-	// accidental tweak in devserver.odin trips this test.
-	testing.expect_value(t, HANDLER_POOL_SIZE, 4)
+	// accidental tweak in devserver.odin trips this test. Raised from
+	// 4 → 16 in #136 M4 (slowloris mitigation).
+	testing.expect_value(t, HANDLER_POOL_SIZE, 16)
 }

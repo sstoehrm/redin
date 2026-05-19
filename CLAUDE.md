@@ -120,7 +120,7 @@ walks upward (8801, 8802, ...) if busy, and writes the bound port to
 `./.redin-token` (0600). Every non-`OPTIONS` request must carry
 `Authorization: Bearer <token>`, and the `Host` header must be
 `localhost:<port>` / `127.0.0.1:<port>`. Requests are served by an
-acceptor plus a 4-handler worker pool (up to 4 in flight at a time).
+acceptor plus a 16-handler worker pool (up to 16 in flight at a time).
 
 | Method | Path | Description |
 |--------|------|-------------|
