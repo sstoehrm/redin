@@ -10,7 +10,7 @@ Starts when the binary was built with `-define:REDIN_DEV=true` (or `-define:REDI
 
 Read endpoints reflect the last state pushed to the host. Write endpoints queue events into the main input channel as if they came from real user input.
 
-The listener is an acceptor thread plus a fixed pool of 4 handler threads, so up to 4 requests can be in flight at once. Beyond that, new connections queue until a handler frees up.
+The listener is an acceptor thread plus a fixed pool of 16 handler threads, so up to 16 requests can be in flight at once. Beyond that, new connections queue until a handler frees up. Each connection is bounded by a 2-second per-recv timeout and a 10-second total request deadline — slowloris caps, not user-facing knobs.
 
 Implementation: `src/redin/bridge/devserver.odin`.
 

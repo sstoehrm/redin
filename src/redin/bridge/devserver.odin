@@ -41,8 +41,14 @@ Sync_Queue :: struct {
 }
 
 // --- Handler pool queue (#129 H8) ---
-
-HANDLER_POOL_SIZE :: 4
+//
+// Pool size raised from 4 → 16 in response to #136 M4: four slow-header
+// connections could otherwise pin every worker for up to the request
+// deadline, blocking legitimate localhost callers. The bigger pool plus
+// the tightened CLIENT_RECV_TIMEOUT below means a slowloris-style
+// attacker would need 16 concurrent connections AND a per-recv that
+// beats a 2-second timer to keep the server fully wedged.
+HANDLER_POOL_SIZE :: 16
 
 Pending_Conn :: struct {
 	socket: net.TCP_Socket,
@@ -377,15 +383,21 @@ devserver_drain_events :: proc(ds: ^Dev_Server, events: ^[dynamic]types.InputEve
 // --- Simple blocking HTTP server thread ---
 
 // Per-recv deadline. Slowloris variant "connect and send nothing"
-// unblocks via SO_RCVTIMEO when recv returns after this. Value kept
-// generous enough to not trip up a sluggish local client.
-CLIENT_RECV_TIMEOUT :: 5 * time.Second
+// unblocks via SO_RCVTIMEO when recv returns after this. Tightened
+// from 5s → 2s for #136 M4 — the server is loopback-only, so any
+// legitimate client should produce request bytes within a single
+// scheduler quantum. A 2-second timeout still tolerates very sluggish
+// local tooling without giving a slowloris client free pinning.
+CLIENT_RECV_TIMEOUT :: 2 * time.Second
 
 // Total time any one request may take from accept to end-of-body,
 // regardless of per-recv progress. Defends against drip-feed
 // slowloris where a client sends one byte every CLIENT_RECV_TIMEOUT
-// just often enough to keep the per-recv timer from firing.
-CLIENT_REQUEST_DEADLINE :: 30 * time.Second
+// just often enough to keep the per-recv timer from firing. Tightened
+// from 30s → 10s for #136 M4: a real request finishes in milliseconds
+// over loopback, 10s is already extravagantly generous, and the lower
+// ceiling caps how long a hostile connection can monopolise a worker.
+CLIENT_REQUEST_DEADLINE :: 10 * time.Second
 
 acceptor_thread_proc :: proc(ds: ^Dev_Server) {
 	for ds.running {
