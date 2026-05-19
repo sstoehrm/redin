@@ -458,7 +458,7 @@ _flatten :: proc(
 
 	p := make([]u8, len(cur))
 	copy(p, cur[:])
-	append(paths, types.Path{value = p, length = u8(len(p))})
+	append(paths, types.Path{value = p, length = u16(len(p))})
 	append(nodes, n.data)
 	append(parent_indices, parent_idx)
 	append(children_list, types.Children{}) // placeholder

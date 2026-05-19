@@ -75,9 +75,9 @@ _parse_theme_props :: proc(p: ^_Parser) -> types.Theme {
 			case "border":
 				t.border = _parse_rgb(p)
 			case "border-width":
-				t.border_width = u8(_read_number(p))
+				t.border_width = _to_u8(_read_number(p))
 			case "radius":
-				t.radius = u8(_read_number(p))
+				t.radius = _to_u8(_read_number(p))
 			case "font-size":
 				t.font_size = f16(_read_number(p))
 			case "font":
@@ -94,7 +94,7 @@ _parse_theme_props :: proc(p: ^_Parser) -> types.Theme {
 					if w == "bold" do t.weight = 1
 					else if w == "italic" do t.weight = 2
 				} else if c2 >= '0' && c2 <= '9' {
-					t.weight = u8(_read_number(p))
+					t.weight = _to_u8(_read_number(p))
 				}
 			case "opacity":
 				t.opacity = _read_number(p)
@@ -119,16 +119,29 @@ _parse_theme_props :: proc(p: ^_Parser) -> types.Theme {
 	return t
 }
 
+// _to_u8 clamps a parsed f32 to [0,255] before truncating to u8.
+// Without this, negative or out-of-range numbers wrap mod 256:
+// `:border-width -1` would silently become 255, `:radius 256.5`
+// would become 0. Combined with the negative-rect path that #136
+// M5 also closed, theme inputs from `PUT /aspects` could drive the
+// renderer into weird states. #136 M6.
+@(private = "file")
+_to_u8 :: proc(n: f32) -> u8 {
+	if n <= 0 do return 0
+	if n >= 255 do return 255
+	return u8(n)
+}
+
 _parse_rgb :: proc(p: ^_Parser) -> [3]u8 {
 	_skip_ws(p)
 	if p.pos < len(p.text) && p.text[p.pos] == '[' {
 		p.pos += 1
 		_skip_ws(p)
-		r := u8(_read_number(p))
+		r := _to_u8(_read_number(p))
 		_skip_ws(p)
-		g := u8(_read_number(p))
+		g := _to_u8(_read_number(p))
 		_skip_ws(p)
-		b := u8(_read_number(p))
+		b := _to_u8(_read_number(p))
 		_skip_ws(p)
 		if p.pos < len(p.text) && p.text[p.pos] == ']' do p.pos += 1
 		return {r, g, b}
@@ -141,13 +154,13 @@ _parse_rgba :: proc(p: ^_Parser) -> [4]u8 {
 	if p.pos < len(p.text) && p.text[p.pos] == '[' {
 		p.pos += 1
 		_skip_ws(p)
-		r := u8(_read_number(p))
+		r := _to_u8(_read_number(p))
 		_skip_ws(p)
-		g := u8(_read_number(p))
+		g := _to_u8(_read_number(p))
 		_skip_ws(p)
-		b := u8(_read_number(p))
+		b := _to_u8(_read_number(p))
 		_skip_ws(p)
-		a := u8(_read_number(p))
+		a := _to_u8(_read_number(p))
 		_skip_ws(p)
 		if p.pos < len(p.text) && p.text[p.pos] == ']' do p.pos += 1
 		return {r, g, b, a}
@@ -160,13 +173,13 @@ _parse_padding :: proc(p: ^_Parser) -> [4]u8 {
 	if p.pos < len(p.text) && p.text[p.pos] == '[' {
 		p.pos += 1
 		_skip_ws(p)
-		top := u8(_read_number(p))
+		top := _to_u8(_read_number(p))
 		_skip_ws(p)
-		right := u8(_read_number(p))
+		right := _to_u8(_read_number(p))
 		_skip_ws(p)
-		bottom := u8(_read_number(p))
+		bottom := _to_u8(_read_number(p))
 		_skip_ws(p)
-		left := u8(_read_number(p))
+		left := _to_u8(_read_number(p))
 		_skip_ws(p)
 		if p.pos < len(p.text) && p.text[p.pos] == ']' do p.pos += 1
 		return {top, right, bottom, left}

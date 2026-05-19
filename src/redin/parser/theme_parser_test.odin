@@ -135,6 +135,29 @@ test_parse_theme_selection :: proc(t: ^testing.T) {
 	testing.expect_value(t, body.selection, [4]u8{255, 220, 0, 120})
 }
 
+// Regression test for issue #136 M6: the theme parser used to truncate
+// f32 values straight to u8, which wrapped on out-of-range numbers
+// (`:border-width -1` → 255, `:radius 256` → 0). Clamping to [0,255]
+// stops a malicious or sloppy `PUT /aspects` body from driving the
+// renderer into states where the wrapped value diverges from what the
+// app wrote.
+@(test)
+test_parse_theme_clamps_u8_fields :: proc(t: ^testing.T) {
+	input := `{:a {:bg [-5 300 128] :padding [-1 256 0 1024] :radius 999 :border-width -2 :weight 5}}`
+	theme, ok := _parse_theme_string(input)
+	defer {
+		for k in theme do delete(k)
+		delete(theme)
+	}
+	testing.expect(t, ok, "parse should succeed")
+	a := theme["a"]
+	testing.expect_value(t, a.bg, [3]u8{0, 255, 128})
+	testing.expect_value(t, a.padding, [4]u8{0, 255, 0, 255})
+	testing.expect_value(t, a.radius, u8(255))
+	testing.expect_value(t, a.border_width, u8(0))
+	testing.expect_value(t, a.weight, u8(5))
+}
+
 @(test)
 test_parse_theme_text_align :: proc(t: ^testing.T) {
 	input := `{:a {:text-align :top}
