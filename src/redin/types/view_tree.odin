@@ -82,8 +82,12 @@ Drag_Over_Attrs :: struct {
 }
 
 Path :: struct {
-	value:  []u8,
-	length: u8,
+	value: []u8,
+	// `length` mirrors `len(value)` (paths are written by parser/_flatten
+	// where each step is one child index). A u8 silently truncated past
+	// depth 255; widened to u16 so the field stays consistent up to the
+	// parser's MAX_NESTING (256) and well beyond. #136 L1.
+	length: u16,
 }
 
 Children :: struct {

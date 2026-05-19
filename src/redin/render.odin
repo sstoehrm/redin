@@ -233,11 +233,15 @@ layout_node :: proc(
 		if len(n.aspect) > 0 {
 			if t, ok := theme[n.aspect]; ok {
 				if t.padding != {} {
+					// Clamp width/height to 0 — a theme with padding
+					// wider than its host would otherwise produce a
+					// negative rect that Raylib's scissor and rect-
+					// outline routines mishandle. #136 M5.
 					content_rect = rl.Rectangle{
 						rect.x + f32(t.padding[3]),
 						rect.y + f32(t.padding[0]),
-						rect.width - f32(t.padding[1]) - f32(t.padding[3]),
-						rect.height - f32(t.padding[0]) - f32(t.padding[2]),
+						max(0, rect.width - f32(t.padding[1]) - f32(t.padding[3])),
+						max(0, rect.height - f32(t.padding[0]) - f32(t.padding[2])),
 					}
 				}
 			}
@@ -355,11 +359,12 @@ layout_box :: proc(
 		effective_aspect := effective_aspect_for_drag(idx, aspect, nodes[idx])
 		if t, ok := theme[effective_aspect]; ok do pad = t.padding
 		if pad != {} {
+			// Clamp width/height to 0 — see #136 M5.
 			content_rect = rl.Rectangle{
 				rect.x + f32(pad[3]),
 				rect.y + f32(pad[0]),
-				rect.width - f32(pad[1]) - f32(pad[3]),
-				rect.height - f32(pad[0]) - f32(pad[2]),
+				max(0, rect.width - f32(pad[1]) - f32(pad[3])),
+				max(0, rect.height - f32(pad[0]) - f32(pad[2])),
 			}
 		}
 	}

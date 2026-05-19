@@ -1229,7 +1229,7 @@ flatten_subtree :: proc(b: ^Bridge, tree: markdown.LoweredTree, parent_flat_idx:
 		append(&b.node_animations, nil)
 		path_copy := make([]u8, len(cur^))
 		copy(path_copy, cur^[:])
-		append(&b.paths, types.Path{value = path_copy, length = u8(len(path_copy))})
+		append(&b.paths, types.Path{value = path_copy, length = u16(len(path_copy))})
 		// Reserve slots — Pass 2 fills parent_indices and children_list.
 		append(&b.parent_indices, 0)
 		append(&b.children_list, types.Children{})
@@ -1320,7 +1320,7 @@ lua_flatten_node :: proc(L: ^Lua_State, index: i32, cur: ^[dynamic]u8, b: ^Bridg
 	my_idx := len(b.nodes)
 	p := make([]u8, len(cur))
 	copy(p, cur[:])
-	append(&b.paths, types.Path{value = p, length = u8(len(p))})
+	append(&b.paths, types.Path{value = p, length = u16(len(p))})
 	append(&b.parent_indices, parent_idx)
 	append(&b.children_list, types.Children{})
 
