@@ -92,6 +92,16 @@ TOKEN_FILE :: ".redin-token"
 PORT_BASE  :: 8800
 PORT_RANGE :: 100
 
+// Constant-pool cstring copies of the cleanup paths. We can't allocate
+// or build cstrings inside a signal handler (no Odin context, no malloc
+// — only async-signal-safe operations are legal), so the paths live
+// here as compile-time `cstring` constants. Keep them in sync with
+// PORT_FILE / TOKEN_FILE if those ever change.
+@(private = "file")
+SIGNAL_PORT_FILE_C: cstring : ".redin-port"
+@(private = "file")
+SIGNAL_TOKEN_FILE_C: cstring : ".redin-token"
+
 // Number of bytes of entropy for the auth token. 32 bytes (256 bits)
 // hex-encoded yields a 64-char token.
 AUTH_TOKEN_BYTES :: 32
@@ -112,6 +122,59 @@ sync_queue_drain :: proc(sq: ^Sync_Queue, out: ^[dynamic]^Pending_Request) {
 		}
 	}
 	sync.unlock(&sq.mu)
+}
+
+// --- Signal-driven cleanup ---
+//
+// Without this, a SIGSEGV / SIGKILL / Ctrl-C / kill -9 / OOM leaves
+// `.redin-port` and `.redin-token` on disk. The token files are 0600
+// so they don't leak to other users, but a stale bearer token sitting
+// in CWD is still wrong — it can be misread for a live server. Plus
+// the port file misleads any tooling that polls for "is redin up".
+//
+// Strategy: rt_sigaction with SA_RESETHAND. Our handler runs once,
+// the kernel restores the default disposition automatically, and we
+// re-raise via kill(getpid(), sig) so the original handler (core dump
+// for SIGSEGV, default termination for SIGTERM, etc.) still fires.
+// Inside the handler we only call async-signal-safe primitives:
+// linux.unlink, linux.getpid, linux.kill.
+//
+// Issue #136 (M2).
+
+@(private = "file")
+g_signal_cleanup_installed: bool = false
+
+@(private = "file")
+cleanup_on_signal :: proc "c" (sig: linux.Signal) {
+	linux.unlink(SIGNAL_PORT_FILE_C)
+	linux.unlink(SIGNAL_TOKEN_FILE_C)
+	// SA_RESETHAND already restored the default handler. Re-raise so
+	// the kernel runs that default disposition (e.g. core dump for
+	// SIGSEGV) on this same signal.
+	linux.kill(linux.getpid(), sig)
+}
+
+@(private = "file")
+install_signal_cleanup :: proc() {
+	if g_signal_cleanup_installed do return
+	g_signal_cleanup_installed = true
+
+	sa := linux.Sig_Action(rawptr) {
+		handler = cleanup_on_signal,
+		flags   = {.RESETHAND},
+	}
+	signals := []linux.Signal{
+		.SIGINT,
+		.SIGTERM,
+		.SIGQUIT,
+		.SIGHUP,
+		.SIGSEGV,
+		.SIGABRT,
+	}
+	for s in signals {
+		// nil oldact via casting; we don't care about the previous handler.
+		linux.rt_sigaction(s, &sa, (^linux.Sig_Action(rawptr))(nil))
+	}
 }
 
 // --- Init/Destroy ---
@@ -200,6 +263,11 @@ devserver_init :: proc(ds: ^Dev_Server, b: ^Bridge) {
 		net.close(ds.tcp_sock)
 		return
 	}
+
+	// Now that the port + token files exist on disk, register the
+	// async-signal-safe cleanup so they're removed on crash/Ctrl-C —
+	// not just on clean shutdown. See the block comment above.
+	install_signal_cleanup()
 
 	ds.acceptor_thread = thread.create_and_start_with_poly_data(ds, acceptor_thread_proc, context)
 	for i in 0 ..< HANDLER_POOL_SIZE {

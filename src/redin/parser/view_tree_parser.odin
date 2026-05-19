@@ -73,9 +73,15 @@ _tree_node_destroy_after_flatten :: proc(n: ^_Tree_Node) {
 
 // -- Parser for [:tag {props}? "text"? children...] format --
 
+// Maximum element-nesting depth accepted by the parser. A `.fnl` file
+// nested deeper than this is refused outright (ok=false) rather than
+// allowed to recurse into a stack overflow. Issue #136 (M1).
+MAX_NESTING :: 256
+
 _Parser :: struct {
-	text: string,
-	pos:  int,
+	text:  string,
+	pos:   int,
+	depth: int,
 }
 
 _skip_ws :: proc(p: ^_Parser) {
@@ -248,6 +254,16 @@ _parse_size_f32 :: proc(v: _Prop) -> union {types.SizeValue, f32} {
 }
 
 _parse_element :: proc(p: ^_Parser) -> (_Tree_Node, bool) {
+	if p.depth >= MAX_NESTING {
+		fmt.eprintfln(
+			"view-tree parser: refusing input nested deeper than MAX_NESTING (%d)",
+			MAX_NESTING,
+		)
+		return {}, false
+	}
+	p.depth += 1
+	defer p.depth -= 1
+
 	if _peek(p) != '[' do return {}, false
 	p.pos += 1
 
@@ -266,9 +282,25 @@ _parse_element :: proc(p: ^_Parser) -> (_Tree_Node, bool) {
 	}
 
 	children: [dynamic]_Tree_Node
+	// Bail out of the child loop on parse failure rather than silently
+	// retrying — without this, a depth-limit refusal (MAX_NESTING) on
+	// the next `[` would never consume the character and the parent
+	// would loop forever. Propagate the failure to our caller so the
+	// top-level parse reports ok=false. Issue #136 (M1).
+	child_parse_failed := false
 	for _peek(p) == '[' {
 		child, ok := _parse_element(p)
-		if ok do append(&children, child)
+		if !ok {
+			child_parse_failed = true
+			break
+		}
+		append(&children, child)
+	}
+
+	if child_parse_failed {
+		for &c in children do _tree_node_destroy(&c)
+		delete(children)
+		return {}, false
 	}
 
 	if _peek(p) == ']' do p.pos += 1
