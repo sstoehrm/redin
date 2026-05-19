@@ -28,6 +28,14 @@ import "core:time"
 @(private = "file")
 g_test_http_state_mutex: sync.Mutex
 
+// Deny-by-default whitelist (#136 H2) means tests that issue real HTTP
+// requests without specifically testing the whitelist must opt in to
+// passthrough. The sentinel "*" entry matches any host.
+@(private = "file")
+allow_open_http :: proc() {
+	set_http_whitelist([]string{"*"})
+}
+
 @(private = "file")
 Mock_Server :: struct {
 	sock:     net.TCP_Socket,
@@ -114,6 +122,8 @@ mock_stop :: proc(m: ^Mock_Server) {
 test_http_response_cap_rejects_oversized_content_length :: proc(t: ^testing.T) {
 	sync.lock(&g_test_http_state_mutex)
 	defer sync.unlock(&g_test_http_state_mutex)
+	allow_open_http()
+	defer set_http_whitelist(nil)
 
 	// Announce 32 MiB. With a HTTP_MAX_BODY cap of 16 MiB the underlying
 	// scanner returns Too_Long without reading the body.
@@ -164,6 +174,8 @@ test_http_response_cap_rejects_oversized_content_length :: proc(t: ^testing.T) {
 test_http_header_value_rejects_crlf :: proc(t: ^testing.T) {
 	sync.lock(&g_test_http_state_mutex)
 	defer sync.unlock(&g_test_http_state_mutex)
+	allow_open_http()
+	defer set_http_whitelist(nil)
 
 	headers := make(map[string]string)
 	headers[strings.clone("X-Smuggle")] = strings.clone("evil\r\nHost: attacker")
@@ -198,6 +210,8 @@ test_http_header_value_rejects_crlf :: proc(t: ^testing.T) {
 test_http_header_key_rejects_nul :: proc(t: ^testing.T) {
 	sync.lock(&g_test_http_state_mutex)
 	defer sync.unlock(&g_test_http_state_mutex)
+	allow_open_http()
+	defer set_http_whitelist(nil)
 
 	headers := make(map[string]string)
 	headers[strings.clone("X-Bad\x00key")] = strings.clone("ok")
@@ -232,6 +246,8 @@ test_http_header_key_rejects_nul :: proc(t: ^testing.T) {
 test_http_redirect_not_followed :: proc(t: ^testing.T) {
 	sync.lock(&g_test_http_state_mutex)
 	defer sync.unlock(&g_test_http_state_mutex)
+	allow_open_http()
+	defer set_http_whitelist(nil)
 
 	resp := "HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:1/elsewhere\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
 	m := mock_start(resp)
@@ -306,6 +322,8 @@ test_http_rejects_file_scheme :: proc(t: ^testing.T) {
 test_http_accepts_uppercase_https :: proc(t: ^testing.T) {
 	sync.lock(&g_test_http_state_mutex)
 	defer sync.unlock(&g_test_http_state_mutex)
+	allow_open_http()
+	defer set_http_whitelist(nil)
 
 	// Just confirms scheme matching is case-insensitive — no real connect.
 	// We expect a connect error (status 0, error_msg contains "Request failed"
@@ -466,6 +484,8 @@ slow_mock_serve :: proc(m: ^Mock_Server) {
 test_http_timeout_fires :: proc(t: ^testing.T) {
 	sync.lock(&g_test_http_state_mutex)
 	defer sync.unlock(&g_test_http_state_mutex)
+	allow_open_http()
+	defer set_http_whitelist(nil)
 
 	m := mock_start_slow()
 	if m == nil { testing.fail_now(t, "could not bind a loopback mock server") }
@@ -512,6 +532,8 @@ test_http_timeout_fires :: proc(t: ^testing.T) {
 test_http_inflight_cap_rejects :: proc(t: ^testing.T) {
 	sync.lock(&g_test_http_state_mutex)
 	defer sync.unlock(&g_test_http_state_mutex)
+	allow_open_http()
+	defer set_http_whitelist(nil)
 
 	hc: Http_Client
 	http_client_init(&hc)
@@ -563,6 +585,8 @@ test_http_inflight_cap_rejects :: proc(t: ^testing.T) {
 test_http_destroy_drains_or_times_out :: proc(t: ^testing.T) {
 	sync.lock(&g_test_http_state_mutex)
 	defer sync.unlock(&g_test_http_state_mutex)
+	allow_open_http()
+	defer set_http_whitelist(nil)
 
 	hc := new(Http_Client)
 	http_client_init(hc)

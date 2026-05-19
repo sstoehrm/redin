@@ -154,20 +154,35 @@ execute_shell :: proc(req: Shell_Request) -> Shell_Response {
 		stdin_w = w
 	}
 
-	// Apply the env allowlist (issue #99 M3). When the allowlist is unset,
-	// shell_env_filtered returns nil — and Process_Desc.env = nil is the
-	// documented "inherit current process' environment" sentinel (see
-	// core/os/process.odin's Process_Desc docstring), preserving the
-	// historical full-passthrough behaviour.
-	//
-	// When set, shell_env_filtered allocates each entry + the slice via
-	// runtime.heap_allocator(); we free both after process_start, since
-	// process_start (Linux execve) copies the env into the child image.
-	filtered_env := shell_env_filtered()
-	defer if filtered_env != nil {
+	// Apply the env allowlist (#136 H3). Deny-by-default:
+	//   - Allowlist unset/empty → child gets an empty env. We pass a
+	//     non-nil zero-length slice (backed by `empty_env_backing` on
+	//     the stack) because Process_Desc treats env == nil as "inherit
+	//     parent" (core/os/process.odin); a freshly-make()d empty slice
+	//     is data-nil and compares equal to nil, so it wouldn't work.
+	//   - Allowlist contains "*" → full passthrough via env = nil.
+	//   - Otherwise → filtered slice from shell_env_filtered.
+	// When the disposition is Filtered, shell_env_filtered allocates
+	// each entry + the slice via runtime.heap_allocator(); we free both
+	// after process_start (Linux execve copies env into the child image).
+	filtered_env, env_disposition := shell_env_filtered()
+	defer if env_disposition == .Filtered && filtered_env != nil {
 		heap := runtime.heap_allocator()
 		for s in filtered_env do delete(s, heap)
 		delete(filtered_env, heap)
+	}
+
+	empty_env_backing: [1]string
+	child_env: []string
+	switch env_disposition {
+	case .Inherit:
+		child_env = nil
+	case .Empty:
+		// Non-nil zero-length slice; data points at `empty_env_backing`
+		// so the slice doesn't compare equal to nil.
+		child_env = empty_env_backing[:0]
+	case .Filtered:
+		child_env = filtered_env
 	}
 
 	// Start process
@@ -176,7 +191,7 @@ execute_shell :: proc(req: Shell_Request) -> Shell_Response {
 		stdout  = stdout_w,
 		stderr  = stderr_w,
 		stdin   = stdin_r,
-		env     = filtered_env, // nil = inherit parent env (default)
+		env     = child_env,
 	}
 
 	process, start_err := os.process_start(desc)

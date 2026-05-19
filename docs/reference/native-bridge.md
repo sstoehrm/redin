@@ -111,33 +111,57 @@ ok, err := bridge.dispatch_tos(L, "combat/push")
 
 ## Effect policy setters
 
-These setters install host-side policy for the built-in `redin.http` and `redin.shell` host functions. Both are global, take a slice of strings (cloned internally), and accept `nil` to clear back to the permissive default. Call before or after `redin.run`; changes apply to subsequent requests.
+These setters install host-side policy for the built-in `redin.http` and `redin.shell` host functions. Both are global, take a slice of strings (cloned internally), and accept `nil` to reset to the deny-by-default state. Call before or after `redin.run`; changes apply to subsequent requests.
 
-**Open-default warning.** When the setter has not been called, the first invocation of the corresponding host function prints a one-shot `[redin] WARNING:` block to stderr explaining that the surface is unrestricted and pointing at the setter. Logged once per process. This is an intentional nudge — call the setter explicitly to acknowledge the open default and silence the warning.
+**Deny-by-default (#136 H2, H3).** When the setter has not been called (or has been called with `nil` or an empty slice), the corresponding surface is closed:
+
+- `redin.http` → every outbound host is rejected with `host <name> not in http whitelist`.
+- `redin.shell` → spawned children get an empty environment.
+
+To re-enable the historical open-by-default behaviour, pass the wildcard sentinel `"*"`:
+
+```odin
+bridge.set_http_whitelist([]string{"*"})         // accept any host
+bridge.set_shell_env_allowlist([]string{"*"})    // full parent-env passthrough
+```
+
+`"*"` works with the rest of the list (e.g. `[]string{"*", "extra"}`), though there's no reason to mix it with real entries — the wildcard always matches first.
 
 ### `bridge.set_http_whitelist(allow: []string)`
 
-When set, `redin.http` accepts only URLs whose host matches an entry. Entries are either hostname literals (case-insensitive — e.g. `"api.example.com"`) or CIDR blocks (IPv4 or IPv6 — e.g. `"127.0.0.0/8"`, `"::1/128"`). CIDR entries are matched only against IP-literal hosts, not DNS names. `nil` (the default) accepts any host.
+Configures which hosts `redin.http` will dial. Entries are either hostname literals (case-insensitive — e.g. `"api.example.com"`) or CIDR blocks (IPv4 or IPv6 — e.g. `"127.0.0.0/8"`, `"::1/128"`). CIDR entries are matched only against IP-literal hosts, not DNS names. The sentinel entry `"*"` matches any host.
 
 Hostname comparison is ASCII-byte case-insensitive. IDN hostnames must be passed in their punycode (`xn--...`) form — `münchen.example` is not equivalent to `xn--mnchen-3ya.example`, and the URL parser punycodes the request host before matching.
 
 Rejection failure (delivered to the `:http` effect's `on-error`): `{status: 0, error: "host <name> not in http whitelist"}`.
 
 ```odin
+// Restrict to specific hosts:
 bridge.set_http_whitelist([]string{"api.example.com", "127.0.0.0/8"})
+
+// Open it up entirely (pre-#136 default):
+bridge.set_http_whitelist([]string{"*"})
+
 redin.run(cfg)
 ```
 
 ### `bridge.set_shell_env_allowlist(allow: []string)`
 
-When set, child processes spawned by `redin.shell` see only env vars whose keys match a list entry. Comparison is exact (case-sensitive on POSIX). `nil` (the default) is full passthrough — children inherit the parent process environment.
+Configures which environment variables `redin.shell` passes to spawned children. Entries are env-var KEY names; comparison is exact (case-sensitive on POSIX). The sentinel entry `"*"` requests full passthrough.
 
-The setter does not produce a runtime failure path. It only changes the env that reaches `execve(2)`.
+The setter does not produce a runtime failure path — it only changes the env that reaches `execve(2)`.
 
 ```odin
+// Specific keys:
 bridge.set_shell_env_allowlist([]string{"PATH", "HOME", "GITHUB_TOKEN"})
+
+// Full passthrough (pre-#136 default):
+bridge.set_shell_env_allowlist([]string{"*"})
+
 redin.run(cfg)
 ```
+
+Tools that resolve their command via `$PATH` (e.g. `bb`, `git`, `gh`) will fail with "command not found" when the allowlist is empty and the child has no `PATH`. Either pass absolute paths in `cmd`, or list `"PATH"` (and whatever else the command needs).
 
 ## Calling conventions and context
 
