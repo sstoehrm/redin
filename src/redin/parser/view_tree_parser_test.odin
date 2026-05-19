@@ -1,5 +1,6 @@
 package parser
 
+import "core:strings"
 import "core:testing"
 import "../types"
 
@@ -198,4 +199,27 @@ test_vector_prop_value :: proc(t: ^testing.T) {
 	prop := _read_prop_value(&p)
 	testing.expect_value(t, prop.kind, _Prop_Kind.Keyword)
 	testing.expect_value(t, prop.str_val, "test/add")
+}
+
+// Regression test for the parser recursion depth limit (issue #136, M1).
+// Before the MAX_NESTING guard, a deeply-nested `[:stack [:stack ...]]`
+// input would either stack-overflow the host process or succeed silently.
+// After the guard, the parser refuses inputs deeper than MAX_NESTING and
+// reports ok=false instead of recursing further.
+@(test)
+test_parse_rejects_excessive_nesting :: proc(t: ^testing.T) {
+	// Build [:stack [:stack ... [:stack]]] nested 1000 deep — well past
+	// any reasonable MAX_NESTING, and below the depth that would blow
+	// the test runner's stack pre-fix.
+	depth :: 1000
+	sb: strings.Builder
+	strings.builder_init(&sb)
+	defer strings.builder_destroy(&sb)
+	for _ in 0 ..< depth do strings.write_string(&sb, "[:stack ")
+	for _ in 0 ..< depth do strings.write_string(&sb, "]")
+
+	p := _Parser{text = strings.to_string(sb), pos = 0}
+	tree, ok := _parse_element(&p)
+	if ok do _tree_node_destroy(&tree)
+	testing.expect(t, !ok, "1000-deep nesting must be rejected by MAX_NESTING guard")
 }

@@ -68,8 +68,23 @@ jobs:
             libgl1-mesa-dev libx11-dev libxrandr-dev libxi-dev \
             libxcursor-dev libxinerama-dev
 
+      # Pinned download + sha256 verification — never pipe `master/install`
+      # into `sudo bash`. See issue #136 (H1). Bump BB_VERSION + BB_SHA256
+      # together; the sha is for the linux-amd64-static tarball published
+      # alongside the release.
       - name: Install Babashka
-        run: curl -sL https://raw.githubusercontent.com/babashka/babashka/master/install | sudo bash
+        env:
+          BB_VERSION: 1.12.218
+          BB_SHA256: 7bd028cc794732ffde3da31ce4379840893c8e54f1046f92a8dfc4f4b3cddaf8
+        run: |
+          set -euo pipefail
+          tmp=$(mktemp -d)
+          curl -fsSL -o "$tmp/bb.tar.gz" \
+            "https://github.com/babashka/babashka/releases/download/v${BB_VERSION}/babashka-${BB_VERSION}-linux-amd64-static.tar.gz"
+          echo "${BB_SHA256}  $tmp/bb.tar.gz" | sha256sum -c -
+          tar -xzf "$tmp/bb.tar.gz" -C "$tmp" bb
+          sudo install -m 0755 "$tmp/bb" /usr/local/bin/bb
+          bb --version
 
       - name: Install Odin
         uses: laytan/setup-odin@8536d8fa450ec6f1bd9ddc84bbaaf16296c0051d  # v2.12.2
