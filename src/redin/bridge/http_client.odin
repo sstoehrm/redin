@@ -104,8 +104,9 @@ Http_Client :: struct {
 	pending_mutex: sync.Mutex,
 	// Set by http_client_destroy to signal in-flight workers to bail
 	// without touching `results` or freeing state we'll free below.
-	// Atomic so the socket hook can observe shutdown without taking
-	// pending_mutex. Issue #99 M1 B, #156.
+	// Atomic so workers can check it under `sockets_mutex` between
+	// dial and register without lock-ordering hazards on `pending_mutex`.
+	// Issue #99 M1 B, #156.
 	destroying:    bool,
 	// Atomic counter of workers that have begun execute_http_request and
 	// not yet completed their cleanup. Drain waits for this to reach 0
@@ -113,46 +114,15 @@ Http_Client :: struct {
 	// `len(pending)` because the timeout sweep removes pending entries
 	// while the worker is still running. Issue #99 M1 B.
 	workers_alive: i32,
-	// Socket fds of in-flight requests, keyed by request id. Populated
-	// from inside odin-http's `request()` via the socket_hook callback
-	// right after dial, and force-closed by `http_client_destroy` on
-	// shutdown to unblock workers parked in `parse_response`'s blocking
-	// `net.recv_tcp`. The fork's `defer` in `parse_response` frees the
-	// scanner buffer once recv returns Connection_Closed. Issue #156.
+	// Socket fds of in-flight requests, keyed by request id. Workers
+	// dial via `http_client.dial`, insert here while `request_on` is
+	// running, and remove on completion. `http_client_destroy`
+	// force-closes any still registered to unblock workers parked in
+	// `parse_response`'s blocking `net.recv_tcp`. The fork's `defer`
+	// in `parse_response` frees the scanner buffer once recv returns
+	// Connection_Closed. Issue #156.
 	sockets:       map[string]net.TCP_Socket,
 	sockets_mutex: sync.Mutex,
-}
-
-@(private = "file")
-Socket_Registration :: struct {
-	client: ^Http_Client,
-	id:     string,
-}
-
-// Hook passed to odin-http's `http_client.request()`. Invoked once with
-// the freshly-dialed TCP socket. Registers the socket in the client's
-// `sockets` map so `http_client_destroy` can force-close it during
-// shutdown. If destroy already started, closes the socket immediately
-// — the subsequent send/recv inside `request()` fails and the worker
-// returns through normal error cleanup.
-@(private = "file")
-register_socket :: proc(sock: net.TCP_Socket, user: rawptr) {
-	reg := cast(^Socket_Registration)user
-	sync.lock(&reg.client.sockets_mutex)
-	if sync.atomic_load(&reg.client.destroying) {
-		sync.unlock(&reg.client.sockets_mutex)
-		net.close(sock)
-		return
-	}
-	reg.client.sockets[reg.id] = sock
-	sync.unlock(&reg.client.sockets_mutex)
-}
-
-@(private = "file")
-unregister_socket :: proc(hc: ^Http_Client, id: string) {
-	sync.lock(&hc.sockets_mutex)
-	delete_key(&hc.sockets, id)
-	sync.unlock(&hc.sockets_mutex)
 }
 
 http_client_init :: proc(hc: ^Http_Client) {
@@ -512,23 +482,48 @@ execute_http_request :: proc(req: Http_Request, client: ^Http_Client = nil) -> H
 		bytes.buffer_write_string(&http_req.body, req.body)
 	}
 
-	res: http_client.Response
-	err: http_client.Error
-	if client != nil {
-		// Address of `reg` is fine — the hook runs synchronously inside
-		// `request()`, so `reg` is alive for the call.
-		reg := Socket_Registration{client = client, id = req.id}
-		res, err = http_client.request(&http_req, req.url, context.allocator,
-		                               register_socket, &reg)
-		unregister_socket(client, req.id)
-	} else {
-		res, err = http_client.request(&http_req, req.url)
-	}
-	if err != nil {
+	// Dial first, then register the socket so destroy can force-close
+	// it. Splitting the dial out is what makes this possible — the old
+	// monolithic `request()` never exposed the underlying fd. When
+	// `client` is nil (sync test callers) we skip the registry dance
+	// entirely.
+	sock, url, dial_err := http_client.dial(req.url)
+	if dial_err != nil {
 		response.status = 0
-		response.error_msg = fmt.aprintf("Request failed: %v", err)
+		response.error_msg = fmt.aprintf("Request failed: %v", dial_err)
 		return response
 	}
+
+	if client != nil {
+		sync.lock(&client.sockets_mutex)
+		if sync.atomic_load(&client.destroying) {
+			sync.unlock(&client.sockets_mutex)
+			net.close(sock)
+			response.status = 0
+			response.error_msg = strings.clone("http client shutting down")
+			return response
+		}
+		client.sockets[req.id] = sock
+		sync.unlock(&client.sockets_mutex)
+	}
+
+	res, req_err := http_client.request_on(&http_req, sock, url, context.allocator)
+
+	if client != nil {
+		sync.lock(&client.sockets_mutex)
+		delete_key(&client.sockets, req.id)
+		sync.unlock(&client.sockets_mutex)
+	}
+
+	if req_err != nil {
+		// `request_on` leaves socket ownership with us on error.
+		net.close(sock)
+		response.status = 0
+		response.error_msg = fmt.aprintf("Request failed: %v", req_err)
+		return response
+	}
+	// Success: ownership of `sock` transferred to `res`; closed by the
+	// `response_destroy` call below.
 
 	response.status = int(res.status)
 
