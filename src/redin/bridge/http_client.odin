@@ -3,6 +3,7 @@ package bridge
 import "core:bytes"
 import "core:fmt"
 import "core:log"
+import "core:net"
 import "core:strings"
 import "core:sync"
 import "core:thread"
@@ -103,7 +104,9 @@ Http_Client :: struct {
 	pending_mutex: sync.Mutex,
 	// Set by http_client_destroy to signal in-flight workers to bail
 	// without touching `results` or freeing state we'll free below.
-	// Read/written under `pending_mutex`. Issue #99 M1 B.
+	// Atomic so workers can check it under `sockets_mutex` between
+	// dial and register without lock-ordering hazards on `pending_mutex`.
+	// Issue #99 M1 B, #156.
 	destroying:    bool,
 	// Atomic counter of workers that have begun execute_http_request and
 	// not yet completed their cleanup. Drain waits for this to reach 0
@@ -111,6 +114,15 @@ Http_Client :: struct {
 	// `len(pending)` because the timeout sweep removes pending entries
 	// while the worker is still running. Issue #99 M1 B.
 	workers_alive: i32,
+	// Socket fds of in-flight requests, keyed by request id. Workers
+	// dial via `http_client.dial`, insert here while `request_on` is
+	// running, and remove on completion. `http_client_destroy`
+	// force-closes any still registered to unblock workers parked in
+	// `parse_response`'s blocking `net.recv_tcp`. The fork's `defer`
+	// in `parse_response` frees the scanner buffer once recv returns
+	// Connection_Closed. Issue #156.
+	sockets:       map[string]net.TCP_Socket,
+	sockets_mutex: sync.Mutex,
 }
 
 http_client_init :: proc(hc: ^Http_Client) {
@@ -118,40 +130,57 @@ http_client_init :: proc(hc: ^Http_Client) {
 
 http_client_destroy :: proc(hc: ^Http_Client) {
 	// Signal workers to bail on completion. They re-check `destroying`
-	// under `pending_mutex` after `execute_http_request` returns and
-	// decrement `workers_alive` LAST, so a worker count of 0 means no
-	// worker holds a pointer into `hc`.
-	sync.lock(&hc.pending_mutex)
-	hc.destroying = true
-	sync.unlock(&hc.pending_mutex)
+	// after `execute_http_request` returns and decrement `workers_alive`
+	// LAST, so a worker count of 0 means no worker holds a pointer into
+	// `hc`. Atomic store so the socket hook can observe shutdown
+	// without locking `pending_mutex`.
+	sync.atomic_store(&hc.destroying, true)
 
-	// Wait for all in-flight workers to complete their cleanup. We watch
-	// `workers_alive` (atomic) rather than `len(pending)` because the
-	// timeout sweep removes pending entries while the worker thread is
-	// still running its HTTP I/O. Cap the wait so a stuck remote doesn't
-	// hang shutdown forever.
+	// Phase 1: wait up to 3 s for workers to drain naturally. The
+	// timeout sweep also runs here to mark long-running requests as
+	// timed out; workers that complete normally during this window
+	// remove themselves from `pending` and `sockets`.
 	deadline := time.time_add(time.now(), 3 * time.Second)
 	for {
 		if sync.atomic_load(&hc.workers_alive) == 0 do break
 		if time.diff(time.now(), deadline) <= 0 do break
 		time.sleep(10 * time.Millisecond)
 
-		// Sweep timed-out entries while we wait, so workers blocked
-		// reading the response notice (their HTTP call may eventually
-		// fail naturally; the sweep at least keeps the registry tidy).
 		dummy: [dynamic]Http_Response
 		http_client_poll(hc, &dummy)
 		for &r in dummy do http_response_destroy(&r)
 		delete(dummy)
 	}
 
-	// Final cleanup. Anything still alive is a worker we couldn't drain
-	// — log and leak (better than UAF when the worker eventually
-	// returns). Each stuck worker leaks ~4 KiB (its scanner buffer in
-	// odin-http's parse_response); bounded by MAX_INFLIGHT_HTTP. See #156.
+	// Phase 2: force-close any sockets still registered. Workers parked
+	// inside odin-http's `parse_response → net.recv_tcp` only return
+	// when the socket dies, so close them ourselves. The upstream defer
+	// (commits on the fork branch) frees the scanner buffer along the
+	// way, eliminating the 4 KiB-per-stuck-worker leak from #156.
+	sync.lock(&hc.sockets_mutex)
+	for _, sock in hc.sockets {
+		net.close(sock)
+	}
+	sync.unlock(&hc.sockets_mutex)
+
+	// Phase 3: wait up to 1 s more for workers to unwind through the
+	// now-unblocked recv. Continue sweeping timeouts so newly-failed
+	// requests get cleaned up too.
+	deadline2 := time.time_add(time.now(), 1 * time.Second)
+	for {
+		if sync.atomic_load(&hc.workers_alive) == 0 do break
+		if time.diff(time.now(), deadline2) <= 0 do break
+		time.sleep(10 * time.Millisecond)
+
+		dummy: [dynamic]Http_Response
+		http_client_poll(hc, &dummy)
+		for &r in dummy do http_response_destroy(&r)
+		delete(dummy)
+	}
+
 	leaked := sync.atomic_load(&hc.workers_alive)
 	if leaked > 0 {
-		fmt.eprintfln("redin: warning: %d HTTP worker(s) still in flight at shutdown; leaking their state (~4 KiB each, see #156)", leaked)
+		fmt.eprintfln("redin: warning: %d HTTP worker(s) still in flight at shutdown", leaked)
 	}
 
 	sync.lock(&hc.results_mutex)
@@ -161,16 +190,21 @@ http_client_destroy :: proc(hc: ^Http_Client) {
 
 	if leaked == 0 {
 		// All workers completed their cleanup; safe to free the pending
-		// map. Any remaining entries (from timeout sweep removals where
-		// the worker had already decremented workers_alive) own no live
-		// references at this point.
+		// and sockets maps. Any remaining sockets entries (from a worker
+		// that closed normally without unregistering, in theory) own
+		// nothing — the fds are already closed by `response_destroy`.
 		sync.lock(&hc.pending_mutex)
 		for _, entry in hc.pending do delete(entry.id_owned)
 		delete(hc.pending)
 		sync.unlock(&hc.pending_mutex)
+
+		sync.lock(&hc.sockets_mutex)
+		delete(hc.sockets)
+		sync.unlock(&hc.sockets_mutex)
 	}
-	// Otherwise we deliberately leak `hc.pending` — workers may still
-	// look at it. Leaked entries leak with the Http_Client.
+	// Otherwise we deliberately leak `hc.pending` / `hc.sockets` —
+	// workers may still look at them. Leaked entries leak with the
+	// Http_Client.
 }
 
 http_response_destroy :: proc(r: ^Http_Response) {
@@ -199,8 +233,8 @@ http_client_request :: proc(hc: ^Http_Client, req: Http_Request) {
 	// the contract for callers on other threads.
 	sync.lock(&hc.pending_mutex)
 	inflight := len(hc.pending)
-	shutting_down := hc.destroying
 	sync.unlock(&hc.pending_mutex)
+	shutting_down := sync.atomic_load(&hc.destroying)
 
 	if inflight >= MAX_INFLIGHT_HTTP {
 		// Move req.id into the rejection response (mirrors execute_http_request,
@@ -314,10 +348,10 @@ http_client_poll :: proc(hc: ^Http_Client, results: ^[dynamic]Http_Response) {
 @(private = "file")
 http_thread_proc :: proc(raw_data_ptr: rawptr) {
 	data := cast(^Http_Thread_Data)raw_data_ptr
-	response := execute_http_request(data.request)
+	response := execute_http_request(data.request, data.client)
 
 	sync.lock(&data.client.pending_mutex)
-	if data.client.destroying {
+	if sync.atomic_load(&data.client.destroying) {
 		// Client is being torn down. Don't touch results; just remove
 		// our entry to allow the drain loop to make progress. Any
 		// synthesized timeout response in `results` for this id has
@@ -378,7 +412,11 @@ http_request_destroy :: proc(req: ^Http_Request) {
 	delete(req.headers)
 }
 
-execute_http_request :: proc(req: Http_Request) -> Http_Response {
+// `client` is optional. When non-nil, the request's socket is registered
+// in `client.sockets` while in flight so `http_client_destroy` can
+// force-close it during shutdown. Tests that drive `execute_http_request`
+// synchronously (no thread, no destroy) pass nil and skip registration.
+execute_http_request :: proc(req: Http_Request, client: ^Http_Client = nil) -> Http_Response {
 	response: Http_Response
 	response.id = req.id
 	response.headers = make(map[string]string)
@@ -444,12 +482,48 @@ execute_http_request :: proc(req: Http_Request) -> Http_Response {
 		bytes.buffer_write_string(&http_req.body, req.body)
 	}
 
-	res, err := http_client.request(&http_req, req.url)
-	if err != nil {
+	// Dial first, then register the socket so destroy can force-close
+	// it. Splitting the dial out is what makes this possible — the old
+	// monolithic `request()` never exposed the underlying fd. When
+	// `client` is nil (sync test callers) we skip the registry dance
+	// entirely.
+	sock, url, dial_err := http_client.dial(req.url)
+	if dial_err != nil {
 		response.status = 0
-		response.error_msg = fmt.aprintf("Request failed: %v", err)
+		response.error_msg = fmt.aprintf("Request failed: %v", dial_err)
 		return response
 	}
+
+	if client != nil {
+		sync.lock(&client.sockets_mutex)
+		if sync.atomic_load(&client.destroying) {
+			sync.unlock(&client.sockets_mutex)
+			net.close(sock)
+			response.status = 0
+			response.error_msg = strings.clone("http client shutting down")
+			return response
+		}
+		client.sockets[req.id] = sock
+		sync.unlock(&client.sockets_mutex)
+	}
+
+	res, req_err := http_client.request_on(&http_req, sock, url, context.allocator)
+
+	if client != nil {
+		sync.lock(&client.sockets_mutex)
+		delete_key(&client.sockets, req.id)
+		sync.unlock(&client.sockets_mutex)
+	}
+
+	if req_err != nil {
+		// `request_on` leaves socket ownership with us on error.
+		net.close(sock)
+		response.status = 0
+		response.error_msg = fmt.aprintf("Request failed: %v", req_err)
+		return response
+	}
+	// Success: ownership of `sock` transferred to `res`; closed by the
+	// `response_destroy` call below.
 
 	response.status = int(res.status)
 

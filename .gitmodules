@@ -1,4 +1,4 @@
 [submodule "lib/odin-http"]
 	path = lib/odin-http
-	url = https://github.com/laytan/odin-http.git
-	branch = main
+	url = https://github.com/sstoehrm/odin-http.git
+	branch = fix/parse-response-leak-socket-hook
