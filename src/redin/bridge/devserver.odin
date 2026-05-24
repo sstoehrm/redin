@@ -653,6 +653,7 @@ int_to_str :: proc(buf: []u8, val: int) -> string {
 		buf[0] = '0'
 		return string(buf[:1])
 	}
+	assert(val > 0 && len(buf) >= 20)
 	i := len(buf)
 	v := val
 	for v > 0 {
@@ -703,7 +704,7 @@ find_header_value :: proc(headers: string, name_lower: string) -> string {
 check_host_header :: proc(headers: string, expected_v4: string, expected_name: string) -> bool {
 	host := find_header_value(headers, "host")
 	if len(host) == 0 do return false
-	return host == expected_v4 || host == expected_name
+	return strings.equal_fold(host, expected_v4) || strings.equal_fold(host, expected_name)
 }
 
 // Constant-time compare of the Authorization bearer token against
@@ -711,13 +712,9 @@ check_host_header :: proc(headers: string, expected_v4: string, expected_name: s
 check_bearer_token :: proc(headers: string, expected: string) -> bool {
 	if len(expected) == 0 do return false
 	auth := find_header_value(headers, "authorization")
-	prefix := "Bearer "
-	if !strings.has_prefix(auth, prefix) {
-		// Tolerate lowercase prefix (some clients).
-		if !strings.has_prefix(auth, "bearer ") do return false
-	}
-	got := auth[len(prefix):]
-	return constant_time_eq(got, expected)
+	if len(auth) < 7 do return false
+	if !strings.equal_fold(auth[:7], "Bearer ") do return false
+	return constant_time_eq(auth[7:], expected)
 }
 
 // Length-independent equality check to avoid leaking token length via
@@ -747,7 +744,7 @@ find_content_length :: proc(headers: string) -> int {
 	for c in val {
 		if c >= '0' && c <= '9' {
 			digits += 1
-			if digits > 12 { return -1 }
+			if digits > 7 { return -1 }
 			n = n*10 + int(c - '0')
 		} else {
 			break
