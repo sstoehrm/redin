@@ -22,6 +22,10 @@ hotreload_init :: proc(hr: ^Hot_Reload, source_tree: bool) {
 		"src/runtime/theme.fnl",
 		"src/runtime/view.fnl",
 		"src/runtime/init.fnl",
+		// #183: also watch these so editing them triggers a reload.
+		"src/runtime/agent.fnl",
+		"src/runtime/markdown.fnl",
+		"src/runtime/canvas.fnl",
 	}
 	for f in files {
 		append(&hr.watch_paths, f)
@@ -58,6 +62,14 @@ hotreload_execute :: proc(b: ^Bridge) {
 		package.loaded["theme"]    = nil
 		package.loaded["view"]     = nil
 		package.loaded["init"]     = nil
+		-- #183: these modules capture dataflow/theme at load time. Without
+		-- invalidating them, a reload re-evaluates dataflow into a fresh
+		-- module but agent/markdown/canvas keep their stale captures, so
+		-- (require :agent).install registers into the old dataflow and the
+		-- agent edit channel / overrides break for the rest of the session.
+		package.loaded["agent"]    = nil
+		package.loaded["markdown"] = nil
+		package.loaded["canvas"]   = nil
 		require("init")
 	`
 	if luaL_dostring(b.L, cstring(raw_data(code))) != 0 {

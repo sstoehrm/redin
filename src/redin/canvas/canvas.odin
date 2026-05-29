@@ -7,6 +7,7 @@ package canvas
 REDIN_DEV :: #config(REDIN_DEV, false)
 
 import "core:fmt"
+import "core:strings"
 import rl "vendor:raylib"
 
 Canvas_Provider :: struct {
@@ -23,27 +24,40 @@ Canvas_Lifecycle :: enum {
 }
 
 Canvas_Entry :: struct {
-	provider:  Canvas_Provider,
-	lifecycle: Canvas_Lifecycle,
-	visited:   bool,
+	provider:   Canvas_Provider,
+	lifecycle:  Canvas_Lifecycle,
+	visited:    bool,
+	name_owned: string, // #182: heap-owned map key; freed on unregister/destroy
 }
 
 entries: map[string]Canvas_Entry
 current_name: string
 
 register :: proc(name: string, provider: Canvas_Provider) {
-	if existing, ok := entries[name]; ok {
+	if existing, ok := &entries[name]; ok {
 		when REDIN_DEV {
 			fmt.eprintfln("redin: warn: canvas.register(%q) replaces an existing provider", name)
 		}
 		if existing.provider.stop != nil {
 			existing.provider.stop()
 		}
+		// #182: reuse the existing owned key; only the value changes. (The
+		// incoming `name` is transient — Odin keeps the original map key on
+		// assignment to an existing slot — so storing it would dangle and
+		// re-cloning it would leak.)
+		existing.provider = provider
+		existing.lifecycle = .Idle
+		existing.visited = false
+		return
 	}
-	entries[name] = Canvas_Entry {
-		provider  = provider,
-		lifecycle = .Idle,
-		visited   = false,
+	// #182: own the key so it can be freed on unregister/destroy. Callers
+	// pass a transient name.
+	owned := strings.clone(name)
+	entries[owned] = Canvas_Entry {
+		provider   = provider,
+		lifecycle  = .Idle,
+		visited    = false,
+		name_owned = owned,
 	}
 }
 
@@ -52,7 +66,10 @@ unregister :: proc(name: string) {
 		if entry.provider.stop != nil {
 			entry.provider.stop()
 		}
+		// #182: free the heap-owned key; delete_key only erases the slot.
+		key := entry.name_owned
 		delete_key(&entries, name)
+		delete(key)
 	}
 }
 
@@ -96,13 +113,12 @@ end_frame :: proc() {
 
 // Called on shutdown. Stops all providers and clears the registry.
 destroy :: proc() {
-	for k, &entry in entries {
+	for _, &entry in entries {
 		if entry.provider.stop != nil {
 			entry.provider.stop()
 		}
-		// Keys are heap-allocated by redin_canvas_register; the map
-		// doesn't own them, so we have to delete each one explicitly.
-		delete(k)
+		// #182: keys are heap-cloned in `register` (name_owned); free each.
+		delete(entry.name_owned)
 	}
 	delete(entries)
 }

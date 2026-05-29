@@ -130,6 +130,25 @@ sync_queue_drain :: proc(sq: ^Sync_Queue, out: ^[dynamic]^Pending_Request) {
 	sync.unlock(&sq.mu)
 }
 
+// #168: answer every request a handler enqueued and is now parked on with
+// 503 so its sync.sema_wait(&channel.done) unblocks. The render loop's
+// devserver_poll is the only other poster of `done`, and at shutdown it
+// has already exited; a parked handler can't be woken by closing the
+// socket (it's a futex wait, not a recv), so without this devserver_destroy
+// deadlocks in thread.join. Mirrors devserver_poll's ownership: respond_*
+// waits for the handler's ack, after which we own and free the channel +
+// pending.
+drain_incoming_503 :: proc(ds: ^Dev_Server) {
+	stranded: [dynamic]^Pending_Request
+	defer delete(stranded)
+	sync_queue_drain(&ds.incoming, &stranded)
+	for req in stranded {
+		respond_json_error(req.response, 503, `{"error":"server shutting down"}`)
+		free(req.response)
+		free(req)
+	}
+}
+
 // --- Signal-driven cleanup ---
 //
 // Without this, a SIGSEGV / SIGKILL / Ctrl-C / kill -9 / OOM leaves
@@ -338,7 +357,25 @@ devserver_destroy :: proc(ds: ^Dev_Server) {
 			thread.destroy(ds.acceptor_thread)
 		}
 		// Acceptor pushed HANDLER_POOL_SIZE nils on its way out; each
-		// handler will pop one nil and exit.
+		// handler will pop one nil and exit. But a handler that already
+		// popped a real connection may be parked on channel.done waiting
+		// for a devserver_poll that will never run again (#168). Repeatedly
+		// drain `incoming` (answering 503) to wake those handlers until
+		// every handler has finished — one pass isn't enough, since a
+		// handler can pop another queued connection and re-park between
+		// drains. Only then is thread.join guaranteed not to deadlock.
+		for {
+			drain_incoming_503(ds)
+			all_done := true
+			for t in ds.handler_threads {
+				if t != nil && !thread.is_done(t) {
+					all_done = false
+					break
+				}
+			}
+			if all_done do break
+			time.sleep(time.Millisecond)
+		}
 		for t in ds.handler_threads {
 			if t != nil {
 				thread.join(t)
@@ -664,6 +701,22 @@ int_to_str :: proc(buf: []u8, val: int) -> string {
 	return string(buf[i:])
 }
 
+// ASCII-only lowercasing that preserves byte length 1:1. Header field
+// names are ASCII per RFC 7230, so folding only 'A'..'Z' is sufficient.
+// strings.to_lower iterates Unicode runes and re-encodes each invalid
+// UTF-8 byte as U+FFFD (1 byte -> 3), which desynchronizes the lowercased
+// copy from the original string; an index found in the copy then no longer
+// aligns with the original (#164). This byte-for-byte fold keeps them
+// aligned so value extraction below is always safe.
+ascii_lower :: proc(s: string, allocator := context.allocator) -> string {
+	buf := make([]u8, len(s), allocator)
+	for i in 0 ..< len(s) {
+		c := s[i]
+		buf[i] = c + 32 if c >= 'A' && c <= 'Z' else c
+	}
+	return string(buf)
+}
+
 // Case-insensitive lookup for a header value. Returns the trimmed
 // value, or "" if the header is absent.
 //
@@ -673,8 +726,12 @@ int_to_str :: proc(buf: []u8, val: int) -> string {
 // first non-boundary match short-circuited the lookup with "", which
 // turned benign URLs like /state/host:foo into spurious 403s and
 // could be turned into a Host/auth bypass by a future refactor.
+//
+// #164: lowercasing must preserve byte length (ascii_lower, not
+// strings.to_lower) so the index located in `lower` stays aligned with
+// `headers`, from which the value is sliced below.
 find_header_value :: proc(headers: string, name_lower: string) -> string {
-	lower := strings.to_lower(headers, context.temp_allocator)
+	lower := ascii_lower(headers, context.temp_allocator)
 	needle := strings.concatenate({name_lower, ":"}, context.temp_allocator)
 
 	start := 0
@@ -730,15 +787,11 @@ constant_time_eq :: proc(a: string, b: string) -> bool {
 }
 
 find_content_length :: proc(headers: string) -> int {
-	lower := strings.to_lower(headers, context.temp_allocator)
-	idx := strings.index(lower, "content-length:")
-	if idx < 0 do return 0
-	// Trim from `lower` (same index) so lookup and extraction don't
-	// reference different case representations of the header block.
-	rest := strings.trim_left_space(lower[idx + len("content-length:"):])
-	end := strings.index_any(rest, "\r\n")
-	if end < 0 do end = len(rest)
-	val := strings.trim_space(rest[:end])
+	// #185: reuse find_header_value, which skips the request line and
+	// anchors to a line start, so a "content-length:<n>" substring inside
+	// the request-line URL/query is no longer mistaken for the header
+	// (the previous unanchored strings.index matched it).
+	val := find_header_value(headers, "content-length")
 	n := 0
 	digits := 0
 	for c in val {
@@ -2037,6 +2090,14 @@ handle_post_input_scroll :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: s
 	y := get_num(L, "y")
 	dx := get_num(L, "delta_x")
 	dy := get_num(L, "delta_y")
+	// #184: reject non-finite values (mirrors /click and /input/mouse/move).
+	// A +Inf delta passes apply_scroll_events' clamps and poisons the
+	// scroll offset, and /scroll-info would then emit invalid JSON (%g Inf).
+	if math.is_nan(x) || math.is_inf(x) || math.is_nan(y) || math.is_inf(y) ||
+	   math.is_nan(dx) || math.is_inf(dx) || math.is_nan(dy) || math.is_inf(dy) {
+		respond_json_error(ch, 400, `{"error":"x/y/delta_x/delta_y must be finite"}`)
+		return
+	}
 	append(&ds.event_queue, types.InputEvent(types.ScrollEvent{
 		x = x, y = y, delta_x = dx, delta_y = dy,
 	}))

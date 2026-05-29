@@ -35,6 +35,7 @@ odin test src/redin/markdown -collection:lib=lib -collection:luajit=vendor/luaji
 odin test src/redin/profile  -collection:lib=lib -collection:luajit=vendor/luajit
 odin test src/redin/input    -collection:lib=lib -collection:luajit=vendor/luajit -define:ODIN_TEST_THREADS=1
 odin test src/redin/bridge   -collection:lib=lib -collection:luajit=vendor/luajit
+odin test src/redin/canvas   -collection:lib=lib -collection:luajit=vendor/luajit
 ```
 
 When you add a new `src/redin/<pkg>/*_test.odin`, add a matching step to `.github/workflows/test.yml` so the suite stays visible in CI. The `input` package needs `-define:ODIN_TEST_THREADS=1` until #118 lands; once it does, drop the flag here and in the workflow.
