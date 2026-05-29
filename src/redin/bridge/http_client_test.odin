@@ -13,6 +13,7 @@ package bridge
 
 import "core:fmt"
 import "core:log"
+import "core:mem"
 import "core:net"
 import "core:strings"
 import "core:sync"
@@ -809,4 +810,52 @@ test_http_duplicate_id_rejected :: proc(t: ^testing.T) {
 		http_response_destroy(&r)
 	}
 	testing.expect(t, found, "expected a 'duplicate' rejection result (#174)")
+}
+// #177: parse_response cloned header keys/values into res.headers, but on a
+// malformed-header error return only the scanner was destroyed — the headers
+// map (and the bytes cloned before the bad line) leaked, since redin's caller
+// net.closes rather than response_destroy on error. A valid header followed
+// by a colon-less line exercises that path.
+@(test)
+test_http_malformed_response_no_header_leak :: proc(t: ^testing.T) {
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+	allow_open_http()
+	defer set_http_whitelist(nil)
+
+	m := mock_start("HTTP/1.1 200 OK\r\nX-Good: 1\r\nMalformedHeaderNoColon\r\n\r\n")
+	if m == nil do testing.fail_now(t, "could not bind a mock server port")
+	defer mock_stop(m)
+	url := fmt.tprintf("http://127.0.0.1:%d/", m.port)
+
+	track: mem.Tracking_Allocator
+	mem.tracking_allocator_init(&track, context.allocator)
+	old := context.allocator
+	context.allocator = mem.tracking_allocator(&track)
+	defer {
+		context.allocator = old
+		mem.tracking_allocator_destroy(&track)
+	}
+
+	req := Http_Request {
+		id     = strings.clone("hdr-leak"),
+		url    = strings.clone(url),
+		method = strings.clone("GET"),
+	}
+	got := execute_http_request(req)
+
+	// Free everything redin owns from the (error) response. got.id aliases
+	// req.id (response.id = req.id), so free it once via got.id.
+	delete(req.url)
+	delete(req.method)
+	delete(got.id)
+	delete(got.body)
+	delete(got.error_msg)
+	for k, v in got.headers {delete(k);delete(v)}
+	delete(got.headers)
+
+	leaks := len(track.allocation_map)
+	testing.expectf(t, leaks == 0,
+		"malformed response leaked %d allocation(s) — parse_response must free its partial headers (#177)",
+		leaks)
 }
