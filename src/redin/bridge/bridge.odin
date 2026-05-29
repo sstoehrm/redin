@@ -537,7 +537,8 @@ fennel_canvas_provider := canvas.Canvas_Provider {
 redin_canvas_register :: proc "c" (L: ^Lua_State) -> i32 {
 	context = g_context
 	if lua_isstring(L, 1) {
-		name := strings.clone_from_cstring(lua_tostring_raw(L, 1))
+		// #182: pass a transient name; canvas.register clones and owns the key.
+		name := string(lua_tostring_raw(L, 1))
 		canvas.register(name, fennel_canvas_provider)
 	}
 	return 0
