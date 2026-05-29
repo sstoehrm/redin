@@ -430,4 +430,24 @@
     (dataflow.flush)
     (assert (= (_G.subscribe "sub/counter") 1) "globals work end-to-end")))
 
+;; #178: a subscription query that itself calls subscribe must not clobber
+;; the outer subscription's dependency tracking. The buggy code set
+;; `tracking` to nil after the nested subscribe, so the outer sub recorded
+;; deps = nil and the next flush did (ipairs nil) and errored, wedging the
+;; render tick.
+(fn t.test-nested-subscribe-preserves-tracking []
+  (setup)
+  (let [db (dataflow.init {:a 1 :b 2})]
+    (dataflow.reg-sub "sub/b" (fn [d] (dataflow.get d :b)))
+    (dataflow.reg-sub "sub/a"
+      (fn [d]
+        (dataflow.subscribe "sub/b") ;; nested subscribe
+        (dataflow.get d :a)))
+    (assert (= (dataflow.subscribe "sub/a") 1) "sub/a computes to 1")
+    ;; Record a change and flush. With the bug, sub/a.deps was nil here, so
+    ;; flush would (ipairs nil) and raise; this must complete cleanly.
+    (dataflow.assoc db :b 99)
+    (dataflow.flush)
+    (assert true "flush completed without ipairs(nil) on sub/a.deps")))
+
 t
