@@ -54,6 +54,17 @@ Bridge :: struct {
 g_bridge: ^Bridge
 g_context: runtime.Context
 
+// #170: hard cap on view-tree nesting depth. flatten/layout/draw each
+// recurse once per level with no native-stack guard, so a deeply
+// self-nesting view (e.g. recursive Fennel) would overflow the C stack
+// uncatchably (the surrounding lua_pcall can't catch a native overflow).
+// We cap at flatten — the single upstream choke point — so the flat tree,
+// and therefore every render pass over it, is bounded. Mirrors the EDN
+// parser's MAX_NESTING. Subtrees deeper than the cap are dropped with a
+// one-time warning rather than crashing.
+MAX_VIEW_DEPTH :: 256
+g_view_depth_warned: bool
+
 init :: proc(b: ^Bridge) {
 	g_bridge = b
 	g_context = context
@@ -331,6 +342,11 @@ clear_node_strings :: proc(n: types.Node) {
 		if len(v.click) > 0 do delete(v.click)
 		if len(v.label) > 0 do delete(v.label)
 		if len(v.aspect) > 0 do delete(v.aspect)
+		// #165: release the registry ref taken by lua_get_event_ctx for a
+		// `:click [:event ctx]` payload. Mirrors clear_dropable_attrs; the
+		// click consumer only ever reads the ref (never retains it across
+		// frames), so an unconditional unref of a nonzero ref is correct.
+		if v.click_ctx != 0 do luaL_unref(g_bridge.L, LUA_REGISTRYINDEX, v.click_ctx)
 	case types.NodeText:
 		if len(v.content) > 0 do delete(v.content)
 		if len(v.aspect) > 0 do delete(v.aspect)
@@ -537,7 +553,8 @@ fennel_canvas_provider := canvas.Canvas_Provider {
 redin_canvas_register :: proc "c" (L: ^Lua_State) -> i32 {
 	context = g_context
 	if lua_isstring(L, 1) {
-		name := strings.clone_from_cstring(lua_tostring_raw(L, 1))
+		// #182: pass a transient name; canvas.register clones and owns the key.
+		name := string(lua_tostring_raw(L, 1))
 		canvas.register(name, fennel_canvas_provider)
 	}
 	return 0
@@ -975,6 +992,28 @@ deliver_http_response :: proc(b: ^Bridge, resp: ^Http_Response) {
 }
 
 // redin.shell(id, cmd_table, stdin) — queue async shell command
+// Reads a Lua sequence at `idx` into an owned []string. Returns ok=false
+// (after freeing any partial result) if any element is not a string, so
+// callers don't silently substitute "" for a non-string argv entry (#172).
+// lua_isstring here is strict (type == LUA_TSTRING), so numbers/bools/tables
+// are rejected rather than coerced.
+read_string_array :: proc(L: ^Lua_State, idx: i32) -> (out: []string, ok: bool) {
+	count := int(lua_objlen(L, idx))
+	out = make([]string, count)
+	for i in 0 ..< count {
+		lua_rawgeti(L, idx, i32(i + 1))
+		is_str := lua_isstring(L, -1)
+		if is_str do out[i] = strings.clone_from_cstring(lua_tostring_raw(L, -1))
+		lua_pop(L, 1)
+		if !is_str {
+			for s in out do if len(s) > 0 do delete(s)
+			delete(out)
+			return nil, false
+		}
+	}
+	return out, true
+}
+
 redin_shell :: proc "c" (L: ^Lua_State) -> i32 {
 	context = g_context
 	if g_bridge == nil do return 0
@@ -983,17 +1022,16 @@ redin_shell :: proc "c" (L: ^Lua_State) -> i32 {
 
 	if lua_isstring(L, 1) do req.id = strings.clone_from_cstring(lua_tostring_raw(L, 1))
 
-	// Read cmd table (sequential array of strings)
+	// Read cmd table (sequential array of strings).
 	if lua_istable(L, 2) {
-		cmd_idx := i32(2)
-		count := int(lua_objlen(L, cmd_idx))
-		cmd := make([]string, count)
-		for i in 0 ..< count {
-			lua_rawgeti(L, cmd_idx, i32(i + 1))
-			if lua_isstring(L, -1) {
-				cmd[i] = strings.clone_from_cstring(lua_tostring_raw(L, -1))
-			}
-			lua_pop(L, 1)
+		cmd, ok := read_string_array(L, 2)
+		if !ok {
+			// #172: a non-string argv element would otherwise become "",
+			// silently corrupting the command. Reject with an error result
+			// so the on-error handler fires instead.
+			shell_emit_error(&g_bridge.shell_client, req.id, "shell :cmd contains a non-string element")
+			if len(req.id) > 0 do delete(req.id)
+			return 0
 		}
 		req.cmd = cmd
 	}
@@ -1370,11 +1408,22 @@ lua_flatten_node :: proc(L: ^Lua_State, index: i32, cur: ^[dynamic]u8, b: ^Bridg
 			if lua_isstring(L, -1) {
 				// It's a child frame
 				lua_pop(L, 1)
-				child_idx := i32(len(b.nodes))
-				append(&child_indices, child_idx)
-				append(cur, u8(len(child_indices) - 1))
-				lua_flatten_node(L, lua_gettop(L), cur, b, my_idx)
-				pop(cur)
+				// #170: len(cur) is this node's nesting depth; cap recursion
+				// so the flat tree (and every render pass over it) stays
+				// bounded. Subtrees deeper than the cap are dropped.
+				if len(cur) < MAX_VIEW_DEPTH {
+					child_idx := i32(len(b.nodes))
+					append(&child_indices, child_idx)
+					append(cur, u8(len(child_indices) - 1))
+					lua_flatten_node(L, lua_gettop(L), cur, b, my_idx)
+					pop(cur)
+				} else if !g_view_depth_warned {
+					g_view_depth_warned = true
+					fmt.eprintfln(
+						"redin: view tree nested deeper than %d levels; dropping deeper subtrees to avoid a native stack overflow (#170)",
+						MAX_VIEW_DEPTH,
+					)
+				}
 			} else {
 				lua_pop(L, 1)
 			}

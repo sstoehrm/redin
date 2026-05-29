@@ -48,6 +48,9 @@ jobs:
       - name: Run Odin bridge tests
         run: odin test src/redin/bridge -collection:lib=lib -collection:luajit=vendor/luajit
 
+      - name: Run Odin canvas tests
+        run: odin test src/redin/canvas -collection:lib=lib -collection:luajit=vendor/luajit
+
       - name: Build redin
         run: |
           mkdir -p build

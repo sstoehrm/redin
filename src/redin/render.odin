@@ -943,7 +943,7 @@ draw_box_children :: proc(
 			max_scroll := fixed_total - content_rect.height
 			scroll_ratio := scroll_off / max_scroll if max_scroll > 0 else 0
 			bar_y := content_rect.y + scroll_ratio * (content_rect.height - bar_h)
-			roundness := f32(t.radius * 2) / bar_w if bar_w > 0 else 1
+			roundness := f32(t.radius) * 2 / bar_w if bar_w > 0 else 1
 			rl.DrawRectangleRounded(
 				{bar_x, bar_y, bar_w, bar_h}, roundness, 4,
 				scrollbar_color(t),
@@ -957,7 +957,7 @@ draw_box_children :: proc(
 			max_scroll := fixed_total - content_rect.width
 			scroll_ratio := scroll_off / max_scroll if max_scroll > 0 else 0
 			bar_x := content_rect.x + scroll_ratio * (content_rect.width - bar_w)
-			roundness := f32(t.radius * 2) / bar_h if bar_h > 0 else 1
+			roundness := f32(t.radius) * 2 / bar_h if bar_h > 0 else 1
 			rl.DrawRectangleRounded(
 				{bar_x, bar_y, bar_w, bar_h}, roundness, 4,
 				scrollbar_color(t),

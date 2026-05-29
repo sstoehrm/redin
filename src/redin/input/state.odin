@@ -98,6 +98,19 @@ focus_leave :: proc() {
 	state.active = false
 }
 
+// Snap a byte offset back to the start of the UTF-8 codepoint it lands on,
+// so a clamped cursor/selection offset never sits on a continuation byte
+// (#179). Also clamps to [0, len(text)]; len(text) (the end) is a boundary.
+clamp_to_codepoint_start :: proc(text: []u8, off: int) -> int {
+	o := off
+	if o > len(text) do o = len(text)
+	if o < 0 do o = 0
+	for o > 0 && o < len(text) && (text[o] & 0xC0) == 0x80 {
+		o -= 1
+	}
+	return o
+}
+
 // Controlled sync: if Fennel changed the value, update the buffer.
 // Call once per frame while active. Returns true if the buffer was replaced.
 controlled_sync :: proc(node_value: string) -> bool {
@@ -107,10 +120,12 @@ controlled_sync :: proc(node_value: string) -> bool {
 	// Fennel transformed the value — replace buffer
 	clear(&state.text)
 	append(&state.text, ..transmute([]u8)node_value)
-	state.cursor = min(state.cursor, len(state.text))
+	// #179: clamp to a UTF-8 boundary, not just a byte index, or a later
+	// edit would split a multibyte codepoint the offset now lands inside.
+	state.cursor = clamp_to_codepoint_start(state.text[:], state.cursor)
 	if state.selection_start >= 0 {
-		state.selection_start = min(state.selection_start, len(state.text))
-		state.selection_end = min(state.selection_end, len(state.text))
+		state.selection_start = clamp_to_codepoint_start(state.text[:], state.selection_start)
+		state.selection_end = clamp_to_codepoint_start(state.text[:], state.selection_end)
 		if state.selection_start == state.selection_end {
 			state.selection_start = -1
 			state.selection_end = -1

@@ -11,6 +11,24 @@ import "core:time"
 
 SHELL_DEFAULT_MAX_OUTPUT :: 16 * 1024 * 1024 // 16 MiB
 SHELL_DEFAULT_TIMEOUT_MS :: 30_000
+SHELL_MAX_STDIN :: 64 * 1024 * 1024 // 64 MiB cap on child stdin (#167)
+
+// #167: SIGPIPE's default disposition terminates the whole process. redin
+// does pipe I/O (child stdin) and socket I/O (http client, dev server), any
+// of which can write to a peer that closed its read end. Ignore SIGPIPE
+// process-wide once and handle EPIPE via return values instead. Installed
+// from shell_client_init (bridge init); idempotent.
+@(private = "file")
+g_sigpipe_ignored: bool
+
+ignore_sigpipe :: proc() {
+	if g_sigpipe_ignored do return
+	g_sigpipe_ignored = true
+	sa := linux.Sig_Action(rawptr) {
+		handler = transmute(linux.Sig_Handler_Fn)(uintptr(linux.Sig_Action_Special.SIG_IGN)),
+	}
+	linux.rt_sigaction(.SIGPIPE, &sa, (^linux.Sig_Action(rawptr))(nil))
+}
 
 Shell_Request :: struct {
 	id:               string,
@@ -31,18 +49,59 @@ Shell_Response :: struct {
 Shell_Client :: struct {
 	results:       [dynamic]Shell_Response,
 	results_mutex: sync.Mutex,
+	// #166: shutdown drain, mirroring Http_Client. Workers run on detached
+	// threads and append into `results`; freeing it while one is still in
+	// flight is a use-after-free. `workers_alive` counts workers holding a
+	// pointer into this struct (destroy waits for it to reach 0 before
+	// freeing); `processes` lets destroy kill in-flight children to bound
+	// that wait. Both `destroying` and `workers_alive` are accessed
+	// atomically.
+	destroying:    bool,
+	workers_alive: i32,
+	processes:     map[string]os.Process,
+	procs_mutex:   sync.Mutex,
 }
 
 shell_client_init :: proc(sc: ^Shell_Client) {
+	ignore_sigpipe()
 }
 
 shell_client_destroy :: proc(sc: ^Shell_Client) {
-	sync.lock(&sc.results_mutex)
-	for &r in sc.results {
-		shell_response_destroy(&r)
+	// Signal shutdown, then kill any in-flight children so their workers
+	// unblock fast, then wait (bounded) for every worker to finish before
+	// freeing state they would otherwise touch (#166).
+	sync.atomic_store(&sc.destroying, true)
+
+	sync.lock(&sc.procs_mutex)
+	for _, p in sc.processes {
+		_ = os.process_kill(p)
 	}
-	delete(sc.results)
-	sync.unlock(&sc.results_mutex)
+	sync.unlock(&sc.procs_mutex)
+
+	deadline := time.time_add(time.now(), 3 * time.Second)
+	for {
+		if sync.atomic_load(&sc.workers_alive) == 0 do break
+		if time.diff(time.now(), deadline) <= 0 do break
+		time.sleep(10 * time.Millisecond)
+	}
+
+	leaked := sync.atomic_load(&sc.workers_alive)
+	if leaked == 0 {
+		sync.lock(&sc.results_mutex)
+		for &r in sc.results {
+			shell_response_destroy(&r)
+		}
+		delete(sc.results)
+		sync.unlock(&sc.results_mutex)
+
+		sync.lock(&sc.procs_mutex)
+		delete(sc.processes)
+		sync.unlock(&sc.procs_mutex)
+	} else {
+		// A worker may still append to results / touch the maps; leak them
+		// deliberately rather than risk a use-after-free.
+		fmt.eprintfln("redin: warning: %d shell worker(s) still in flight at shutdown", leaked)
+	}
 }
 
 shell_response_destroy :: proc(r: ^Shell_Response) {
@@ -50,6 +109,21 @@ shell_response_destroy :: proc(r: ^Shell_Response) {
 	delete(r.stdout)
 	delete(r.stderr)
 	delete(r.error_msg)
+}
+
+// Append a synthesized failure result for a request rejected before it is
+// ever spawned (e.g. a malformed :cmd, #172), so the matching on-error
+// handler still fires with a clear message instead of the request silently
+// misbehaving.
+shell_emit_error :: proc(sc: ^Shell_Client, id: string, msg: string) {
+	r := Shell_Response {
+		id        = strings.clone(id),
+		exit_code = -1,
+		error_msg = strings.clone(msg),
+	}
+	sync.lock(&sc.results_mutex)
+	append(&sc.results, r)
+	sync.unlock(&sc.results_mutex)
 }
 
 Shell_Thread_Data :: struct {
@@ -61,6 +135,9 @@ shell_client_request :: proc(sc: ^Shell_Client, req: Shell_Request) {
 	data := new(Shell_Thread_Data)
 	data.client = sc
 	data.request = req
+	// Count this worker before it starts so shell_client_destroy can wait
+	// for it (#166). The worker decrements last, after its final access.
+	sync.atomic_add(&sc.workers_alive, 1)
 	thread.create_and_start_with_data(data, shell_thread_proc, self_cleanup = true)
 }
 
@@ -76,14 +153,23 @@ shell_client_poll :: proc(sc: ^Shell_Client, results: ^[dynamic]Shell_Response) 
 @(private = "file")
 shell_thread_proc :: proc(raw_data_ptr: rawptr) {
 	data := cast(^Shell_Thread_Data)raw_data_ptr
-	response := execute_shell(data.request)
+	response := execute_shell(data.request, data.client)
 
 	sync.lock(&data.client.results_mutex)
-	append(&data.client.results, response)
+	if !sync.atomic_load(&data.client.destroying) {
+		append(&data.client.results, response)
+	} else {
+		// Client is being torn down; don't append into state it may free.
+		shell_response_destroy(&response)
+	}
 	sync.unlock(&data.client.results_mutex)
 
 	shell_request_destroy(&data.request)
+	client := data.client
 	free(data)
+	// Decrement LAST so shell_client_destroy doesn't observe 0 and free the
+	// client while we still hold a pointer into it (#166).
+	sync.atomic_sub(&client.workers_alive, 1)
 }
 
 @(private = "file")
@@ -96,12 +182,21 @@ shell_request_destroy :: proc(req: ^Shell_Request) {
 	delete(req.cmd)
 }
 
-execute_shell :: proc(req: Shell_Request) -> Shell_Response {
+execute_shell :: proc(req: Shell_Request, client: ^Shell_Client = nil) -> Shell_Response {
 	response: Shell_Response
 	response.id = strings.clone(req.id)
 
 	if len(req.cmd) == 0 {
 		response.error_msg = strings.clone("Empty command")
+		response.exit_code = -1
+		return response
+	}
+
+	// #167: bound the cloned stdin so a pathological :stdin can't pin
+	// unbounded memory; the poll-loop writer below handles any size safely,
+	// this is just a documented ceiling.
+	if len(req.stdin) > SHELL_MAX_STDIN {
+		response.error_msg = fmt.aprintf("shell stdin exceeds %d MiB cap", SHELL_MAX_STDIN / (1024 * 1024))
 		response.exit_code = -1
 		return response
 	}
@@ -208,11 +303,37 @@ execute_shell :: proc(req: Shell_Request) -> Shell_Response {
 		return response
 	}
 
-	// Write stdin
-	if stdin_w != nil {
-		os.write(stdin_w, transmute([]u8)req.stdin)
-		os.close(stdin_w)
+	// #166: register the child so shell_client_destroy can kill it to bound
+	// the shutdown drain. Check `destroying` under the same lock so a request
+	// racing destroy can't leave an unkillable child running; unregister on
+	// every return path via the defer below.
+	if client != nil {
+		sync.lock(&client.procs_mutex)
+		if sync.atomic_load(&client.destroying) {
+			sync.unlock(&client.procs_mutex)
+			_ = os.process_kill(process)
+			_, _ = os.process_wait(process)
+			if stdin_w != nil do os.close(stdin_w)
+			response.error_msg = strings.clone("shell client shutting down")
+			response.exit_code = -1
+			return response
+		}
+		client.processes[req.id] = process
+		sync.unlock(&client.procs_mutex)
 	}
+	defer if client != nil {
+		sync.lock(&client.procs_mutex)
+		delete_key(&client.processes, req.id)
+		sync.unlock(&client.procs_mutex)
+	}
+
+	// #167: stdin is fed inside the poll loop below (POLLOUT) rather than
+	// with one blocking os.write. A large stdin to a child that doesn't
+	// drain it (or exits early) would otherwise block here forever -- past
+	// the timeout/output-cap checks, which only run in the read loop -- and
+	// writing to a closed read end would raise SIGPIPE (now ignored).
+	stdin_off := 0
+	stdin_done := stdin_w == nil
 
 	// Read stdout and stderr
 	stdout_buf: [dynamic]u8
@@ -253,10 +374,11 @@ execute_shell :: proc(req: Shell_Request) -> Shell_Response {
 			break
 		}
 
-		fds: [2]linux.Poll_Fd
+		fds: [3]linux.Poll_Fd
 		n_fds := 0
 		stdout_idx := -1
 		stderr_idx := -1
+		stdin_idx := -1
 		if !stdout_done {
 			fds[n_fds] = linux.Poll_Fd {
 				fd     = linux.Fd(os.fd(stdout_r)),
@@ -271,6 +393,14 @@ execute_shell :: proc(req: Shell_Request) -> Shell_Response {
 				events = {.IN},
 			}
 			stderr_idx = n_fds
+			n_fds += 1
+		}
+		if !stdin_done {
+			fds[n_fds] = linux.Poll_Fd {
+				fd     = linux.Fd(os.fd(stdin_w)),
+				events = {.OUT},
+			}
+			stdin_idx = n_fds
 			n_fds += 1
 		}
 
@@ -306,6 +436,35 @@ execute_shell :: proc(req: Shell_Request) -> Shell_Response {
 					append(&stderr_buf, ..read_buf[:n])
 				}
 			}
+			// #167: feed stdin a chunk at a time, only when the pipe is
+			// writable. A write of <= PIPE_BUF (4096) bytes is non-blocking
+			// once POLLOUT signals room, so this never blocks the loop and
+			// the timeout/cap checks above keep firing. EPIPE/HUP (child
+			// closed its read end) ends stdin without a SIGPIPE crash.
+			if stdin_idx >= 0 {
+				r := fds[stdin_idx].revents
+				if .OUT in r {
+					chunk := len(req.stdin) - stdin_off
+					if chunk > 4096 do chunk = 4096
+					n, werr := os.write(stdin_w, transmute([]u8)req.stdin[stdin_off:stdin_off + chunk])
+					if werr != nil || n <= 0 {
+						stdin_done = true
+						os.close(stdin_w)
+						stdin_w = nil
+					} else {
+						stdin_off += n
+						if stdin_off >= len(req.stdin) {
+							stdin_done = true
+							os.close(stdin_w)
+							stdin_w = nil
+						}
+					}
+				} else if .ERR in r || .HUP in r {
+					stdin_done = true
+					os.close(stdin_w)
+					stdin_w = nil
+				}
+			}
 		}
 
 		if len(stdout_buf) + len(stderr_buf) > output_cap {
@@ -321,6 +480,10 @@ execute_shell :: proc(req: Shell_Request) -> Shell_Response {
 			break
 		}
 	}
+
+	// Close the stdin pipe if the child never drained it (timeout/cap kill,
+	// or a child that exited without reading all input). #167.
+	if stdin_w != nil do os.close(stdin_w)
 
 	if killed {
 		// Reap the child to avoid a zombie. The exit_code from a SIGKILL'd
