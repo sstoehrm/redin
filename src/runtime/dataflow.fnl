@@ -153,12 +153,16 @@
         nil)
       (do
         (when sub.dirty
-          (set tracking [])
-          (let [value (sub.fn raw-db)]
-            (set sub.deps tracking)
-            (set tracking nil)
-            (set sub.cached value)
-            (set sub.dirty false)))
+          ;; #178: save/restore `tracking` (like M.dispatch) so a query fn
+          ;; that itself calls subscribe doesn't clobber it to nil, which
+          ;; would drop this sub's deps and later (ipairs nil) in flush.
+          (let [saved-tracking tracking]
+            (set tracking [])
+            (let [value (sub.fn raw-db)]
+              (set sub.deps tracking)
+              (set tracking saved-tracking)
+              (set sub.cached value)
+              (set sub.dirty false))))
         sub.cached))))
 
 ;; ===== Public API: flush =====
