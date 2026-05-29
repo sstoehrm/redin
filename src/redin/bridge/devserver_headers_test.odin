@@ -19,6 +19,19 @@ test_find_header_value_simple :: proc(t: ^testing.T) {
 }
 
 @(test)
+test_find_header_value_invalid_utf8_before_host :: proc(t: ^testing.T) {
+	// #164: a header value with invalid UTF-8 before Host. strings.to_lower
+	// re-encodes each invalid byte as U+FFFD (1 byte -> 3), so an index
+	// located in the lowercased copy no longer aligns with the original
+	// `headers`, corrupting (or OOB-panicking on) the value-extraction
+	// slice. This is reachable PRE-AUTH via check_host_header. The lookup
+	// must stay byte-aligned and still return the real header values.
+	headers := "GET / HTTP/1.1\r\nX-Junk: \xff\xfe\xc3\x28\r\nHost: localhost:8800\r\nAuthorization: Bearer abc\r\n"
+	testing.expect_value(t, find_header_value(headers, "host"), "localhost:8800")
+	testing.expect_value(t, find_header_value(headers, "authorization"), "Bearer abc")
+}
+
+@(test)
 test_find_header_value_missing :: proc(t: ^testing.T) {
 	headers := "GET / HTTP/1.1\r\nHost: localhost:8800"
 	testing.expect_value(t, find_header_value(headers, "x-not-here"), "")
