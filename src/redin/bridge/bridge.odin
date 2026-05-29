@@ -54,6 +54,17 @@ Bridge :: struct {
 g_bridge: ^Bridge
 g_context: runtime.Context
 
+// #170: hard cap on view-tree nesting depth. flatten/layout/draw each
+// recurse once per level with no native-stack guard, so a deeply
+// self-nesting view (e.g. recursive Fennel) would overflow the C stack
+// uncatchably (the surrounding lua_pcall can't catch a native overflow).
+// We cap at flatten — the single upstream choke point — so the flat tree,
+// and therefore every render pass over it, is bounded. Mirrors the EDN
+// parser's MAX_NESTING. Subtrees deeper than the cap are dropped with a
+// one-time warning rather than crashing.
+MAX_VIEW_DEPTH :: 256
+g_view_depth_warned: bool
+
 init :: proc(b: ^Bridge) {
 	g_bridge = b
 	g_context = context
@@ -331,6 +342,11 @@ clear_node_strings :: proc(n: types.Node) {
 		if len(v.click) > 0 do delete(v.click)
 		if len(v.label) > 0 do delete(v.label)
 		if len(v.aspect) > 0 do delete(v.aspect)
+		// #165: release the registry ref taken by lua_get_event_ctx for a
+		// `:click [:event ctx]` payload. Mirrors clear_dropable_attrs; the
+		// click consumer only ever reads the ref (never retains it across
+		// frames), so an unconditional unref of a nonzero ref is correct.
+		if v.click_ctx != 0 do luaL_unref(g_bridge.L, LUA_REGISTRYINDEX, v.click_ctx)
 	case types.NodeText:
 		if len(v.content) > 0 do delete(v.content)
 		if len(v.aspect) > 0 do delete(v.aspect)
@@ -1370,11 +1386,22 @@ lua_flatten_node :: proc(L: ^Lua_State, index: i32, cur: ^[dynamic]u8, b: ^Bridg
 			if lua_isstring(L, -1) {
 				// It's a child frame
 				lua_pop(L, 1)
-				child_idx := i32(len(b.nodes))
-				append(&child_indices, child_idx)
-				append(cur, u8(len(child_indices) - 1))
-				lua_flatten_node(L, lua_gettop(L), cur, b, my_idx)
-				pop(cur)
+				// #170: len(cur) is this node's nesting depth; cap recursion
+				// so the flat tree (and every render pass over it) stays
+				// bounded. Subtrees deeper than the cap are dropped.
+				if len(cur) < MAX_VIEW_DEPTH {
+					child_idx := i32(len(b.nodes))
+					append(&child_indices, child_idx)
+					append(cur, u8(len(child_indices) - 1))
+					lua_flatten_node(L, lua_gettop(L), cur, b, my_idx)
+					pop(cur)
+				} else if !g_view_depth_warned {
+					g_view_depth_warned = true
+					fmt.eprintfln(
+						"redin: view tree nested deeper than %d levels; dropping deeper subtrees to avoid a native stack overflow (#170)",
+						MAX_VIEW_DEPTH,
+					)
+				}
 			} else {
 				lua_pop(L, 1)
 			}
