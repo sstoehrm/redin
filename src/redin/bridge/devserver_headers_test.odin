@@ -125,3 +125,12 @@ test_find_content_length_zero :: proc(t: ^testing.T) {
 	headers := "GET / HTTP/1.1\r\nContent-Length: 0\r\n"
 	testing.expect_value(t, find_content_length(headers), 0)
 }
+
+@(test)
+test_find_content_length_ignores_request_line :: proc(t: ^testing.T) {
+	// #185: "content-length:" inside the request-line URL/query must not be
+	// parsed as the body length (find_content_length now skips the request
+	// line via find_header_value, like the #78 hardening for other headers).
+	headers := "GET /state/x?content-length:9 HTTP/1.1\r\nHost: localhost:8800\r\n"
+	testing.expect_value(t, find_content_length(headers), 0)
+}
