@@ -52,6 +52,21 @@ shell_response_destroy :: proc(r: ^Shell_Response) {
 	delete(r.error_msg)
 }
 
+// Append a synthesized failure result for a request rejected before it is
+// ever spawned (e.g. a malformed :cmd, #172), so the matching on-error
+// handler still fires with a clear message instead of the request silently
+// misbehaving.
+shell_emit_error :: proc(sc: ^Shell_Client, id: string, msg: string) {
+	r := Shell_Response {
+		id        = strings.clone(id),
+		exit_code = -1,
+		error_msg = strings.clone(msg),
+	}
+	sync.lock(&sc.results_mutex)
+	append(&sc.results, r)
+	sync.unlock(&sc.results_mutex)
+}
+
 Shell_Thread_Data :: struct {
 	client:  ^Shell_Client,
 	request: Shell_Request,
