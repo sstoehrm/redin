@@ -118,7 +118,7 @@ lua_value_to_json_inner :: proc(b: ^strings.Builder, L: ^Lua_State, index: i32, 
 	case LUA_TNUMBER:
 		json_number(b, lua_tonumber(L, abs_idx))
 	case LUA_TSTRING:
-		json_string(b, string(lua_tostring_raw(L, abs_idx)))
+		json_string(b, lua_tostring_len(L, abs_idx))
 	case LUA_TTABLE:
 		ptr := lua_topointer(L, abs_idx)
 		if ptr in ctx.path {
@@ -155,7 +155,7 @@ lua_value_to_json_inner :: proc(b: ^strings.Builder, L: ^Lua_State, index: i32, 
 				if lua_isstring(L, -2) {
 					if !first do json_comma(b)
 					first = false
-					json_key(b, string(lua_tostring_raw(L, -2)))
+					json_key(b, lua_tostring_len(L, -2))
 					lua_value_to_json_inner(b, L, -1, ctx)
 				}
 				lua_pop(L, 1)
@@ -183,7 +183,7 @@ redin_json_encode :: proc "c" (L: ^Lua_State) -> i32 {
 
 redin_json_decode :: proc "c" (L: ^Lua_State) -> i32 {
 	context = runtime.default_context()
-	s := string(lua_tostring_raw(L, 1))
+	s := lua_tostring_len(L, 1)
 	if len(s) == 0 {
 		lua_pushnil(L)
 		return 1
@@ -193,6 +193,17 @@ redin_json_decode :: proc "c" (L: ^Lua_State) -> i32 {
 		luaL_error(L, "invalid JSON")
 	}
 	return 1
+}
+
+// #173: read a Lua string with its explicit length so embedded NULs are
+// preserved. string(cstring) is strlen-based and truncates at the first NUL;
+// Lua strings carry a length and may contain NULs. Mirrors the length-carrying
+// read at bridge.odin:396.
+@(private = "file")
+lua_tostring_len :: proc(L: ^Lua_State, index: i32) -> string {
+	n: uint
+	p := lua_tolstring(L, index, &n)
+	return string(([^]u8)(p)[:n])
 }
 
 // ---------------------------------------------------------------------------
