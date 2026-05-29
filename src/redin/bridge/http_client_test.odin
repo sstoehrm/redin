@@ -12,6 +12,7 @@ package bridge
 // execute_http_request reports an error rather than streaming the body.
 
 import "core:fmt"
+import "core:log"
 import "core:net"
 import "core:strings"
 import "core:sync"
@@ -617,4 +618,107 @@ test_http_destroy_drains_or_times_out :: proc(t: ^testing.T) {
 
 	testing.expect(t, elapsed < 4 * time.Second,
 		"http_client_destroy should drain within ~3 s, not hang")
+}
+
+// --- #163: malformed responses must not abort the process (negative-slice) ---
+
+@(private = "file")
+expect_no_crash_with_error :: proc(t: ^testing.T, label: string, response: string) {
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+	allow_open_http()
+	defer set_http_whitelist(nil)
+
+	m := mock_start(response)
+	if m == nil do testing.fail_now(t, "could not bind a mock server port")
+	defer mock_stop(m)
+
+	url := fmt.tprintf("http://127.0.0.1:%d/", m.port)
+	req := Http_Request {
+		id     = strings.clone("neg"),
+		url    = strings.clone(url),
+		method = strings.clone("GET"),
+	}
+	defer {
+		delete(req.id)
+		delete(req.url)
+		delete(req.method)
+	}
+
+	// The point of the test: this call must RETURN (with an error), not
+	// abort the whole process on a negative-index slice (#163).
+	got := execute_http_request(req)
+	defer {
+		delete(got.body)
+		delete(got.error_msg)
+		for k, v in got.headers {delete(k);delete(v)}
+		delete(got.headers)
+	}
+
+	testing.expectf(t, len(got.error_msg) > 0, "%s: expected an error, not success/crash", label)
+}
+
+@(test)
+test_http_negative_content_length_no_crash :: proc(t: ^testing.T) {
+	expect_no_crash_with_error(t, "negative Content-Length",
+		"HTTP/1.1 200 OK\r\nContent-Length: -1\r\nConnection: close\r\n\r\nx")
+}
+
+@(test)
+test_http_negative_chunk_size_no_crash :: proc(t: ^testing.T) {
+	expect_no_crash_with_error(t, "negative chunk size",
+		"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n-1\r\n")
+}
+
+@(test)
+test_http_spaceless_status_line_no_crash :: proc(t: ^testing.T) {
+	expect_no_crash_with_error(t, "spaceless status line",
+		"HTTP/1.1200OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+}
+
+// --- #169: a hung peer must not pin the worker past the timeout ---
+
+@(test)
+test_http_socket_timeout_unblocks_hung_peer :: proc(t: ^testing.T) {
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+	allow_open_http()
+	defer set_http_whitelist(nil)
+
+	m := mock_start_slow() // accepts, reads the request, then sleeps ~2s without replying
+	if m == nil do testing.fail_now(t, "could not bind a mock server port")
+	defer mock_stop(m)
+
+	url := fmt.tprintf("http://127.0.0.1:%d/", m.port)
+	req := Http_Request {
+		id         = strings.clone("slow"),
+		url        = strings.clone(url),
+		method     = strings.clone("GET"),
+		timeout_ms = 500,
+	}
+	defer {
+		delete(req.id)
+		delete(req.url)
+		delete(req.method)
+	}
+
+	// Suppress odin-http's log.error on the expected recv timeout (Would_Block),
+	// mirroring the production worker (http_client_request sets nil_logger);
+	// otherwise the test runner counts that error log as a failure.
+	context.logger = log.nil_logger()
+
+	start := time.now()
+	got := execute_http_request(req)
+	elapsed := time.diff(start, time.now())
+	defer {
+		delete(got.body)
+		delete(got.error_msg)
+		for k, v in got.headers {delete(k);delete(v)}
+		delete(got.headers)
+	}
+
+	testing.expectf(t, elapsed < 1500 * time.Millisecond,
+		"execute_http_request blocked %v on a non-responding peer; the 500ms socket Receive_Timeout should unblock recv (#169)",
+		elapsed)
+	testing.expect(t, got.status == 0, "expected a timeout error status, not success")
 }
