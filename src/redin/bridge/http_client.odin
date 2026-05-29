@@ -276,11 +276,35 @@ http_client_request :: proc(hc: ^Http_Client, req: Http_Request) {
 	// both the map key and id_owned, so a single delete frees both.
 	id_clone := strings.clone(req.id)
 	sync.lock(&hc.pending_mutex)
-	hc.pending[id_clone] = Pending_Http{
-		id_owned = id_clone,
-		deadline = time.time_add(time.now(), time.Duration(timeout) * time.Millisecond),
+	_, dup := hc.pending[id_clone]
+	if !dup {
+		hc.pending[id_clone] = Pending_Http{
+			id_owned = id_clone,
+			deadline = time.time_add(time.now(), time.Duration(timeout) * time.Millisecond),
+		}
 	}
 	sync.unlock(&hc.pending_mutex)
+
+	// #174: a duplicate in-flight id would overwrite the first entry's
+	// map-key allocation (leak) and cause the second worker's real response
+	// to be dropped (ok=false on completion). Reject synchronously instead.
+	// The supported :http effect always generates unique ids; this hardens
+	// the native-bridge contract where the caller supplies req.id.
+	if dup {
+		delete(id_clone)
+		r := Http_Response {
+			id        = req.id,
+			status    = 0,
+			error_msg = strings.clone("duplicate http request id (already in flight)"),
+			headers   = make(map[string]string),
+		}
+		sync.lock(&hc.results_mutex)
+		append(&hc.results, r)
+		sync.unlock(&hc.results_mutex)
+		req := req
+		http_request_destroy(&req)
+		return
+	}
 
 	data := new(Http_Thread_Data)
 	data.client = hc
@@ -430,6 +454,16 @@ execute_http_request :: proc(req: Http_Request, client: ^Http_Client = nil) -> H
 			response.error_msg = strings.clone("http scheme must be http or https")
 			return response
 		}
+	}
+
+	// #175: the URL's path/query is written verbatim into the request line,
+	// so control bytes (CR/LF/NUL) could smuggle extra header lines or a
+	// second request. header_safe is applied to header keys/values below;
+	// apply it to the URL too, before dial.
+	if !header_safe(req.url) {
+		response.status = 0
+		response.error_msg = strings.clone("http url contains invalid character")
+		return response
 	}
 
 	// Whitelist guard. Opt-in via bridge.set_http_whitelist. M4 from issue #99.

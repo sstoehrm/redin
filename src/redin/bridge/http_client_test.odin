@@ -722,3 +722,91 @@ test_http_socket_timeout_unblocks_hung_peer :: proc(t: ^testing.T) {
 		elapsed)
 	testing.expect(t, got.status == 0, "expected a timeout error status, not success")
 }
+// #175: the request URL is written verbatim into the request line, so
+// control bytes in the path/query could smuggle extra headers / a second
+// request. header_safe is applied to header keys/values; it must apply to
+// the URL too.
+@(test)
+test_http_url_rejects_crlf :: proc(t: ^testing.T) {
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+	allow_open_http()
+	defer set_http_whitelist(nil)
+
+	req := Http_Request {
+		id     = strings.clone("url-crlf"),
+		url    = strings.clone("http://127.0.0.1:1/x\r\nX-Injected: 1"),
+		method = strings.clone("GET"),
+	}
+	defer {
+		delete(req.id)
+		delete(req.url)
+		delete(req.method)
+	}
+
+	got := execute_http_request(req)
+	defer {
+		delete(got.body)
+		delete(got.error_msg)
+		for k, v in got.headers {delete(k);delete(v)}
+		delete(got.headers)
+	}
+
+	testing.expect(t, got.status == 0, "expected error status for CRLF in URL")
+	testing.expectf(t, strings.contains(got.error_msg, "invalid character"),
+		"expected 'invalid character' rejection before dial, got %q (#175)", got.error_msg)
+}
+
+// #174: pending/sockets are keyed by caller-supplied req.id. Two in-flight
+// requests sharing an id make the second insert overwrite the first's
+// map-key allocation (leak) and the second's real response gets dropped.
+// http_client_request must reject a duplicate in-flight id synchronously
+// instead of starting a second worker.
+@(test)
+test_http_duplicate_id_rejected :: proc(t: ^testing.T) {
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+	allow_open_http()
+	defer set_http_whitelist(nil)
+
+	hc: Http_Client
+	http_client_init(&hc)
+	defer http_client_destroy(&hc)
+
+	m := mock_start_slow() // accepts, then sleeps — keeps req1 in flight
+	if m == nil do testing.fail_now(t, "could not bind a mock server port")
+	defer mock_stop(m)
+
+	url := fmt.tprintf("http://127.0.0.1:%d/", m.port)
+
+	// First request: inserts pending["dup"] synchronously, then runs.
+	req1 := Http_Request {
+		id     = strings.clone("dup"),
+		url    = strings.clone(url),
+		method = strings.clone("GET"),
+	}
+	http_client_request(&hc, req1)
+	after_first := sync.atomic_load(&hc.workers_alive)
+
+	// Second request with the SAME id must be rejected without a new worker.
+	req2 := Http_Request {
+		id     = strings.clone("dup"),
+		url    = strings.clone(url),
+		method = strings.clone("GET"),
+	}
+	http_client_request(&hc, req2)
+
+	testing.expectf(t, sync.atomic_load(&hc.workers_alive) == after_first,
+		"duplicate-id request must not start another worker (#174); workers_alive %d -> %d",
+		after_first, sync.atomic_load(&hc.workers_alive))
+
+	results: [dynamic]Http_Response
+	defer delete(results)
+	http_client_poll(&hc, &results)
+	found := false
+	for &r in results {
+		if strings.contains(r.error_msg, "duplicate") do found = true
+		http_response_destroy(&r)
+	}
+	testing.expect(t, found, "expected a 'duplicate' rejection result (#174)")
+}
