@@ -494,6 +494,15 @@ execute_http_request :: proc(req: Http_Request, client: ^Http_Client = nil) -> H
 		return response
 	}
 
+	// #169: bound the socket read. The poll-side timeout in http_client_poll
+	// only synthesizes a response and frees the in-flight slot; it never
+	// touches the socket, so without this a worker parked in
+	// request_on -> recv against a hung/tarpit peer would block (and hold
+	// its fd) forever, defeating MAX_INFLIGHT_HTTP. A real receive deadline
+	// makes recv return and the worker unwind.
+	recv_timeout_ms := req.timeout_ms <= 0 ? HTTP_DEFAULT_TIMEOUT_MS : req.timeout_ms
+	net.set_option(sock, .Receive_Timeout, time.Duration(recv_timeout_ms) * time.Millisecond)
+
 	if client != nil {
 		sync.lock(&client.sockets_mutex)
 		if sync.atomic_load(&client.destroying) {
