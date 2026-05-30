@@ -50,6 +50,13 @@ Sync_Queue :: struct {
 // beats a 2-second timer to keep the server fully wedged.
 HANDLER_POOL_SIZE :: 16
 
+// #162 H2: hard cap on connections queued for a handler. The acceptor
+// drops (closes) any connection arriving past this, so a client opening
+// sockets faster than the handler pool drains them can't grow
+// accepted_conns — and the fds it pins — without bound. Sized well above
+// HANDLER_POOL_SIZE so legitimate bursts still queue comfortably.
+MAX_PENDING_CONNS :: 256
+
 Pending_Conn :: struct {
 	socket: net.TCP_Socket,
 }
@@ -65,6 +72,23 @@ conn_push :: proc(cq: ^Conn_Queue, c: ^Pending_Conn) {
 	queue.push_back(&cq.q, c)
 	sync.unlock(&cq.mu)
 	sync.sema_post(&cq.sema)
+}
+
+// conn_try_push enqueues `c` only while the queue holds fewer than
+// `max_len` entries, returning false (without enqueuing) when full so the
+// caller can close the socket instead of leaking it. The nil shutdown
+// sentinel always enqueues — handlers must observe the stop signal even
+// when the queue is saturated. #162 H2.
+conn_try_push :: proc(cq: ^Conn_Queue, c: ^Pending_Conn, max_len: int) -> bool {
+	sync.lock(&cq.mu)
+	if c != nil && queue.len(cq.q) >= max_len {
+		sync.unlock(&cq.mu)
+		return false
+	}
+	queue.push_back(&cq.q, c)
+	sync.unlock(&cq.mu)
+	sync.sema_post(&cq.sema)
+	return true
 }
 
 conn_pop_blocking :: proc(cq: ^Conn_Queue) -> ^Pending_Conn {
@@ -444,7 +468,13 @@ acceptor_thread_proc :: proc(ds: ^Dev_Server) {
 		}
 		pc := new(Pending_Conn)
 		pc.socket = client
-		conn_push(&ds.accepted_conns, pc)
+		// #162 H2: refuse to grow the pending queue without bound. On
+		// overflow, close the socket and drop it rather than pinning the
+		// fd + allocation until a handler frees up.
+		if !conn_try_push(&ds.accepted_conns, pc, MAX_PENDING_CONNS) {
+			net.close(pc.socket)
+			free(pc)
+		}
 	}
 	// Wake every handler so they observe the nil sentinel and exit.
 	for _ in 0 ..< HANDLER_POOL_SIZE {
@@ -816,6 +846,7 @@ status_text :: proc(code: int) -> string {
 	case 404: return "404 Not Found"
 	case 405: return "405 Method Not Allowed"
 	case 408: return "408 Request Timeout"
+	case 413: return "413 Payload Too Large"
 	case 500: return "500 Internal Server Error"
 	case:     return "200 OK"
 	}
@@ -2216,7 +2247,29 @@ handle_put_aspects :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string)
 
 // --- Screenshot ---
 
+// #162 H3: upper bound on the pixel count /screenshot will capture.
+// LoadImageFromScreen + ExportImageToMemory allocate an RGBA buffer plus
+// a PNG-encoded copy; at the 8192x8192 window /resize permits that is
+// ~256 MB transient per call, so an authenticated caller could OOM the
+// host by driving the window large and hammering the endpoint. 16 MP sits
+// comfortably above any real display while capping that allocation.
+MAX_SCREENSHOT_PIXELS :: 16 * 1024 * 1024
+
+// Pure predicate so the cap is unit-testable without a GL context: a
+// capture is allowed only when both dimensions are positive and their
+// product is within the cap. Multiply in i64 to avoid i32 overflow at
+// the extreme dimensions /resize allows.
+screenshot_dims_ok :: proc(width, height: int) -> bool {
+	if width <= 0 || height <= 0 do return false
+	return i64(width) * i64(height) <= i64(MAX_SCREENSHOT_PIXELS)
+}
+
 handle_screenshot :: proc(ch: ^Response_Channel) {
+	// #162 H3: reject oversized captures before any allocation happens.
+	if !screenshot_dims_ok(int(rl.GetScreenWidth()), int(rl.GetScreenHeight())) {
+		respond_text(ch, 413, "Screenshot exceeds maximum size")
+		return
+	}
 	// Encode PNG in-memory (no temp file). Avoids the fixed-path
 	// TOCTOU where a local attacker could symlink-swap a predictable
 	// /tmp path between export and readback. Raylib returns a buffer
