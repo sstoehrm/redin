@@ -211,22 +211,29 @@ layout_node :: proc(
 	nodes: []types.Node,
 	children_list: []types.Children,
 	theme: map[string]types.Theme,
+	depth := 0,
 ) {
 	if idx < 0 || idx >= len(nodes) do return
+	// #162 H1: backstop the layout recursion symmetrically with the
+	// intrinsic-height walk. Unreachable behind the flatten cap (#170).
+	if layout_depth_exceeded(depth) {
+		warn_layout_depth()
+		return
+	}
 	node_rects[idx] = rect
 	node_content_rects[idx] = rect
 
 	switch n in nodes[idx] {
 	case types.NodeStack:
 		if len(n.viewport) > 0 {
-			layout_children_viewport(idx, n, nodes, children_list, theme)
+			layout_children_viewport(idx, n, nodes, children_list, theme, depth)
 		} else {
-			layout_children_stack(idx, rect, nodes, children_list, theme)
+			layout_children_stack(idx, rect, nodes, children_list, theme, depth)
 		}
 	case types.NodeVbox:
-		layout_box(idx, rect, n.aspect, n.layout, true, n.overflow, nodes, children_list, theme)
+		layout_box(idx, rect, n.aspect, n.layout, true, n.overflow, nodes, children_list, theme, depth)
 	case types.NodeHbox:
-		layout_box(idx, rect, n.aspect, n.layout, false, n.overflow, nodes, children_list, theme)
+		layout_box(idx, rect, n.aspect, n.layout, false, n.overflow, nodes, children_list, theme, depth)
 	case types.NodeCanvas:
 		// Apply padding to content_rect; draw pass uses this for canvas.process.
 		content_rect := rect
@@ -250,12 +257,12 @@ layout_node :: proc(
 	case types.NodeInput, types.NodeButton, types.NodeText, types.NodeImage:
 		// Leaf — no children, rect already stored.
 	case types.NodePopout:
-		layout_children_stack(idx, rect, nodes, children_list, theme)
+		layout_children_stack(idx, rect, nodes, children_list, theme, depth)
 	case types.NodeModal:
 		screen := rl.Rectangle{0, 0, f32(rl.GetScreenWidth()), f32(rl.GetScreenHeight())}
 		node_rects[idx] = screen
 		node_content_rects[idx] = screen
-		layout_children_stack(idx, screen, nodes, children_list, theme)
+		layout_children_stack(idx, screen, nodes, children_list, theme, depth)
 	}
 }
 
@@ -265,11 +272,12 @@ layout_children_stack :: proc(
 	nodes: []types.Node,
 	children_list: []types.Children,
 	theme: map[string]types.Theme,
+	depth: int,
 ) {
 	ch := children_list[idx]
 	for i in 0 ..< int(ch.length) {
 		child_idx := int(ch.value[i])
-		layout_node(child_idx, rect, nodes, children_list, theme)
+		layout_node(child_idx, rect, nodes, children_list, theme, depth + 1)
 	}
 }
 
@@ -308,6 +316,7 @@ layout_children_viewport :: proc(
 	nodes: []types.Node,
 	children_list: []types.Children,
 	theme: map[string]types.Theme,
+	depth: int,
 ) {
 	ch := children_list[idx]
 	if int(ch.length) != len(stack.viewport) {
@@ -338,7 +347,7 @@ layout_children_viewport :: proc(
 		}
 		child_rect := rl.Rectangle{px(x), px(y), w, h}
 		child_idx := int(ch.value[i])
-		layout_node(child_idx, child_rect, nodes, children_list, theme)
+		layout_node(child_idx, child_rect, nodes, children_list, theme, depth + 1)
 	}
 }
 
@@ -352,6 +361,7 @@ layout_box :: proc(
 	nodes: []types.Node,
 	children_list: []types.Children,
 	theme: map[string]types.Theme,
+	depth: int,
 ) {
 	content_rect := rect
 	pad: [4]u8
@@ -384,7 +394,7 @@ layout_box :: proc(
 		s: f32
 		if vertical {
 			s = scrollable_y \
-				? intrinsic_height(child_idx, nodes, children_list, theme, content_rect.width) \
+				? intrinsic_height(child_idx, nodes, children_list, theme, content_rect.width, depth) \
 				: node_preferred_height(child_idx, nodes, theme, content_rect.width)
 		} else {
 			s = node_preferred_width(child_idx, nodes)
@@ -450,7 +460,7 @@ layout_box :: proc(
 		child_rect: rl.Rectangle
 		if vertical {
 			h := scrollable_y \
-				? intrinsic_height(child_idx, nodes, children_list, theme, content_rect.width) \
+				? intrinsic_height(child_idx, nodes, children_list, theme, content_rect.width, depth) \
 				: node_preferred_height(child_idx, nodes, theme, content_rect.width)
 			if h <= 0 do h = fill_size
 			child_x := content_rect.x; child_w := content_rect.width
@@ -481,7 +491,7 @@ layout_box :: proc(
 			child_rect = rl.Rectangle{pos, child_y, w, child_h}
 			pos += w
 		}
-		layout_node(child_idx, child_rect, nodes, children_list, theme)
+		layout_node(child_idx, child_rect, nodes, children_list, theme, depth + 1)
 	}
 }
 
@@ -1078,24 +1088,58 @@ node_preferred_height :: proc(
 	return 0
 }
 
+// #162 H1: defense-in-depth ceiling on the layout / intrinsic-height
+// recursion. The bridge flatten pass already caps view-tree nesting at
+// bridge.MAX_VIEW_DEPTH (256, #170), which bounds every render walk over
+// the flat tree — so this backstop never trips on a tree that flatten
+// produced. It exists purely so a future change to the flatten cap (or a
+// new code path that builds the flat arrays without it) can't silently
+// reintroduce the unbounded native-stack recursion. Kept strictly above
+// MAX_VIEW_DEPTH; verified by test_layout_backstop_exceeds_flatten_cap.
+LAYOUT_DEPTH_BACKSTOP :: 1024
+
+g_layout_depth_warned: bool
+
+layout_depth_exceeded :: proc(depth: int) -> bool {
+	return depth > LAYOUT_DEPTH_BACKSTOP
+}
+
+// Emit the one-shot backstop warning. Separate from the predicate so the
+// predicate stays pure (and unit-testable without side effects).
+@(private)
+warn_layout_depth :: proc() {
+	if g_layout_depth_warned do return
+	g_layout_depth_warned = true
+	fmt.eprintfln(
+		"redin: layout recursion hit the %d-level backstop; truncating. This should be unreachable behind the flatten cap (#162 H1, #170).",
+		LAYOUT_DEPTH_BACKSTOP,
+	)
+}
+
 // Natural content height for use in scrollable containers. When a child
 // inside a scroll-y vbox has no explicit height, layout must still give
 // it a non-zero rect — otherwise children collapse to the same Y. For
-// nested boxes this means recursing over the subtree.
+// nested boxes this means recursing over the subtree. `depth` is the
+// recursion depth from the measurement root, bounded by the backstop.
 intrinsic_height :: proc(
 	idx: int,
 	nodes: []types.Node,
 	children_list: []types.Children,
 	theme: map[string]types.Theme,
 	available_width: f32,
+	depth := 0,
 ) -> f32 {
 	if idx < 0 || idx >= len(nodes) do return 0
+	if layout_depth_exceeded(depth) {
+		warn_layout_depth()
+		return 0
+	}
 
 	if cached, ok := text_pkg.lookup_intrinsic(idx, available_width); ok {
 		return cached
 	}
 
-	h := intrinsic_height_impl(idx, nodes, children_list, theme, available_width)
+	h := intrinsic_height_impl(idx, nodes, children_list, theme, available_width, depth)
 	text_pkg.cache_intrinsic(idx, available_width, h)
 	return h
 }
@@ -1107,6 +1151,7 @@ intrinsic_height_impl :: proc(
 	children_list: []types.Children,
 	theme: map[string]types.Theme,
 	available_width: f32,
+	depth: int,
 ) -> f32 {
 	switch n in nodes[idx] {
 	case types.NodeVbox:
@@ -1120,7 +1165,7 @@ intrinsic_height_impl :: proc(
 		total := f32(pad[0]) + f32(pad[2])
 		ch := children_list[idx]
 		for i in 0 ..< int(ch.length) {
-			total += intrinsic_height(int(ch.value[i]), nodes, children_list, theme, inner_w)
+			total += intrinsic_height(int(ch.value[i]), nodes, children_list, theme, inner_w, depth + 1)
 		}
 		return total
 
@@ -1137,7 +1182,7 @@ intrinsic_height_impl :: proc(
 		share := inner_w / f32(ch.length)
 		max_h: f32 = 0
 		for i in 0 ..< int(ch.length) {
-			ch_h := intrinsic_height(int(ch.value[i]), nodes, children_list, theme, share)
+			ch_h := intrinsic_height(int(ch.value[i]), nodes, children_list, theme, share, depth + 1)
 			if ch_h > max_h do max_h = ch_h
 		}
 		return max_h + f32(pad[0]) + f32(pad[2])
@@ -1146,7 +1191,7 @@ intrinsic_height_impl :: proc(
 		ch := children_list[idx]
 		max_h: f32 = 0
 		for i in 0 ..< int(ch.length) {
-			ch_h := intrinsic_height(int(ch.value[i]), nodes, children_list, theme, available_width)
+			ch_h := intrinsic_height(int(ch.value[i]), nodes, children_list, theme, available_width, depth + 1)
 			if ch_h > max_h do max_h = ch_h
 		}
 		return max_h
