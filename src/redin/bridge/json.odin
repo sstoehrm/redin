@@ -394,6 +394,18 @@ json_decode_object :: proc(L: ^Lua_State, s: string, pos: ^int, depth: int) -> b
 	}
 }
 
+// #162 M2: upper bound on array entries. Without it, idx (an i32) wraps
+// to negative past 2^31 entries and lua_rawseti with a negative key is
+// undefined behaviour for the VM. 1,000,000 is far above any array a
+// 1 MiB request body can hold, and far below the i32 wrap point.
+MAX_JSON_ARRAY_LEN :: 1_000_000
+
+// Pure predicate (testable without decoding a giant array): the 1-based
+// index about to be assigned is in range when it doesn't exceed the cap.
+json_array_index_ok :: proc(idx: i32) -> bool {
+	return idx <= MAX_JSON_ARRAY_LEN
+}
+
 @(private = "file")
 json_decode_array :: proc(L: ^Lua_State, s: string, pos: ^int, depth: int) -> bool {
 	if s[pos^] != '[' do return false
@@ -406,6 +418,9 @@ json_decode_array :: proc(L: ^Lua_State, s: string, pos: ^int, depth: int) -> bo
 	}
 	idx: i32 = 1
 	for {
+		// Check at loop top while only the table is on the stack, so the
+		// reject path's single pop matches the other guards below.
+		if !json_array_index_ok(idx) {lua_pop(L, 1);return false}
 		if !json_decode_value_at(L, s, pos, depth + 1) {lua_pop(L, 1);return false}
 		lua_rawseti(L, -2, idx)
 		idx += 1

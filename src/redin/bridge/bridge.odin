@@ -1670,10 +1670,20 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 validate_font_path :: proc(path: string) -> bool {
 	if len(path) == 0 do return false
 	if strings.contains_rune(path, 0) do return false
+	// #162 M1: reject Windows-style escapes outright. A backslash never
+	// appears in a legitimate relative asset path on the platforms we
+	// support, and on a Windows host it both separates segments (so
+	// "..\..\Windows\..." would bypass a '/'-only split) and forms UNC
+	// prefixes ("\\server\share\...").
+	if strings.contains_rune(path, '\\') do return false
+	// Drive-letter prefix ("C:\..." or "C:/..."): the second byte being a
+	// colon marks an absolute Windows path regardless of slash direction.
+	if len(path) >= 2 && path[1] == ':' do return false
 	if path[0] == '/' do return false
 	// Segment-wise check so "foo..bar" (a legit filename that happens
 	// to contain two dots) doesn't trip the guard, but "../etc/passwd"
-	// does. Split on '/' only — Windows support would also need '\\'.
+	// does. Backslashes are already rejected above, so splitting on '/'
+	// alone now covers every separator we accept.
 	segments := strings.split(path, "/", context.temp_allocator)
 	for seg in segments {
 		if seg == ".." do return false
