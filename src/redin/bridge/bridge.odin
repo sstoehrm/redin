@@ -46,7 +46,6 @@ Bridge :: struct {
 	shell_client:    Shell_Client,
 	hot_reload:      Hot_Reload,
 	dev_server:      Dev_Server,
-	dev_mode:        bool,
 	frame_changed:   bool,
 	source_tree:     bool,
 }
@@ -137,9 +136,9 @@ init :: proc(b: ^Bridge) {
 // otherwise the first /frames request queues up against load_app and
 // can take seconds to respond, which breaks bb-side test timeouts (#132).
 start_devserver :: proc(b: ^Bridge) {
-	when REDIN_DEV {
-		b.dev_mode = true
-	}
+	// #162 L3: the former `dev_mode` runtime flag is gone — dev-only
+	// mutating endpoints are now gated at compile time via `when REDIN_DEV`
+	// in devserver.odin, so a non-dev build can't reach them at all.
 	when REDIN_DEV || REDIN_AGENT {
 		devserver_init(&b.dev_server, b)
 	}
