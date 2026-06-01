@@ -374,6 +374,94 @@ test_http_whitelist_allows_listed_host :: proc(t: ^testing.T) {
 	testing.expect_value(t, got.status, 200)
 }
 
+// #162 M3: the "external" class must block a host that resolves to
+// loopback. This is the core SSRF assertion — enforcement is against the
+// resolved IP. No mock server: rejection happens before the dial, so there
+// is nothing to connect to (a mock's accept loop would hang the test).
+@(test)
+test_http_access_external_blocks_loopback :: proc(t: ^testing.T) {
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+
+	set_http_whitelist([]string{"external"})
+	defer set_http_whitelist(nil)
+
+	req := Http_Request{
+		id = strings.clone("ssrf-1"),
+		url = strings.clone("http://127.0.0.1:1/"),
+		method = strings.clone("GET"),
+	}
+	defer { delete(req.id); delete(req.url); delete(req.method) }
+	got := execute_http_request(req)
+	defer {
+		delete(got.body); delete(got.error_msg)
+		for k, v in got.headers { delete(k); delete(v) }
+		delete(got.headers)
+	}
+	testing.expect_value(t, got.status, 0)
+	testing.expect(t, strings.contains(got.error_msg, "whitelist"),
+		"expected whitelist rejection for loopback under 'external'")
+}
+
+// "local" allows loopback — the companion to the block test.
+@(test)
+test_http_access_local_allows_loopback :: proc(t: ^testing.T) {
+	resp := "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+	m := mock_start(resp)
+	if m == nil { testing.fail_now(t, "could not bind mock") }
+	defer mock_stop(m)
+
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+
+	set_http_whitelist([]string{"local"})
+	defer set_http_whitelist(nil)
+
+	url := fmt.tprintf("http://127.0.0.1:%d/", m.port)
+	req := Http_Request{
+		id = strings.clone("ssrf-2"), url = strings.clone(url),
+		method = strings.clone("GET"),
+	}
+	defer { delete(req.id); delete(req.url); delete(req.method) }
+	got := execute_http_request(req)
+	defer {
+		delete(got.body); delete(got.error_msg)
+		for k, v in got.headers { delete(k); delete(v) }
+		delete(got.headers)
+	}
+	testing.expect_value(t, got.status, 200)
+}
+
+// An explicit loopback entry still allows it even under "external" — the
+// explicit opt-in always wins over the class.
+@(test)
+test_http_access_explicit_entry_overrides_class :: proc(t: ^testing.T) {
+	resp := "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+	m := mock_start(resp)
+	if m == nil { testing.fail_now(t, "could not bind mock") }
+	defer mock_stop(m)
+
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+
+	set_http_whitelist([]string{"external", "127.0.0.1"})
+	defer set_http_whitelist(nil)
+
+	url := fmt.tprintf("http://127.0.0.1:%d/", m.port)
+	req := Http_Request{
+		id = strings.clone("ssrf-3"), url = strings.clone(url),
+		method = strings.clone("GET"),
+	}
+	defer { delete(req.id); delete(req.url); delete(req.method) }
+	got := execute_http_request(req)
+	defer {
+		delete(got.body); delete(got.error_msg)
+		for k, v in got.headers { delete(k); delete(v) }
+		delete(got.headers)
+	}
+	testing.expect_value(t, got.status, 200)
+}
+
 @(test)
 test_http_whitelist_blocks_unlisted_host :: proc(t: ^testing.T) {
 	sync.lock(&g_test_http_state_mutex)

@@ -4,6 +4,7 @@ import "core:bytes"
 import "core:fmt"
 import "core:log"
 import "core:net"
+import "core:strconv"
 import "core:strings"
 import "core:sync"
 import "core:thread"
@@ -67,6 +68,40 @@ url_host :: proc(url: string) -> string {
 		host = host[:colon]
 	}
 	return host
+}
+
+// url_port extracts the explicit port from a URL host:port, or 0 if absent.
+// Mirrors url_host's parsing (userinfo + IPv6 brackets) so an authority like
+// "user@[::1]:8080" yields 8080. #162 M3.
+@(private = "file")
+url_port :: proc(url: string) -> int {
+	idx := strings.index(url, "://")
+	if idx < 0 do return 0
+	rest := url[idx + 3:]
+	end := len(rest)
+	for i in 0 ..< len(rest) {
+		c := rest[i]
+		if c == '/' || c == '?' || c == '#' { end = i; break }
+	}
+	host := rest[:end]
+	if at := strings.last_index_byte(host, '@'); at >= 0 {
+		host = host[at+1:]
+	}
+	// IPv6 literal: the port (if any) follows the closing bracket.
+	if strings.has_prefix(host, "[") {
+		if rb := strings.index_byte(host, ']'); rb >= 0 {
+			after := host[rb+1:]
+			if strings.has_prefix(after, ":") {
+				if p, ok := strconv.parse_int(after[1:], 10); ok do return p
+			}
+			return 0
+		}
+		return 0
+	}
+	if colon := strings.last_index_byte(host, ':'); colon >= 0 {
+		if p, ok := strconv.parse_int(host[colon+1:], 10); ok do return p
+	}
+	return 0
 }
 
 Http_Request :: struct {
@@ -466,13 +501,33 @@ execute_http_request :: proc(req: Http_Request, client: ^Http_Client = nil) -> H
 		return response
 	}
 
-	// Whitelist guard. Opt-in via bridge.set_http_whitelist. M4 from issue #99.
+	// Whitelist + SSRF guard (#99 M4, #162 M3). Resolve the host ourselves
+	// so we can enforce the access class against the *resolved* IP and then
+	// dial that exact endpoint — closing the DNS-rebinding window where a
+	// re-resolve between check and connect could land on a blocked address.
+	parsed_url := http.url_parse(req.url)
+	checked_endpoint: net.Endpoint
 	{
 		host := url_host(req.url)
-		if rejected, ok := http_whitelist_check(host); !ok {
+		ep4, ep6, resolve_err := net.resolve(parsed_url.host)
+		if resolve_err != nil {
+			// #162 L4: don't echo the resolver error (it can confirm
+			// internal names); log detail, return generic.
+			fmt.eprintfln("redin: http resolve failed for %s: %v", host, resolve_err)
 			response.status = 0
-			response.error_msg = fmt.aprintf("host %s not in http whitelist", rejected)
+			response.error_msg = strings.clone("http request failed")
 			return response
+		}
+		checked_endpoint = ep4.address != nil ? ep4 : ep6
+		if !http_access_allowed(host, checked_endpoint.address) {
+			response.status = 0
+			response.error_msg = fmt.aprintf("host %s not in http whitelist", host)
+			return response
+		}
+		// Fill in the port the same way odin-http's parse_endpoint would.
+		checked_endpoint.port = url_port(req.url)
+		if checked_endpoint.port == 0 {
+			checked_endpoint.port = parsed_url.scheme == "https" ? 443 : 80
 		}
 	}
 
@@ -521,7 +576,10 @@ execute_http_request :: proc(req: Http_Request, client: ^Http_Client = nil) -> H
 	// monolithic `request()` never exposed the underlying fd. When
 	// `client` is nil (sync test callers) we skip the registry dance
 	// entirely.
-	sock, url, dial_err := http_client.dial(req.url)
+	// Dial the endpoint we already resolved and vetted — NOT req.url, which
+	// would make odin-http re-resolve and reopen the rebinding window.
+	url := parsed_url
+	sock, dial_err := net.dial_tcp(checked_endpoint)
 	if dial_err != nil {
 		// #162 L4: the raw dial error names the host/IP and the OS-level
 		// reason ("connection refused on 10.0.x.x:80", "no route to

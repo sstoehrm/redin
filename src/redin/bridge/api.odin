@@ -420,22 +420,113 @@ dispatch :: proc(event: string, payload: any) -> (ok: bool, err: string) {
 }
 
 // ---------------------------------------------------------------------------
-// Outbound HTTP destination whitelist (issue #99 M4)
+// Outbound HTTP destination whitelist (issue #99 M4; SSRF hardening #162 M3)
 // ---------------------------------------------------------------------------
 //
-// When unset (default), redin.http accepts any http(s) destination.
-// When set, the URL host must match either a hostname literal
-// (case-insensitive) or a CIDR (IPv4 or IPv6, applied only to
-// IP-literal hosts). Apps opt in by calling this setter at startup
-// from app.odin (--native projects) or via a registered cfunc.
+// The whitelist is deny-by-default (#136 H2): with nothing set, redin.http
+// refuses every host. An app opts in via `bridge.set_http_whitelist` with a
+// mix of:
+//
+//   - an access-class keyword controlling which IP *ranges* are reachable:
+//       "all"      — any address (the historical open behaviour; "*" is an alias)
+//       "local"    — loopback only (127/8, ::1)
+//       "external" — public addresses only; loopback, link-local, RFC1918,
+//                    ULA, and cloud-metadata ranges are blocked
+//   - explicit hostname literals (case-insensitive) and CIDRs, which are
+//     always allowed regardless of the class (e.g. ["external","127.0.0.1"]
+//     reaches public hosts plus that one loopback service).
+//
+// #162 M3: the class is enforced against the *resolved* IP, so a public
+// hostname that resolves into a blocked range is caught (DNS-rebinding
+// defence). See execute_http_request.
 //
 // #129 L2: hostname comparison is ASCII-byte case-insensitive. IDN
 // hostnames must be passed in their punycode (xn--...) form;
 // `münchen.example` is not equivalent to `xn--mnchen-3ya.example`
 // for whitelist matching.
 
+// Access_Class is the IP-range policy parsed from a class keyword.
+Access_Class :: enum {
+	None,     // no class keyword present — deny unless an explicit entry matches
+	All,      // any address
+	Local,    // loopback only
+	External, // public addresses only
+}
+
+// parse_access_class maps a whitelist entry to its class, or .None if the
+// entry is not a class keyword (i.e. it's a hostname/CIDR literal). "*" is
+// the back-compat alias for "all".
+parse_access_class :: proc(entry: string) -> Access_Class {
+	switch entry {
+	case "all", "*": return .All
+	case "local":    return .Local
+	case "external": return .External
+	}
+	return .None
+}
+
+// --- IP-range classification ---
+
+ip4_is_loopback :: proc(a: net.IP4_Address) -> bool {
+	return a[0] == 127 // 127.0.0.0/8
+}
+
+// Private-or-local covers everything the "external" class must block:
+// loopback, RFC1918, link-local (incl. cloud metadata 169.254.169.254),
+// and CGNAT 100.64/10.
+ip4_is_private_or_local :: proc(a: net.IP4_Address) -> bool {
+	switch {
+	case a[0] == 127:                              return true // loopback
+	case a[0] == 10:                               return true // 10/8
+	case a[0] == 172 && a[1] >= 16 && a[1] <= 31:  return true // 172.16/12
+	case a[0] == 192 && a[1] == 168:               return true // 192.168/16
+	case a[0] == 169 && a[1] == 254:               return true // link-local + metadata
+	case a[0] == 100 && a[1] >= 64 && a[1] <= 127: return true // CGNAT 100.64/10
+	case a[0] == 0:                                 return true // 0.0.0.0/8 "this host"
+	}
+	return false
+}
+
+ip6_is_loopback :: proc(a: net.IP6_Address) -> bool {
+	return a == net.IP6_Loopback
+}
+
+ip6_is_private_or_local :: proc(a: net.IP6_Address) -> bool {
+	if a == net.IP6_Loopback do return true
+	b := transmute([16]u8)a
+	switch {
+	case b[0] == 0xfe && (b[1] & 0xc0) == 0x80: return true // fe80::/10 link-local
+	case (b[0] & 0xfe) == 0xfc:                 return true // fc00::/7 ULA
+	}
+	return false
+}
+
+// access_decide_ip4 / _ip6: does `class` permit dialing this resolved IP,
+// ignoring explicit entries (those are checked separately and always win).
+access_decide_ip4 :: proc(class: Access_Class, a: net.IP4_Address) -> bool {
+	switch class {
+	case .All:      return true
+	case .Local:    return ip4_is_loopback(a)
+	case .External: return !ip4_is_private_or_local(a)
+	case .None:     return false
+	}
+	return false
+}
+
+access_decide_ip6 :: proc(class: Access_Class, a: net.IP6_Address) -> bool {
+	switch class {
+	case .All:      return true
+	case .Local:    return ip6_is_loopback(a)
+	case .External: return !ip6_is_private_or_local(a)
+	case .None:     return false
+	}
+	return false
+}
+
 @(private)
 g_http_whitelist:       []string
+@(private)
+g_http_access_class:    Access_Class
 @(private)
 g_http_whitelist_mutex: sync.Mutex
 
@@ -452,43 +543,83 @@ set_http_whitelist :: proc(allow: []string) {
 	for s in g_http_whitelist do delete(s, heap)
 	delete(g_http_whitelist, heap)
 	g_http_whitelist = nil
+	g_http_access_class = .None
 
 	if allow == nil do return
 
 	cloned := make([]string, len(allow), heap)
 	for s, i in allow do cloned[i] = strings.clone(s, heap)
 	g_http_whitelist = cloned
+
+	// Derive the access class from any class keyword(s) present. If more
+	// than one is given the most permissive wins (All > External > Local),
+	// so a broadening keyword is never silently dropped.
+	for entry in allow {
+		switch parse_access_class(entry) {
+		case .All:      g_http_access_class = .All
+		case .External: if g_http_access_class != .All do g_http_access_class = .External
+		case .Local:    if g_http_access_class == .None do g_http_access_class = .Local
+		case .None:     // hostname / CIDR literal — not a class
+		}
+	}
 }
 
-// http_whitelist_check returns ("", true) if allowed, ("<rejected host>", false)
-// otherwise. host must already be the URL host (no port, no scheme).
-//
-// Defaults (#136 H2): an unset or empty whitelist denies every outbound
-// host. To re-enable the historical open-by-default behaviour, call
-// `bridge.set_http_whitelist([]string{"*"})` from app.odin — the `"*"`
-// entry is a sentinel wildcard that matches any host.
+// http_whitelist_check reports whether an *explicit* entry (hostname
+// literal, case-insensitive, or CIDR) matches `host`, or the class is All.
+// It is the string-level check used directly by unit tests; the live
+// request path uses http_access_allowed, which additionally enforces the
+// access class against the resolved IP. Returns ("", true) when allowed,
+// ("<host>", false) otherwise.
 @(private)
 http_whitelist_check :: proc(host: string) -> (rejected: string, ok: bool) {
 	sync.lock(&g_http_whitelist_mutex)
 	defer sync.unlock(&g_http_whitelist_mutex)
 
-	if len(g_http_whitelist) == 0 do return host, false
+	if g_http_access_class == .All do return "", true
 
 	host_lower := strings.to_lower(host, context.temp_allocator)
 	for entry in g_http_whitelist {
-		// Sentinel wildcard — matches any host. Explicit opt-out of
-		// the deny-by-default policy.
-		if entry == "*" do return "", true
-		// CIDR entry?
+		if parse_access_class(entry) != .None do continue // skip class keywords
 		if strings.contains(entry, "/") {
 			if cidr_match(host, entry) do return "", true
 			continue
 		}
-		// Hostname literal — case-insensitive exact match.
 		entry_lower := strings.to_lower(entry, context.temp_allocator)
 		if host_lower == entry_lower do return "", true
 	}
 	return host, false
+}
+
+// http_access_allowed is the live SSRF gate. `host` is the URL host as
+// written (hostname or IP literal); `addr` is the IP it resolved to and
+// that we are about to dial. An explicit hostname/CIDR entry allows
+// unconditionally (the explicit opt-in always wins); otherwise the access
+// class is enforced against the resolved IP — so a public hostname that
+// resolves into a blocked range is rejected (#162 M3, DNS-rebinding).
+@(private)
+http_access_allowed :: proc(host: string, addr: net.Address) -> bool {
+	sync.lock(&g_http_whitelist_mutex)
+	defer sync.unlock(&g_http_whitelist_mutex)
+
+	host_lower := strings.to_lower(host, context.temp_allocator)
+	ip_str := net.address_to_string(addr, context.temp_allocator)
+	for entry in g_http_whitelist {
+		if parse_access_class(entry) != .None do continue // skip class keywords
+		if strings.contains(entry, "/") {
+			// CIDRs match against the resolved IP, not the host string —
+			// so an explicit CIDR carve-out works for hostnames too.
+			if cidr_match(ip_str, entry) do return true
+			continue
+		}
+		entry_lower := strings.to_lower(entry, context.temp_allocator)
+		if host_lower == entry_lower do return true
+	}
+
+	switch a in addr {
+	case net.IP4_Address: return access_decide_ip4(g_http_access_class, a)
+	case net.IP6_Address: return access_decide_ip6(g_http_access_class, a)
+	}
+	return false
 }
 
 @(private = "file")

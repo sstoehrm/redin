@@ -118,29 +118,46 @@ These setters install host-side policy for the built-in `redin.http` and `redin.
 - `redin.http` → every outbound host is rejected with `host <name> not in http whitelist`.
 - `redin.shell` → spawned children get an empty environment.
 
-To re-enable the historical open-by-default behaviour, pass the wildcard sentinel `"*"`:
+To re-enable the historical open-by-default behaviour, pass the wildcard sentinel (`"*"`, or the equivalent `"all"` access class for HTTP):
 
 ```odin
-bridge.set_http_whitelist([]string{"*"})         // accept any host
+bridge.set_http_whitelist([]string{"all"})       // accept any host ("*" is an alias)
 bridge.set_shell_env_allowlist([]string{"*"})    // full parent-env passthrough
 ```
 
-`"*"` works with the rest of the list (e.g. `[]string{"*", "extra"}`), though there's no reason to mix it with real entries — the wildcard always matches first.
+For `redin.http`, prefer the `"local"` / `"external"` access classes over `"all"` when you can — they bound which IP ranges are reachable and close SSRF/DNS-rebinding. See `bridge.set_http_whitelist` below. For `set_shell_env_allowlist`, `"*"` works with the rest of the list (e.g. `[]string{"*", "extra"}`), though there's no reason to mix it with real entries — the wildcard always matches first.
 
 ### `bridge.set_http_whitelist(allow: []string)`
 
-Configures which hosts `redin.http` will dial. Entries are either hostname literals (case-insensitive — e.g. `"api.example.com"`) or CIDR blocks (IPv4 or IPv6 — e.g. `"127.0.0.0/8"`, `"::1/128"`). CIDR entries are matched only against IP-literal hosts, not DNS names. The sentinel entry `"*"` matches any host.
+Configures which hosts `redin.http` will dial. Entries are one of:
+
+- **An access-class keyword** controlling which IP *ranges* are reachable:
+  - `"all"` — any address (the historical open-by-default behaviour; `"*"` is a back-compat alias).
+  - `"local"` — loopback only (`127.0.0.0/8`, `::1`).
+  - `"external"` — public addresses only; loopback, link-local, RFC1918, ULA, CGNAT, and cloud-metadata (`169.254.169.254`) ranges are blocked.
+- **A hostname literal** (case-insensitive — e.g. `"api.example.com"`).
+- **A CIDR block** (IPv4 or IPv6 — e.g. `"127.0.0.0/8"`, `"::1/128"`).
+
+Hostname and CIDR entries are **always allowed**, on top of whatever the class permits — so `[]string{"external", "127.0.0.1"}` reaches public hosts *plus* that one loopback service. If multiple class keywords appear, the most permissive wins.
+
+**SSRF / DNS-rebinding defence (#162 M3):** the access class is enforced against the **resolved IP**, not the URL text. redin resolves the host itself, checks the resolved address against the class, then dials that exact endpoint. So a public hostname that resolves into a blocked range (`evil.example → 127.0.0.1`) is rejected under `"local"`/`"external"` — a literal-string check would miss it. An explicit hostname or CIDR entry still overrides this (the explicit opt-in is intentional).
 
 Hostname comparison is ASCII-byte case-insensitive. IDN hostnames must be passed in their punycode (`xn--...`) form — `münchen.example` is not equivalent to `xn--mnchen-3ya.example`, and the URL parser punycodes the request host before matching.
 
 Rejection failure (delivered to the `:http` effect's `on-error`): `{status: 0, error: "host <name> not in http whitelist"}`.
 
 ```odin
-// Restrict to specific hosts:
+// Restrict to specific hosts (plus any loopback in 127/8):
 bridge.set_http_whitelist([]string{"api.example.com", "127.0.0.0/8"})
 
+// Public internet only — block SSRF into loopback/LAN/metadata:
+bridge.set_http_whitelist([]string{"external"})
+
+// A local companion service plus the public internet:
+bridge.set_http_whitelist([]string{"external", "127.0.0.1"})
+
 // Open it up entirely (pre-#136 default):
-bridge.set_http_whitelist([]string{"*"})
+bridge.set_http_whitelist([]string{"all"})   // or "*"
 
 redin.run(cfg)
 ```
