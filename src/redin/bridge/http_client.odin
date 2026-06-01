@@ -523,8 +523,14 @@ execute_http_request :: proc(req: Http_Request, client: ^Http_Client = nil) -> H
 	// entirely.
 	sock, url, dial_err := http_client.dial(req.url)
 	if dial_err != nil {
+		// #162 L4: the raw dial error names the host/IP and the OS-level
+		// reason ("connection refused on 10.0.x.x:80", "no route to
+		// host"), which lets an authenticated caller map the internal
+		// network one host at a time. Log the detail to stderr for the
+		// developer; return a generic message to the app.
+		fmt.eprintfln("redin: http dial failed for %s: %v", url_host(req.url), dial_err)
 		response.status = 0
-		response.error_msg = fmt.aprintf("Request failed: %v", dial_err)
+		response.error_msg = strings.clone("http request failed")
 		return response
 	}
 
@@ -561,8 +567,10 @@ execute_http_request :: proc(req: Http_Request, client: ^Http_Client = nil) -> H
 	if req_err != nil {
 		// `request_on` leaves socket ownership with us on error.
 		net.close(sock)
+		// #162 L4: generic to the caller, detail to stderr.
+		fmt.eprintfln("redin: http request failed for %s: %v", url_host(req.url), req_err)
 		response.status = 0
-		response.error_msg = fmt.aprintf("Request failed: %v", req_err)
+		response.error_msg = strings.clone("http request failed")
 		return response
 	}
 	// Success: ownership of `sock` transferred to `res`; closed by the
@@ -585,7 +593,9 @@ execute_http_request :: proc(req: Http_Request, client: ^Http_Client = nil) -> H
 			"Response body too large (cap %d bytes)", HTTP_MAX_BODY,
 		)
 	} else {
-		response.error_msg = fmt.aprintf("Body read failed: %v", body_err)
+		// #162 L4: generic to the caller, detail to stderr.
+		fmt.eprintfln("redin: http body read failed for %s: %v", url_host(req.url), body_err)
+		response.error_msg = strings.clone("http request failed")
 	}
 
 	for k, v in res.headers._kv {

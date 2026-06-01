@@ -3,9 +3,21 @@ package bridge
 import "core:fmt"
 import "core:strings"
 
+// #162 L2: the app path is forwarded to fennel.dofile / luaL_dofile as a
+// C string. An embedded NUL truncates there, so the loader would silently
+// act on a prefix of the supplied path. Reject empty or NUL-containing
+// paths up front. The user controls the CLI argument, so this is a
+// robustness guard (clean refusal over confusing downstream errors), not
+// an exploit barrier — hence absolute paths and any extension stay valid.
+valid_app_path :: proc(path: string) -> bool {
+	if len(path) == 0 do return false
+	if strings.contains_rune(path, 0) do return false
+	return true
+}
+
 load_app :: proc(b: ^Bridge, app_file: string) -> bool {
-	if len(app_file) == 0 {
-		fmt.eprintfln("No app file specified")
+	if !valid_app_path(app_file) {
+		fmt.eprintfln("Invalid app file path (empty or contains NUL)")
 		return false
 	}
 

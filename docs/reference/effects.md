@@ -105,6 +105,7 @@ Make an async HTTP request. The response is routed back as an event.
 | `"http timeout exceeded"` | Wall-clock timeout (per-call `:timeout`, default 30000 ms) elapsed. |
 | `"too many concurrent http requests (cap 64)"` | Submitted while 64 in-flight requests were already running. |
 | `"host <name> not in http whitelist"` | Whitelist denies this host. Deny-by-default since #136 H2 — set `bridge.set_http_whitelist([]string{"*"})` to allow any host. See [native bridge](native-bridge.md). |
+| `"http request failed"` | A dial, request, or body-read error (e.g. connection refused, no route to host, malformed response). The specific underlying error is logged to the host's stderr; the caller receives this generic message so the response body can't be used to probe internal network topology (#162 L4). |
 
 **Shutdown behavior.** `http_client_destroy` waits up to 3 s for in-flight workers to drain naturally, then force-closes the TCP sockets of any still parked inside `parse_response`'s blocking read, then waits up to 1 s more for them to unwind. Closing the socket surfaces as `Connection_Closed` inside `recv_tcp`, which lets the parser return through its error path with the scanner buffer freed (#156). The "N HTTP worker(s) still in flight at shutdown" warning only fires if a worker survives both phases, which should be rare in practice.
 

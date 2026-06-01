@@ -328,8 +328,8 @@ test_http_accepts_uppercase_https :: proc(t: ^testing.T) {
 	defer set_http_whitelist(nil)
 
 	// Just confirms scheme matching is case-insensitive — no real connect.
-	// We expect a connect error (status 0, error_msg contains "Request failed"
-	// or similar), NOT the scheme-rejection error_msg.
+	// We expect a generic connect failure (status 0, "http request failed"
+	// per #162 L4), NOT the scheme-rejection error_msg.
 	req := Http_Request{
 		id = strings.clone("scheme-3"),
 		url = strings.clone("HTTPS://127.0.0.1:1/"),
