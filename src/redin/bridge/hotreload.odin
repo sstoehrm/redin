@@ -83,7 +83,10 @@ hotreload_execute :: proc(b: ^Bridge) {
 
 @(private = "file")
 get_file_mtime :: proc(path: string) -> i64 {
-	fi, err := os.stat(path, context.temp_allocator)
+	// #162 L1: lstat, not stat — don't dereference symlinks. A symlink
+	// swap in the watched directory should be observed as the watched
+	// path changing, not silently followed to whatever it now points at.
+	fi, err := os.lstat(path, context.temp_allocator)
 	if err != os.ERROR_NONE do return 0
 	return time.time_to_unix(fi.modification_time)
 }
