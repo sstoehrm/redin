@@ -926,7 +926,8 @@ process_request :: proc(ds: ^Dev_Server, req: ^Pending_Request) {
 		} else if req.path == "/input/key" {
 			handle_post_input_key(ds, ch, req.body)
 		} else if req.path == "/shutdown" {
-			if ds.bridge.dev_mode {
+			// #162 L3: compile-time gate (see handler guards below).
+			when REDIN_DEV {
 				ds.shutdown_requested = true
 				respond_json_ok(ch)
 			} else {
@@ -935,14 +936,14 @@ process_request :: proc(ds: ^Dev_Server, req: ^Pending_Request) {
 		} else if req.path == "/resize" {
 			handle_post_resize(ds, ch, req.body)
 		} else if req.path == "/maximize" {
-			if ds.bridge.dev_mode {
+			when REDIN_DEV {
 				rl.MaximizeWindow()
 				respond_json_ok(ch)
 			} else {
 				respond_text(ch, 404, "Not found")
 			}
 		} else if req.path == "/restore" {
-			if ds.bridge.dev_mode {
+			when REDIN_DEV {
 				rl.RestoreWindow()
 				respond_json_ok(ch)
 			} else {
@@ -1769,7 +1770,11 @@ theme_to_json :: proc(b: ^strings.Builder, t: types.Theme) {
 // --- POST handlers ---
 
 handle_post_events :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string) {
-	if !ds.bridge.dev_mode {
+	// #162 L3: compile-time gate. In a non-dev build (e.g. REDIN_AGENT
+	// without REDIN_DEV) this becomes an unconditional 404 + return, and
+	// the mutating body below is eliminated as dead code rather than left
+	// reachable behind a runtime flag.
+	when !REDIN_DEV {
 		respond_text(ch, 404, "Not found")
 		return
 	}
@@ -1799,7 +1804,11 @@ handle_post_events :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string)
 }
 
 handle_post_click :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string) {
-	if !ds.bridge.dev_mode {
+	// #162 L3: compile-time gate. In a non-dev build (e.g. REDIN_AGENT
+	// without REDIN_DEV) this becomes an unconditional 404 + return, and
+	// the mutating body below is eliminated as dead code rather than left
+	// reachable behind a runtime flag.
+	when !REDIN_DEV {
 		respond_text(ch, 404, "Not found")
 		return
 	}
@@ -1837,7 +1846,11 @@ handle_post_click :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string) 
 }
 
 handle_post_input_takeover :: proc(ds: ^Dev_Server, ch: ^Response_Channel) {
-	if !ds.bridge.dev_mode {
+	// #162 L3: compile-time gate. In a non-dev build (e.g. REDIN_AGENT
+	// without REDIN_DEV) this becomes an unconditional 404 + return, and
+	// the mutating body below is eliminated as dead code rather than left
+	// reachable behind a runtime flag.
+	when !REDIN_DEV {
 		respond_text(ch, 404, "Not found")
 		return
 	}
@@ -1850,7 +1863,11 @@ handle_post_input_takeover :: proc(ds: ^Dev_Server, ch: ^Response_Channel) {
 }
 
 handle_post_input_release :: proc(ds: ^Dev_Server, ch: ^Response_Channel) {
-	if !ds.bridge.dev_mode {
+	// #162 L3: compile-time gate. In a non-dev build (e.g. REDIN_AGENT
+	// without REDIN_DEV) this becomes an unconditional 404 + return, and
+	// the mutating body below is eliminated as dead code rather than left
+	// reachable behind a runtime flag.
+	when !REDIN_DEV {
 		respond_text(ch, 404, "Not found")
 		return
 	}
@@ -1877,7 +1894,11 @@ read_mouse_button :: proc(L: ^Lua_State) -> (rl.MouseButton, bool) {
 }
 
 handle_post_input_mouse_move :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string) {
-	if !ds.bridge.dev_mode {
+	// #162 L3: compile-time gate. In a non-dev build (e.g. REDIN_AGENT
+	// without REDIN_DEV) this becomes an unconditional 404 + return, and
+	// the mutating body below is eliminated as dead code rather than left
+	// reachable behind a runtime flag.
+	when !REDIN_DEV {
 		respond_text(ch, 404, "Not found")
 		return
 	}
@@ -1911,7 +1932,11 @@ handle_post_input_mouse_move :: proc(ds: ^Dev_Server, ch: ^Response_Channel, bod
 }
 
 handle_post_input_mouse_down :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string) {
-	if !ds.bridge.dev_mode {
+	// #162 L3: compile-time gate. In a non-dev build (e.g. REDIN_AGENT
+	// without REDIN_DEV) this becomes an unconditional 404 + return, and
+	// the mutating body below is eliminated as dead code rather than left
+	// reachable behind a runtime flag.
+	when !REDIN_DEV {
 		respond_text(ch, 404, "Not found")
 		return
 	}
@@ -1969,7 +1994,11 @@ handle_post_input_mouse_down :: proc(ds: ^Dev_Server, ch: ^Response_Channel, bod
 }
 
 handle_post_input_mouse_up :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string) {
-	if !ds.bridge.dev_mode {
+	// #162 L3: compile-time gate. In a non-dev build (e.g. REDIN_AGENT
+	// without REDIN_DEV) this becomes an unconditional 404 + return, and
+	// the mutating body below is eliminated as dead code rather than left
+	// reachable behind a runtime flag.
+	when !REDIN_DEV {
 		respond_text(ch, 404, "Not found")
 		return
 	}
@@ -2051,7 +2080,11 @@ key_string_to_raylib :: proc(s: string) -> (rl.KeyboardKey, bool) {
 }
 
 handle_post_input_key :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string) {
-	if !ds.bridge.dev_mode {
+	// #162 L3: compile-time gate. In a non-dev build (e.g. REDIN_AGENT
+	// without REDIN_DEV) this becomes an unconditional 404 + return, and
+	// the mutating body below is eliminated as dead code rather than left
+	// reachable behind a runtime flag.
+	when !REDIN_DEV {
 		respond_text(ch, 404, "Not found")
 		return
 	}
@@ -2097,7 +2130,11 @@ handle_post_input_key :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: stri
 }
 
 handle_post_input_scroll :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string) {
-	if !ds.bridge.dev_mode {
+	// #162 L3: compile-time gate. In a non-dev build (e.g. REDIN_AGENT
+	// without REDIN_DEV) this becomes an unconditional 404 + return, and
+	// the mutating body below is eliminated as dead code rather than left
+	// reachable behind a runtime flag.
+	when !REDIN_DEV {
 		respond_text(ch, 404, "Not found")
 		return
 	}
@@ -2178,7 +2215,11 @@ handle_get_window :: proc(ch: ^Response_Channel) {
 }
 
 handle_post_resize :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string) {
-	if !ds.bridge.dev_mode {
+	// #162 L3: compile-time gate. In a non-dev build (e.g. REDIN_AGENT
+	// without REDIN_DEV) this becomes an unconditional 404 + return, and
+	// the mutating body below is eliminated as dead code rather than left
+	// reachable behind a runtime flag.
+	when !REDIN_DEV {
 		respond_text(ch, 404, "Not found")
 		return
 	}
@@ -2221,7 +2262,11 @@ handle_post_resize :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string)
 // --- PUT handlers ---
 
 handle_put_aspects :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string) {
-	if !ds.bridge.dev_mode {
+	// #162 L3: compile-time gate. In a non-dev build (e.g. REDIN_AGENT
+	// without REDIN_DEV) this becomes an unconditional 404 + return, and
+	// the mutating body below is eliminated as dead code rather than left
+	// reachable behind a runtime flag.
+	when !REDIN_DEV {
 		respond_text(ch, 404, "Not found")
 		return
 	}
