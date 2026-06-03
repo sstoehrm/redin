@@ -45,10 +45,13 @@ TOTAL_FAILED=0
 
 # Per-test and total wall-clock budgets (#132). Defaults are tight on
 # purpose: a healthy test runs in seconds, so 30s catches a hang fast,
-# and a 120s total cap keeps a runaway suite from pinning CI for hours
-# while still leaving room for the fast-path of 25-ish tests.
+# and the total cap keeps a runaway suite from pinning CI for hours while
+# still leaving room for the full suite to finish. Raised 120s -> 180s
+# because the agent flavour (REDIN_AGENT=true, which runs extra suites
+# including the agent channel) was legitimately exceeding the 2-minute cap
+# in CI and skipping its tail, even though every test passed.
 TEST_TIMEOUT="${REDIN_TEST_TIMEOUT:-30}"
-GLOBAL_TIMEOUT="${REDIN_GLOBAL_TIMEOUT:-120}"
+GLOBAL_TIMEOUT="${REDIN_GLOBAL_TIMEOUT:-180}"
 GLOBAL_START=$SECONDS
 
 # Build
