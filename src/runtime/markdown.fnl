@@ -27,6 +27,11 @@
    ;; bg / color come through resolve too if user overrides).
    :md/code         {:font :mono :font-size 16 :color [240 240 240] :bg [60 60 70]}
 
+   ;; Copy bar + button (emitted by markdown lowering for [:markdown {:copyable true} ...] nodes).
+   :md/copy-bar     {:padding [0 0 8 0]}
+   :md/copy-button  {:bg [60 60 70] :color [240 240 240] :radius 4
+                     :padding [4 10 4 10] :font :sans :font-size 14}
+
    ;; Scrollbar track/thumb defaults.  Rendered by draw_box_children;
    ;; override via :scrollbar, :scrollbar#hover, :scrollbar#active in
    ;; the app theme.  border-width doubles as thumb thickness here.
