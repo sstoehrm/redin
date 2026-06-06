@@ -136,3 +136,31 @@ test_lower_text_is_not_selectable :: proc(t: ^testing.T) {
 		}
 	}
 }
+
+@(test)
+test_lower_copy_button_has_compact_dimensions :: proc(t: ^testing.T) {
+	blocks := parse("# Title", context.temp_allocator)
+	tree := lower(blocks, Wrapper_Attrs{copyable = true}, context.temp_allocator, "# Title")
+	// Explicit sizes are load-bearing: an unset width/height makes a redin node
+	// fill its container, so without these the button would expand to fill the
+	// whole block instead of a compact, right-aligned chip.
+	bar, bar_ok := tree.nodes[1].(types.NodeHbox)
+	testing.expect(t, bar_ok, "node 1 must be the copy-bar hbox")
+	if bh, ok := bar.height.(f32); ok {
+		testing.expect_value(t, bh, f32(COPY_BAR_HEIGHT))
+	} else {
+		testing.expect(t, false, "copy-bar must have an explicit f32 height")
+	}
+	btn, btn_ok := tree.nodes[2].(types.NodeButton)
+	testing.expect(t, btn_ok, "node 2 must be the Copy button")
+	if bw, ok := btn.width.(f32); ok {
+		testing.expect_value(t, bw, f32(COPY_BUTTON_WIDTH))
+	} else {
+		testing.expect(t, false, "copy button must have an explicit f32 width")
+	}
+	if bhh, ok := btn.height.(f32); ok {
+		testing.expect_value(t, bhh, f32(COPY_BUTTON_HEIGHT))
+	} else {
+		testing.expect(t, false, "copy button must have an explicit f32 height")
+	}
+}

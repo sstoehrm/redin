@@ -1,6 +1,4 @@
 (require '[redin-test :refer :all]
-         '[cheshire.core :as json]
-         '[babashka.http-client :as http]
          '[clojure.string :as str])
 
 ;; ---------------------------------------------------------------------------

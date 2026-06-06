@@ -56,55 +56,52 @@
             (str "sentinel height should be 40 (its explicit height), got "
                  (:h sr) "; rect=" (pr-str sr)))))
 
-;; The md/copy-button theme sets bg [60 60 70].  Because the button
-;; carries no explicit :width it fills the full-width md/copy-bar hbox,
-;; so the copy-bar row renders solid [60 60 70] edge to edge.
-;; The probe x-coordinate (100) is well inside both the card and the bar,
-;; so the pixel is card-bg [40 44 52] where there is no copy bar and
-;; button-bg [60 60 70] where the bar + button are rendered.
+;; #112: the copyable block renders a COMPACT, RIGHT-ALIGNED Copy button
+;; (theme bg [60 60 70]) above its content. /frames exposes only the
+;; pre-lowering tree, so the lowered NodeButton never appears as a frame
+;; node; we verify geometry via screenshot pixels instead.
 ;;
-;; NOTE: /frames exposes the original Lua view tree (pre-lowering).
-;; The lowered NodeButton is an Odin-side construct that does not appear
-;; as a child node in the frame JSON.  We therefore verify button
-;; presence via the screenshot pixel at the copy-bar row, using the
-;; known theme colours: card-bg [40 44 52], button-bg [60 60 70].
+;; Probe layout (calibrated against actual render):
+;;   row-y   = block-top + 18  → top edge of the button, above any text glyphs
+;;   right-x = block-right - 30 → solidly inside the ~72px right-aligned button
+;;   left-x  = block-x + 40    → left side of the bar row, never covered by the button
+;;
+;; At row-y the button bg [60 60 70] is unobstructed by anti-aliased text,
+;; giving a clean pixel match. The card background [40 44 52] fills left-x.
 (def copy-button-bg [60 60 70])
-(def card-bg        [40 44 52])
 
 (deftest copyable-block-renders-copy-button
-  ;; The :id :md-copy block has {:copyable true}; the lowering emits an
-  ;; md/copy-bar hbox with a full-width md/copy-button child as its first
-  ;; child (before the content paragraphs).  The button bg [60 60 70] fills
-  ;; the entire width of the bar row.  We probe one pixel ~20px below the
-  ;; block's top edge (inside the copy-bar, which starts after 16px card
-  ;; padding) and assert it matches the copy-button colour.
-  (let [md   (find-element {:id :md-copy})
-        r    (rect-of md)]
+  (let [md (find-element {:id :md-copy})
+        r  (rect-of md)]
     (assert r (str "md-copy wrapper must have a rect; got " (pr-str (frame-attrs md))))
-    (let [probe-x 100
-          probe-y (int (+ (:y r) 20))
-          png     (screenshot)
-          px      (vec (screenshot-pixel png probe-x probe-y))]
-      (assert (= copy-button-bg px)
-              (str "expected copy-button bg " copy-button-bg
-                   " at (" probe-x "," probe-y ") inside the copyable block; got " px
-                   ".  Block rect=" (pr-str r))))))
+    (let [png     (screenshot)
+          row-y   (int (+ (:y r) 18))              ;; top of button, above text glyphs
+          right-x (int (- (+ (:x r) (:w r)) 30))  ;; solidly inside the right-aligned button
+          left-x  (int (+ (:x r) 40))             ;; left of bar row, never covered by button
+          right-px (vec (screenshot-pixel png right-x row-y))
+          left-px  (vec (screenshot-pixel png left-x  row-y))]
+      (assert (= copy-button-bg right-px)
+              (str "expected compact Copy button (bg " copy-button-bg ") near the right edge at ("
+                   right-x "," row-y "); got " right-px ". rect=" (pr-str r)))
+      ;; Compactness: the button must NOT span the full width, so the left
+      ;; side of the same row must not be the button colour.
+      (assert (not= copy-button-bg left-px)
+              (str "Copy button must be compact (not full-width): left of the row at ("
+                   left-x "," row-y ") should not be button bg; got " left-px)))))
 
 (deftest non-copyable-block-has-no-copy-button
-  ;; The :id :md block is NOT copyable.  The same relative row inside that
-  ;; block (y = block-top + 20) sits in the heading area where no copy bar
-  ;; is rendered, so the pixel must NOT be the copy-button colour.
-  (let [md   (find-element {:id :md})
-        r    (rect-of md)]
+  ;; The :id :md block is NOT copyable: probing the same right-edge row that
+  ;; holds the button in the copyable block must not show the button colour.
+  (let [md (find-element {:id :md})
+        r  (rect-of md)]
     (assert r (str "md wrapper must have a rect; got " (pr-str (frame-attrs md))))
-    (let [probe-x 100
-          probe-y (int (+ (:y r) 20))
-          png     (screenshot)
-          px      (vec (screenshot-pixel png probe-x probe-y))]
+    (let [png     (screenshot)
+          row-y   (int (+ (:y r) 18))
+          right-x (int (- (+ (:x r) (:w r)) 30))
+          px      (vec (screenshot-pixel png right-x row-y))]
       (assert (not= copy-button-bg px)
-              (str "non-copyable block must NOT render copy-button bg " copy-button-bg
-                   " at (" probe-x "," probe-y "); got " px
-                   ".  Block rect=" (pr-str r))))))
+              (str "non-copyable block must NOT render the Copy button bg " copy-button-bg
+                   " at (" right-x "," row-y "); got " px ". rect=" (pr-str r))))))
 
 (deftest clicking-markdown-text-does-not-select
   ;; Lowered markdown text is non-selectable: clicking inside the rendered
