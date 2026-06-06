@@ -4,19 +4,6 @@
          '[clojure.string :as str])
 
 ;; ---------------------------------------------------------------------------
-;; Helpers
-;; ---------------------------------------------------------------------------
-
-(defn get-selection []
-  (let [token (read-token-file)
-        resp (http/get (str (base-url) "/selection")
-                       {:headers (merge {"Accept" "application/json"}
-                                        (when token {"Authorization" (str "Bearer " token)}))
-                        :throw false})]
-    (when (= 200 (:status resp))
-      (json/parse-string (:body resp) true))))
-
-;; ---------------------------------------------------------------------------
 ;; Reset helper: click an empty corner to clear any existing selection and
 ;; wait long enough (>0.4s) that the double-click counter resets.
 (defn reset-selection! []

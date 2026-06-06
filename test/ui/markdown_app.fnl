@@ -21,6 +21,8 @@ on the next line.
 - first item
 - second item
 - third item"]
+    [:markdown {:id :md-copy :aspect :card :width :full :copyable true}
+      "# Copyable\n\nThis block has a copy button."]
     ;; Sentinel sibling — guards `/frames` rect alignment for nodes
     ;; placed after a [:markdown] (the wrapper lowers to N flat-array
     ;; entries; the walker must skip past all of them).
