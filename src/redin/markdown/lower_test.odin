@@ -90,3 +90,49 @@ test_lower_inline_spans_round_trip :: proc(t: ^testing.T) {
 	testing.expect_value(t, tn.inline_spans[1].style, text_pkg.Span_Style.Bold)
 	testing.expect_value(t, tn.inline_spans[1].text, "there")
 }
+
+@(test)
+test_lower_copyable_emits_copy_button :: proc(t: ^testing.T) {
+	src := "# Title\n\nbody"
+	blocks := parse(src, context.temp_allocator)
+	tree := lower(blocks, Wrapper_Attrs{copyable = true}, context.temp_allocator, src)
+	// local 0 = wrapper vbox, 1 = md/copy-bar hbox, 2 = Copy button.
+	bar, bar_ok := tree.nodes[1].(types.NodeHbox)
+	testing.expect(t, bar_ok, "node 1 must be the copy-bar hbox")
+	testing.expect_value(t, bar.aspect, "md/copy-bar")
+	testing.expect_value(t, bar.layout, types.Anchor.CENTER_RIGHT)
+	if w, w_ok := bar.width.(types.SizeValue); w_ok {
+		testing.expect_value(t, w, types.SizeValue.FULL)
+	} else {
+		testing.expect(t, false, "copy-bar width must be SizeValue.FULL")
+	}
+	testing.expect_value(t, tree.parent_indices[1], i32(0))
+	btn, btn_ok := tree.nodes[2].(types.NodeButton)
+	testing.expect(t, btn_ok, "node 2 must be the Copy button")
+	testing.expect_value(t, btn.label, "Copy")
+	testing.expect_value(t, btn.aspect, "md/copy-button")
+	testing.expect_value(t, btn.copy_text, src)
+	testing.expect_value(t, tree.parent_indices[2], i32(1))
+}
+
+@(test)
+test_lower_not_copyable_has_no_button :: proc(t: ^testing.T) {
+	blocks := parse("# Title", context.temp_allocator)
+	tree := lower(blocks, Wrapper_Attrs{}, context.temp_allocator)
+	for n in tree.nodes {
+		_, is_btn := n.(types.NodeButton)
+		testing.expect(t, !is_btn, "non-copyable markdown must not emit a button")
+	}
+}
+
+@(test)
+test_lower_text_is_not_selectable :: proc(t: ^testing.T) {
+	blocks := parse("# Title\n\nbody\n\n- item", context.temp_allocator)
+	tree := lower(blocks, Wrapper_Attrs{}, context.temp_allocator)
+	for n in tree.nodes {
+		if tn, ok := n.(types.NodeText); ok {
+			testing.expectf(t, tn.not_selectable,
+				"lowered text node (aspect %q) must be not_selectable", tn.aspect)
+		}
+	}
+}
