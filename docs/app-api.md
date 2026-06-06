@@ -350,6 +350,10 @@ Dispatch another event immediately.
  :dispatch [:event/notify "Saved"]}
 ```
 
+Dispatches run synchronously, so a self-dispatching chain is capped at depth
+**64** — past it the event is dropped with a warning instead of overflowing
+the host stack. See [reference/effects.md](reference/effects.md#built-in-dispatch).
+
 #### `:dispatch-later`
 
 Schedule event dispatch after a delay.
@@ -365,7 +369,7 @@ Schedule event dispatch after a delay.
                   {:ms 5000 :dispatch [:session/timeout]}]}
 ```
 
-Each entry: `{:ms N :dispatch event-vector}`. Timer fires when `poll-timers` is called with `now >= start + ms`. The host calls `poll-timers` once per frame.
+Each entry: `{:ms N :dispatch event-vector}`. Timer fires when `poll-timers` is called with `now >= start + ms`. The host calls `poll-timers` once per frame. The pending-timer queue is capped at **10,000** entries; beyond it new timers are dropped with a warning.
 
 #### `:log`
 

@@ -103,12 +103,20 @@ for test_file in "$SCRIPT_DIR"/test_*.bb; do
 
   echo "=== $name ==="
 
-  # Optional sidecar: <app>_app.flags — whitespace-split extra host flags.
+  # Optional sidecar: <app>_app.flags — extra host flags, ONE PER LINE.
+  # Read line-by-line (no word-splitting, no globbing): the file contents
+  # are repo-controlled, but CI runs this script, so an unquoted `$(cat …)`
+  # expansion would let a `*_app.flags` carrying shell metacharacters run on
+  # the runner the moment a job picks it up (#204 F3). One flag per line
+  # means whitespace inside a line is preserved as part of that single arg.
+  # Blank lines are ignored; the `|| [ -n "$line" ]` tail catches a final
+  # line with no trailing newline.
   flags_file="$SCRIPT_DIR/${app_name}_app.flags"
   extra_flags=()
   if [ -f "$flags_file" ]; then
-    # shellcheck disable=SC2207
-    extra_flags=( $(cat "$flags_file") )
+    while IFS= read -r line || [ -n "$line" ]; do
+      [ -n "$line" ] && extra_flags+=( "$line" )
+    done < "$flags_file"
   fi
 
   # Start dev server in background

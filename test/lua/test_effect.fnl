@@ -104,6 +104,46 @@
   (effect.clear-timers)
   (assert (= (effect.pending-timers) 0) "timers cleared"))
 
+;; --- F4 (#204): runaway-growth guards ---
+
+;; A handler-less `:dispatch-later` scheduled every frame grows timer-queue
+;; without bound. The cap drops new timers (with a warning) once the queue
+;; is full rather than letting it consume memory forever.
+(fn t.test-timer-queue-cap-drops-overflow []
+  (setup)
+  (let [cap effect.MAX_TIMER_QUEUE]
+    (assert (and cap (> cap 0)) "MAX_TIMER_QUEUE is exported and positive")
+    (for [_ 1 cap]
+      (effect.execute {:db nil :dispatch-later {:ms 100 :dispatch [:event/x]}}))
+    (assert (= (effect.pending-timers) cap) "queue fills exactly to the cap")
+    ;; One more past the cap must be dropped, not enqueued.
+    (effect.execute {:db nil :dispatch-later {:ms 100 :dispatch [:event/x]}})
+    (assert (= (effect.pending-timers) cap) "over-cap dispatch-later is dropped")))
+
+;; A handler that unconditionally re-dispatches itself recurses
+;; synchronously through effect.execute -> :dispatch -> dataflow.dispatch.
+;; Without a depth cap this overflows the Lua stack; with it, the chain is
+;; cut at MAX_DISPATCH_DEPTH and unwinds cleanly (no error).
+(fn t.test-dispatch-depth-cap-stops-runaway []
+  (setup)
+  (dataflow.init {:n 0})
+  (dataflow.register-globals)
+  (dataflow.set-effect-handler effect.execute)
+  (dataflow.reg-handler :event/loop
+    (fn [db _event]
+      (dataflow.update db :n #(+ (or $1 0) 1))
+      {:db db :dispatch [:event/loop]}))
+  (let [(ok err) (pcall dataflow.dispatch [:event/loop])]
+    (assert ok (.. "runaway dispatch must be capped, not error: " (tostring err))))
+  ;; Exactly MAX_DISPATCH_DEPTH handlers run before the cap drops the next.
+  (assert (= (rawget (dataflow._get-raw-db) :n) dataflow.MAX_DISPATCH_DEPTH)
+          "ran exactly MAX_DISPATCH_DEPTH handlers before hitting the cap")
+  ;; The depth counter must return to baseline so later dispatches aren't
+  ;; wrongly rejected.
+  (dataflow.dispatch [:event/loop])
+  (assert (= (rawget (dataflow._get-raw-db) :n) (* 2 dataflow.MAX_DISPATCH_DEPTH))
+          "depth counter reset between top-level dispatches"))
+
 ;; Regression test for issue #146.
 ;;
 ;; In production the host calls poll-timers with wall-clock ms

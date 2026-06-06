@@ -8,6 +8,31 @@ Import from your `app.odin`:
 import "./.redin/src/redin/bridge"
 ```
 
+## Trust model
+
+**redin is not a sandbox.** Your app's `.fnl` / `.lua` files are the trusted
+principal, not untrusted content. They load with the **full Lua standard
+library** — including `os` (`os.execute`, `os.getenv`, `os.remove`), `io`,
+`debug`, and `package` — and on top of that the host hands them `redin.shell`
+and `redin.http`. App code can therefore run arbitrary commands and read or
+write the filesystem with the privileges of the process. This is intentional:
+the app *is* the program, so withholding `os.execute` while shipping
+`redin.shell` would be theatre.
+
+The deny-by-default effect policies below (`set_http_whitelist`,
+`set_shell_env_allowlist`) and the SSRF/CRLF hardening on `redin.http` are
+defense-in-depth for the *host-configured* surface — they bound what a bug or
+a compromised remote endpoint can reach. They are **not** a boundary that
+contains hostile app code: code with `os`/`io`/`package` can ignore the
+framework entirely. Treat the `.fnl`/`.lua` you load with the same trust you'd
+give a native plugin compiled into the binary.
+
+Concretely: **do not** use redin to run third-party `.fnl`/`.lua` widgets,
+user-submitted scripts, or any code you would not run as a shell command. If
+you ever need to host untrusted UI code, the isolation must come from outside
+redin (a separate process, an OS sandbox, a container) — there is no
+in-framework setting that makes loading untrusted scripts safe.
+
 ## Cfunc registration
 
 ### `bridge.register_cfunc(name: cstring, fn: proc(L: ^Lua_State) -> i32)`

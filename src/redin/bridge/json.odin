@@ -108,6 +108,13 @@ lua_value_to_json_inner :: proc(b: ^strings.Builder, L: ^Lua_State, index: i32, 
 		json_null(b)
 		return
 	}
+	// Same stack guard as the decoder. The encoder keeps a strings.Builder
+	// alive up the call stack, so on exhaustion we degrade to `null` (as the
+	// depth cap does) rather than longjmp out via luaL_error and leak it.
+	if lua_checkstack(L, 8) == 0 {
+		json_null(b)
+		return
+	}
 	abs_idx := index < 0 ? lua_gettop(L) + index + 1 : index
 	t := lua_type(L, abs_idx)
 	switch t {
@@ -229,6 +236,17 @@ json_decode_value :: proc(L: ^Lua_State, s: string, pos: ^int) -> bool {
 @(private = "file")
 json_decode_value_at :: proc(L: ^Lua_State, s: string, pos: ^int, depth: int) -> bool {
 	if depth > MAX_JSON_DEPTH do return false
+	// Defense-in-depth: guarantee room for the slots this level and its
+	// children push (table + key + value, plus headroom) before descending.
+	// MAX_JSON_DEPTH (128) keeps today's worst case far under LuaJIT's
+	// 8000-slot default, so this never trips now; it stops a future raised
+	// cap or a non-default-stack thread from turning a deep payload into an
+	// unchecked overflow instead of a catchable error. No Odin allocation is
+	// live on this recursion path, so the luaL_error longjmp leaks nothing.
+	if lua_checkstack(L, 8) == 0 {
+		luaL_error(L, "JSON nesting exhausts Lua stack")
+		return false
+	}
 	json_skip_ws(s, pos)
 	if pos^ >= len(s) do return false
 	c := s[pos^]
