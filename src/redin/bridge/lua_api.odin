@@ -28,6 +28,10 @@ foreign luajit {
 
 	lua_gettop    :: proc(L: ^Lua_State) -> i32 ---
 	lua_settop    :: proc(L: ^Lua_State, index: i32) ---
+	// Ensures at least `extra` free slots on the Lua stack, growing it if
+	// needed. Returns 0 (false) when the stack cannot grow. Calling a push
+	// without this guard past the available slots is an unchecked overflow.
+	lua_checkstack :: proc(L: ^Lua_State, extra: i32) -> i32 ---
 	lua_pushvalue :: proc(L: ^Lua_State, index: i32) ---
 	lua_remove    :: proc(L: ^Lua_State, index: i32) ---
 	lua_type      :: proc(L: ^Lua_State, index: i32) -> i32 ---

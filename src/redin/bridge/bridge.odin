@@ -192,10 +192,17 @@ is_shutdown_requested :: proc(b: ^Bridge) -> bool {
 
 check_hotreload :: proc(b: ^Bridge) {
 	when !REDIN_DEV do return
-	if hotreload_check(&b.hot_reload) {
-		hotreload_execute(b)
-		b.frame_changed = true
+	trigger := hotreload_poll(&b.hot_reload)
+	if trigger == .None do return
+	ok := hotreload_execute(b)
+	// F5: a fresh-change reload that failed is likely a non-atomic editor
+	// save caught mid-write — arm one short retry. A retry that also fails
+	// (or any success) leaves the retry disarmed, so a genuinely broken file
+	// settles after two attempts instead of retrying forever.
+	if hotreload_should_arm_retry(trigger, ok) {
+		hotreload_arm_retry(&b.hot_reload)
 	}
+	b.frame_changed = true
 }
 
 // Walk the flat tree once: for each draggable with handle_off, ensure at

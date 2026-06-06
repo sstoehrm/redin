@@ -3,6 +3,15 @@
 
 (local M {})
 
+;; F4 (#204): upper bound on outstanding dispatch-later timers. A handler
+;; that schedules a timer every frame grows timer-queue without bound and
+;; slowly exhausts memory with no useful diagnostic. Not a security boundary
+;; — the app author controls their handlers — but an easy footgun. At the cap
+;; we drop new timers with a warning rather than grow forever. 10,000 is far
+;; above any legitimate fan-out of pending timers.
+(local MAX-TIMER-QUEUE 10000)
+(set M.MAX_TIMER_QUEUE MAX-TIMER-QUEUE)
+
 (var executors {})
 (var timer-queue [])
 (var pending-http {})
@@ -14,6 +23,16 @@
 
 (fn M.reg-fx [key executor-fn]
   (tset executors key executor-fn))
+
+;; Enqueue a timer unless the queue is at its cap, in which case drop it
+;; with a warning. Centralised so both the single- and list-form of
+;; :dispatch-later share the bound (F4, #204).
+(fn enqueue-timer [at event]
+  (if (< (length timer-queue) MAX-TIMER-QUEUE)
+    (table.insert timer-queue {:at at :event event})
+    (print (.. "Warning: timer queue at cap (" MAX-TIMER-QUEUE
+               "); dropping dispatch-later event "
+               (tostring (and (= (type event) "table") (. event 1)))))))
 
 ;; ===== Execution =====
 
@@ -91,9 +110,9 @@
                   (* (_G.redin.now) 1000)
                   (* (os.clock) 1000))]
         (if (and (= (type params) "table") (. params :ms))
-          (table.insert timer-queue {:at (+ now params.ms) :event params.dispatch})
+          (enqueue-timer (+ now params.ms) params.dispatch)
           (each [_ timer-spec (ipairs params)]
-            (table.insert timer-queue {:at (+ now timer-spec.ms) :event timer-spec.dispatch}))))))
+            (enqueue-timer (+ now timer-spec.ms) timer-spec.dispatch))))))
   (M.reg-fx :http
     (fn [params]
       (set next-http-id (+ next-http-id 1))

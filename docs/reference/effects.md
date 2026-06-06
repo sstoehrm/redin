@@ -47,6 +47,13 @@ Dispatch another event immediately.
  :dispatch [:event/notify "Saved"]}
 ```
 
+A `:dispatch` runs synchronously, so a handler that dispatches an event whose
+handler dispatches back forms a recursive chain. That chain is capped at depth
+**64**: past it the event is dropped with a `Warning: dispatch depth exceeded`
+log rather than overflowing the host stack. The cap is a footgun guard for
+unbounded self-dispatch, not a normal control-flow limit — real chains are
+far shallower.
+
 ---
 
 ## Built-in: `:dispatch-later`
@@ -63,6 +70,11 @@ Schedule event dispatch after a delay. Accepts a single timer map or a sequence 
 ```
 
 Each entry: `{:ms N :dispatch event-vector}`. The timer fires when `poll-timers` is called with `now >= start + ms`. The host calls `poll-timers` once per frame.
+
+The pending-timer queue is capped at **10,000** entries. A handler that
+schedules a timer every frame without them firing would otherwise grow the
+queue without bound; past the cap, new `:dispatch-later` timers are dropped
+with a `Warning: timer queue at cap` log. No legitimate use approaches this.
 
 ---
 

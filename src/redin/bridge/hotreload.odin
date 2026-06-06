@@ -4,11 +4,32 @@ import "core:fmt"
 import "core:os"
 import "core:time"
 
+// F5 (#204): how long after a failed reload to make one more attempt.
+// An editor that saves non-atomically (write-in-place rather than
+// write-temp-then-rename) can update a watched file's mtime while the
+// buffer is still half-written, so the mtime-triggered re-require lands on
+// a truncated module and fails with a Fennel syntax error. A single short
+// retry gives the editor time to finish the write; 50ms is far longer than
+// any in-place save and short enough to feel instant.
+HOTRELOAD_RETRY_MS :: 50.0
+
+Hotreload_Trigger :: enum {
+	None,    // nothing to do this frame
+	Changed, // a watched file's mtime advanced
+	Retry,   // a previously-armed one-shot retry came due
+}
+
 Hot_Reload :: struct {
 	watch_paths:    [dynamic]string,
 	last_mtimes:    map[string]i64,
 	frame_counter:  int,
 	check_interval: int,
+	// F5: one-shot retry after a failed reload. retry_armed is true between
+	// arming the retry and consuming it; retry_at marks when it was armed.
+	// Because it is armed only on a fresh-change failure and consumed once,
+	// a genuinely broken file fails at most twice, never in a loop.
+	retry_armed:    bool,
+	retry_at:       time.Tick,
 }
 
 hotreload_init :: proc(hr: ^Hot_Reload, source_tree: bool) {
@@ -38,9 +59,36 @@ hotreload_destroy :: proc(hr: ^Hot_Reload) {
 	delete(hr.last_mtimes)
 }
 
-hotreload_check :: proc(hr: ^Hot_Reload) -> bool {
+// Pure predicate: given a retry is armed and `elapsed_ms` have passed since
+// it was armed, is it due to fire? Factored out so the timing rule is unit-
+// testable without a real clock.
+hotreload_retry_due :: proc(armed: bool, elapsed_ms: f64) -> bool {
+	return armed && elapsed_ms >= HOTRELOAD_RETRY_MS
+}
+
+// Pure predicate: after an execute attempt, should a one-shot retry be armed?
+// Only when a *fresh* mtime change (not an already-consumed retry) failed —
+// this is what bounds a broken file to two attempts instead of a loop.
+hotreload_should_arm_retry :: proc(trigger: Hotreload_Trigger, reload_ok: bool) -> bool {
+	return trigger == .Changed && !reload_ok
+}
+
+hotreload_poll :: proc(hr: ^Hot_Reload) -> Hotreload_Trigger {
+	// A pending retry fires on its own time-based deadline, independent of
+	// the mtime-poll throttle, and is consumed here so it fires at most once.
+	// While a retry is still pending we hold off on mtime polling so the two
+	// paths can't interleave.
+	if hr.retry_armed {
+		elapsed := time.duration_milliseconds(time.tick_since(hr.retry_at))
+		if hotreload_retry_due(hr.retry_armed, elapsed) {
+			hr.retry_armed = false
+			return .Retry
+		}
+		return .None
+	}
+
 	hr.frame_counter += 1
-	if hr.frame_counter < hr.check_interval do return false
+	if hr.frame_counter < hr.check_interval do return .None
 	hr.frame_counter = 0
 
 	changed := false
@@ -51,10 +99,17 @@ hotreload_check :: proc(hr: ^Hot_Reload) -> bool {
 		}
 		hr.last_mtimes[path] = mtime
 	}
-	return changed
+	return changed ? .Changed : .None
 }
 
-hotreload_execute :: proc(b: ^Bridge) {
+// Arm a single retry to fire ~HOTRELOAD_RETRY_MS later. retry_at records
+// the moment of failure; hotreload_poll fires once that long has elapsed.
+hotreload_arm_retry :: proc(hr: ^Hot_Reload) {
+	hr.retry_armed = true
+	hr.retry_at = time.tick_now()
+}
+
+hotreload_execute :: proc(b: ^Bridge) -> (ok: bool) {
 	code := `
 		package.loaded["dataflow"] = nil
 		package.loaded["effect"]   = nil
@@ -76,9 +131,10 @@ hotreload_execute :: proc(b: ^Bridge) {
 		msg := lua_tostring_raw(b.L, -1)
 		fmt.eprintfln("Hot reload error: %s", msg)
 		lua_pop(b.L, 1)
-	} else {
-		fmt.println("Hot reload: runtime reloaded")
+		return false
 	}
+	fmt.println("Hot reload: runtime reloaded")
+	return true
 }
 
 @(private = "file")

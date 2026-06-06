@@ -10,6 +10,16 @@
 (var tracking nil)
 (var effect-handler nil)
 
+;; F4 (#204): cap on synchronous dispatch recursion. A handler that returns
+;; {:db db :dispatch [...]} re-enters dispatch through the effect handler; one
+;; that self-dispatches unconditionally would otherwise recurse until the Lua
+;; stack overflows with no useful diagnostic. Not a security boundary — the
+;; app author controls their handlers — but an easy footgun. 64 is far deeper
+;; than any legitimate dispatch chain.
+(local MAX-DISPATCH-DEPTH 64)
+(set M.MAX_DISPATCH_DEPTH MAX-DISPATCH-DEPTH)
+(var dispatch-depth 0)
+
 ;; ===== Path utilities =====
 
 (fn paths-overlap? [a b]
@@ -122,7 +132,7 @@
 (fn M.reg-handler [key handler-fn]
   (tset handlers key handler-fn))
 
-(fn M.dispatch [event]
+(fn do-dispatch [event]
   (let [key (. event 1)
         handler-fn (. handlers key)]
     (assert handler-fn (.. "No handler registered for: " (tostring key)))
@@ -134,6 +144,23 @@
                    (= (type result) "table") (~= (. result :db) nil))
           (when effect-handler
             (effect-handler result)))))))
+
+(fn M.dispatch [event]
+  (if (>= dispatch-depth MAX-DISPATCH-DEPTH)
+    ;; Runaway synchronous recursion — drop the event with a diagnostic
+    ;; instead of overflowing the Lua stack.
+    (print (.. "Warning: dispatch depth exceeded " MAX-DISPATCH-DEPTH
+               " (runaway :dispatch recursion?); dropping event "
+               (tostring (. event 1))))
+    (do
+      (set dispatch-depth (+ dispatch-depth 1))
+      ;; pcall so the depth counter is restored even when a handler errors;
+      ;; otherwise one errored dispatch leaves the counter elevated and
+      ;; eventually wedges all dispatching. Re-raise with level 0 to preserve
+      ;; the original message (e.g. the "No handler" assert) verbatim.
+      (let [(ok? err) (pcall do-dispatch event)]
+        (set dispatch-depth (- dispatch-depth 1))
+        (when (not ok?) (error err 0))))))
 
 ;; ===== Public API: change detection =====
 
@@ -191,7 +218,8 @@
   (set subscriptions {})
   (set changed-paths [])
   (set tracking nil)
-  (set effect-handler nil))
+  (set effect-handler nil)
+  (set dispatch-depth 0))
 
 ;; ===== Global registration =====
 
