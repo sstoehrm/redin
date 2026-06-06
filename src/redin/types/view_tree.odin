@@ -179,6 +179,7 @@ NodeButton :: struct {
 	label:     string,
 	aspect:    string,
 	drag_handle: bool,
+	copy_text: string,   // #112: non-empty => clicking copies this to the system clipboard
 }
 
 NodeText :: struct {

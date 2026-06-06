@@ -348,6 +348,7 @@ clear_node_strings :: proc(n: types.Node) {
 		if len(v.click) > 0 do delete(v.click)
 		if len(v.label) > 0 do delete(v.label)
 		if len(v.aspect) > 0 do delete(v.aspect)
+		if len(v.copy_text) > 0 do delete(v.copy_text)   // #112
 		// #165: release the registry ref taken by lua_get_event_ctx for a
 		// `:click [:event ctx]` payload. Mirrors clear_dropable_attrs; the
 		// click consumer only ever reads the ref (never retains it across
