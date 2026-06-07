@@ -282,6 +282,13 @@
   []
   (keyword (:kind (get-json "/cursor"))))
 
+(defn get-selection
+  "Fetch the active selection via GET /selection.
+   Returns a map like {:kind \"none\"} or
+   {:kind \"text\" :start N :end N :text \"...\"}."
+  []
+  (get-json "/selection"))
+
 (defn rect-of
   "Read the :rect attr from a frame node and return {:x :y :w :h}.
    Returns nil if the node has no :rect (e.g. layout not yet computed)."

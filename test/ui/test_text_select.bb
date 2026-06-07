@@ -1,20 +1,5 @@
 (require '[redin-test :refer :all]
-         '[cheshire.core :as json]
-         '[babashka.http-client :as http]
          '[clojure.string :as str])
-
-;; ---------------------------------------------------------------------------
-;; Helpers
-;; ---------------------------------------------------------------------------
-
-(defn get-selection []
-  (let [token (read-token-file)
-        resp (http/get (str (base-url) "/selection")
-                       {:headers (merge {"Accept" "application/json"}
-                                        (when token {"Authorization" (str "Bearer " token)}))
-                        :throw false})]
-    (when (= 200 (:status resp))
-      (json/parse-string (:body resp) true))))
 
 ;; ---------------------------------------------------------------------------
 ;; Reset helper: click an empty corner to clear any existing selection and

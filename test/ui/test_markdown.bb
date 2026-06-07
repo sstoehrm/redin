@@ -55,3 +55,31 @@
     (assert (= 40.0 (double (:h sr)))
             (str "sentinel height should be 40 (its explicit height), got "
                  (:h sr) "; rect=" (pr-str sr)))))
+
+;; #112 — note on copy-button presence coverage:
+;; There is intentionally no UI assertion that the Copy button is *present*.
+;; The lowered NodeButton does not appear in /frames (which exposes the
+;; pre-lowering tree), and the markdown wrapper is a fill-height node, so its
+;; /frames rect carries no signal about the copy bar. Pixel-probing the
+;; rendered button is unreliable in dev builds — it is right-aligned in the
+;; top-right corner where the F3 profile overlay also draws — and slow
+;; (Babashka's PNG decoder is O(rows)). Button presence/shape is therefore
+;; verified authoritatively by the lowering unit tests in
+;; src/redin/markdown/lower_test.odin (test_lower_copyable_emits_copy_button,
+;; test_lower_copy_button_has_compact_dimensions, test_lower_not_copyable_*).
+;; The UI suite covers the other half of #112 below: markdown text is not
+;; selectable. The copyable render path is still exercised by
+;; markdown-renders-without-error (which screenshots a copyable block).
+
+(deftest clicking-markdown-text-does-not-select
+  ;; Lowered markdown text is non-selectable: clicking inside the rendered
+  ;; body must leave /selection at {kind:none}, not start a text selection.
+  (let [md (find-element {:id :md})
+        r  (rect-of md)]
+    (assert r (str "markdown wrapper must have a rect; got " (pr-str (frame-attrs md))))
+    ;; Click low in the block (body area) to land on paragraph text.
+    (click (int (+ (:x r) 20)) (int (+ (:y r) (* 0.7 (:h r)))))
+    (wait-ms 120)
+    (let [s (get-selection)]
+      (assert (= "none" (:kind s))
+              (str "markdown text must not be selectable; got selection " (pr-str s))))))

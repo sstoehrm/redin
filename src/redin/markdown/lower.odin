@@ -11,6 +11,7 @@ Wrapper_Attrs :: struct {
 	width:    union {types.SizeValue, f16},
 	height:   union {types.SizeValue, f16},
 	overflow: string,
+	copyable: bool,   // #112: render a copy-to-clipboard button
 }
 
 // Synthetic-tree representation of one [:markdown] subtree. Parallel
@@ -30,8 +31,15 @@ LoweredTree :: struct {
 // markdown wrapper via the original Lua tree's :id attr. If a
 // bridge-side id store is added later, propagate id at that time.
 //
+// #112: fixed dimensions for the opt-in copy affordance. redin buttons fill
+// their container when width/height are unset, so explicit sizes keep the
+// button a compact, right-aligned chip. The bar is the right-alignment track.
+COPY_BAR_HEIGHT    :: 34.0
+COPY_BUTTON_WIDTH  :: 72.0
+COPY_BUTTON_HEIGHT :: 26.0
+
 // Allocations come from `allocator` (typically context.temp_allocator).
-lower :: proc(blocks: []Block, attrs: Wrapper_Attrs, allocator := context.allocator) -> LoweredTree {
+lower :: proc(blocks: []Block, attrs: Wrapper_Attrs, allocator := context.allocator, source := "") -> LoweredTree {
 	context.allocator = allocator
 
 	nodes:   [dynamic]types.Node
@@ -46,6 +54,33 @@ lower :: proc(blocks: []Block, attrs: Wrapper_Attrs, allocator := context.alloca
 	}
 	append(&nodes, wrapper)
 	append(&parents, i32(-1))
+
+	// #112: opt-in copy button as the wrapper's first child — a full-width,
+	// right-aligned bar holding a compact "Copy" button whose copy_text is the
+	// raw source. Emitted before the content blocks so it renders at the top.
+	// The bar and button carry explicit sizes on purpose: redin buttons have no
+	// content-based sizing (an unset width/height makes a node FILL its
+	// container — see node_preferred_width/layout in render.odin), so without
+	// these the button would expand to fill the whole block. The bar stays
+	// full-width so CENTER_RIGHT can right-align the fixed-width button.
+	if attrs.copyable {
+		bar_idx := i32(len(nodes))
+		append(&nodes, types.NodeHbox{
+			aspect = "md/copy-bar",
+			layout = .CENTER_RIGHT,
+			width  = types.SizeValue.FULL,
+			height = f32(COPY_BAR_HEIGHT),
+		})
+		append(&parents, 0)
+		append(&nodes, types.NodeButton{
+			aspect    = "md/copy-button",
+			label     = "Copy",
+			copy_text = source,
+			width     = f32(COPY_BUTTON_WIDTH),
+			height    = f32(COPY_BUTTON_HEIGHT),
+		})
+		append(&parents, bar_idx)
+	}
 
 	for blk in blocks {
 		emit_block(&nodes, &parents, blk, 0)
@@ -106,9 +141,10 @@ emit_list_item :: proc(
 	marker_text := item.marker
 	if len(marker_text) == 0 do marker_text = "•"
 	append(nodes, types.NodeText{
-		aspect  = "md/list-marker",
-		content = marker_text,
-		width   = f32(MARKER_COLUMN_WIDTH),
+		aspect         = "md/list-marker",
+		content        = marker_text,
+		width          = f32(MARKER_COLUMN_WIDTH),
+		not_selectable = true,   // #112
 	})
 	append(parents, hbox_idx)
 	emit_text(nodes, parents, "md/body", "", item.spans, hbox_idx)
@@ -123,9 +159,10 @@ emit_text :: proc(
 	parent:  i32,
 ) {
 	t := types.NodeText{
-		aspect       = aspect,
-		content      = plain,
-		inline_spans  = spans,
+		aspect         = aspect,
+		content        = plain,
+		inline_spans   = spans,
+		not_selectable = true,   // #112: markdown text isn't mouse-selectable
 	}
 	// If spans are provided, content stays empty — the renderer reads
 	// from inline_spans. If spans is nil and plain is set (markers),

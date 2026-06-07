@@ -44,7 +44,7 @@ src/runtime/        Fennel runtime (loaded by bridge at startup)
 `NodeStack`, `NodeCanvas`, `NodeVbox`, `NodeHbox`, `NodeInput`, `NodeButton`, `NodeText`, `NodeImage`, `NodePopout`, `NodeModal`
 
 NodeText accepts `:selectable` (boolean, default `true`); set to `false` to opt the node out of mouse-selection.
-The `[:markdown ...]` element renders a string of markdown source as a lowered subtree of vbox/hbox/text nodes themed with the `md/*` aspect family (`:md/h1` … `:md/h6`, `:md/body`, `:md/list`, `:md/list-item`, `:md/list-marker`, `:md/code`). Defaults ship with the framework; override via `(theme.set-theme {…})`. See `docs/core-api.md` for syntax + attribute table.
+The `[:markdown ...]` element renders a string of markdown source as a lowered subtree of vbox/hbox/text nodes themed with the `md/*` aspect family (`:md/h1` … `:md/h6`, `:md/body`, `:md/list`, `:md/list-item`, `:md/list-marker`, `:md/code`). Defaults ship with the framework; override via `(theme.set-theme {…})`. See `docs/core-api.md` for syntax + attribute table. Add `:copyable true` to render a top-right Copy button that copies the raw markdown source to the clipboard (aspects `md/copy-bar`, `md/copy-button`); rendered markdown text itself is non-selectable.
 
 ## Frame format (Fennel)
 

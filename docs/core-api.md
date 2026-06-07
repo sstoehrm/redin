@@ -234,6 +234,14 @@ The styling of `:md/h1` … `:md/h6`, `:md/body`, `:md/list`,
 with the framework; override individual entries via your normal
 `(theme.set-theme {…})` call.
 
+`:copyable true` (optional, default false) renders a compact, right-aligned **Copy**
+button above the rendered content. Clicking it copies the block's verbatim raw
+markdown source to the system clipboard. The button is themed via the
+`:md/copy-bar` (the right-aligned row) and `:md/copy-button` aspects, both
+shipped as framework defaults and overridable with `theme.set-theme`. Note:
+rendered markdown text is **not** mouse-selectable — use the copy button to
+copy a block.
+
 ### Animation
 
 Any element may carry an `:animate` map that renders a registered canvas provider at a viewport-anchored rect relative to the host. Useful for corner ornaments — a blinking notification star, a soft glow behind a tile, a badge in the bottom-right.

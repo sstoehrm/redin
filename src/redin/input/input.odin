@@ -128,7 +128,7 @@ extract_listeners :: proc(
 			}
 		case types.NodeButton:
 			aspect = n.aspect
-			if len(n.click) > 0 {
+			if len(n.click) > 0 || len(n.copy_text) > 0 {   // #112
 				append(&listeners, types.Listener(types.ClickListener{node_idx = idx}))
 			}
 		case types.NodeCanvas:
@@ -294,6 +294,13 @@ poll :: proc() -> [dynamic]types.InputEvent {
 	return events
 }
 
+// #112: a button with non-empty copy_text copies that text to the system
+// clipboard when clicked. Pure decision, factored out for unit testing.
+button_clipboard_text :: proc(n: types.NodeButton) -> (text: string, ok: bool) {
+	if len(n.copy_text) > 0 do return n.copy_text, true
+	return "", false
+}
+
 // Process user events for the focused input. Applies edits to Input_State
 // and returns Dispatch_Events for Fennel.
 process_user_events :: proc(
@@ -310,7 +317,13 @@ process_user_events :: proc(
 	for ue in user_events {
 		if ue.event != .CLICK do continue
 		if ue.node_idx < 0 || ue.node_idx >= len(nodes) do continue
-		if btn, ok := nodes[ue.node_idx].(types.NodeButton); ok && len(btn.click) > 0 {
+		btn, ok := nodes[ue.node_idx].(types.NodeButton)
+		if !ok do continue
+		if clip, has := button_clipboard_text(btn); has {   // #112
+			cstr := strings.clone_to_cstring(clip, context.temp_allocator)
+			rl.SetClipboardText(cstr)
+		}
+		if len(btn.click) > 0 {
 			append(&dispatch, types.Dispatch_Event(types.Click_Event{
 				event_name  = btn.click,
 				context_ref = btn.click_ctx,

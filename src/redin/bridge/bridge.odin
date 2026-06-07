@@ -348,6 +348,7 @@ clear_node_strings :: proc(n: types.Node) {
 		if len(v.click) > 0 do delete(v.click)
 		if len(v.label) > 0 do delete(v.label)
 		if len(v.aspect) > 0 do delete(v.aspect)
+		if len(v.copy_text) > 0 do delete(v.copy_text)   // #112
 		// #165: release the registry ref taken by lua_get_event_ctx for a
 		// `:click [:event ctx]` payload. Mirrors clear_dropable_attrs; the
 		// click consumer only ever reads the ref (never retains it across
@@ -1268,6 +1269,10 @@ flatten_subtree :: proc(b: ^Bridge, tree: markdown.LoweredTree, parent_flat_idx:
 		} else if t, ok := &owned_node.(types.NodeHbox); ok {
 			if len(t.aspect)   > 0 do t.aspect   = strings.clone(t.aspect)
 			if len(t.overflow) > 0 do t.overflow = strings.clone(t.overflow)
+		} else if t, ok := &owned_node.(types.NodeButton); ok {
+			if len(t.aspect)    > 0 do t.aspect    = strings.clone(t.aspect)
+			if len(t.label)     > 0 do t.label     = strings.clone(t.label)
+			if len(t.copy_text) > 0 do t.copy_text = strings.clone(t.copy_text)
 		}
 		append(&b.nodes, owned_node)
 		append(&b.node_animations, nil)
@@ -1350,11 +1355,14 @@ lua_flatten_node :: proc(L: ^Lua_State, index: i32, cur: ^[dynamic]u8, b: ^Bridg
 			attrs.width    = size_f32_to_f16(lua_get_size_f32(L, attrs_idx, "width"))
 			attrs.height   = size_f32_to_f16(lua_get_size_f32(L, attrs_idx, "height"))
 			attrs.overflow = lua_get_string_field_raw(L, attrs_idx, "overflow")
+			if cp, exists := lua_get_bool_field_opt(L, attrs_idx, "copyable"); exists {
+				attrs.copyable = cp   // #112
+			}
 			lua_pop(L, 1)
 		}
 
 		blocks := markdown.parse(source, context.temp_allocator)
-		tree   := markdown.lower(blocks, attrs, context.temp_allocator)
+		tree   := markdown.lower(blocks, attrs, context.temp_allocator, source)
 		flatten_subtree(b, tree, i32(parent_idx), cur)
 		return
 	}

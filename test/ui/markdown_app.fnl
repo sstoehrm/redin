@@ -21,6 +21,11 @@ on the next line.
 - first item
 - second item
 - third item"]
+    ;; A copyable block — renders a Copy button (verified by lowering unit
+    ;; tests; included here so markdown-renders-without-error exercises the
+    ;; copyable render path).
+    [:markdown {:id :md-copy :aspect :card :width :full :copyable true}
+      "# Copyable\n\nThis block has a copy button."]
     ;; Sentinel sibling — guards `/frames` rect alignment for nodes
     ;; placed after a [:markdown] (the wrapper lowers to N flat-array
     ;; entries; the walker must skip past all of them).
