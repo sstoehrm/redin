@@ -1,209 +1,343 @@
-;; treedo — forest-themed pixel-art todo example.
+;; treedo — dusk-forest-glade pixel-art todo example.
+;;
+;; A single cohesive scene: a large "tree of life" stands as the hero in a
+;; textured forest glade under a graded twilight sky (moon, stars, distant
+;; treeline), with the todo list as a translucent field-journal card resting
+;; on the right. Each todo is a leaf; adding sprouts one, removing drops one.
 
 (local dataflow (require :dataflow))
 (local theme-mod (require :theme))
 (local canvas (require :canvas))
 
-;; ===== Palette (pixel-art forest) =====
+;; ===== Palette (pixel-art dusk forest) =====
 
-(local pal {:night-soil  [22 28 22]
-            :bark-dark   [54 38 28]
-            :bark-mid    [96 70 48]
-            :moss        [70 92 58]
-            :leaf-deep   [54 110 56]
-            :leaf-mid    [120 170 70]
-            :leaf-bright [200 220 110]
-            :sunset-gold [228 188 90]
-            :mushroom    [180 60 70]
-            :bone-white  [232 224 196]})
+(local pal {:night-soil   [22 28 22]
+            :bark-dark    [54 38 28]
+            :bark-mid     [96 70 48]
+            :moss         [70 92 58]
+            :leaf-deep    [54 110 56]
+            :leaf-mid     [120 170 70]
+            :leaf-bright  [200 220 110]
+            :sunset-gold  [228 188 90]
+            :mushroom     [180 60 70]
+            :bone-white   [232 224 196]
+            ;; twilight-sky set
+            :sky-top      [24 22 46]
+            :sky-mid      [58 46 80]
+            :sky-low      [150 96 92]
+            :horizon-glow [228 168 96]
+            :moon         [244 238 214]
+            :star         [210 214 196]
+            :silhouette   [30 30 46]
+            :grass        [58 86 50]
+            :ground-top   [44 50 32]
+            :ground-bot   [22 26 18]})
 
-;; ===== Tree geometry =====
-;; Canvas size: 240×320. Trunk at x=120, base at y=320.
-;; Four diagonal branches; 8 leaf slots per branch = 32 total.
-
-(local leaf-slots
-       (let [slots []]
-         (for [i 0 7]
-           (let [t (/ i 7)]
-             (table.insert slots [(- 112 (math.floor (* 72 t)))
-                                  (- 200 (math.floor (* 60 t)))])))
-         (for [i 0 7]
-           (let [t (/ i 7)]
-             (table.insert slots [(+ 128 (math.floor (* 72 t)))
-                                  (- 200 (math.floor (* 60 t)))])))
-         (for [i 0 7]
-           (let [t (/ i 7)]
-             (table.insert slots [(- 112 (math.floor (* 52 t)))
-                                  (- 130 (math.floor (* 50 t)))])))
-         (for [i 0 7]
-           (let [t (/ i 7)]
-             (table.insert slots [(+ 128 (math.floor (* 52 t)))
-                                  (- 130 (math.floor (* 50 t)))])))
-         slots))
-
-;; ===== Canvas: forest-floor (static backdrop) =====
-;;
-;; Deterministic pseudo-random fleck pattern via an LCG seeded with
-;; a constant, so the floor renders identically every frame and across
-;; runs. Two passes: moss flecks then mushroom dots, then a centered
-;; dirt path with sunset-gold stones.
-
-(local FLOOR-MOSS-COUNT 120)
-(local FLOOR-MUSHROOM-COUNT 80)
+;; ===== Small numeric helpers =====
 
 (fn lcg [seed]
   (% (+ (* seed 1103515245) 12345) 2147483648))
 
-(canvas.register
-  :forest-floor
-  (fn [ctx]
-    (let [w ctx.width
-          h ctx.height]
-      (ctx.rect 0 0 w h {:fill (. pal :night-soil)})
-      ;; moss flecks
-      (var s 42)
-      (for [_ 1 FLOOR-MOSS-COUNT]
-        (set s (lcg s))
-        (let [x (* 2 (math.floor (/ (% s w) 2)))]
-          (set s (lcg s))
-          (let [y (* 2 (math.floor (/ (% s h) 2)))]
-            (ctx.rect x y 2 2 {:fill (. pal :moss)}))))
-      ;; mushroom dots
-      (for [_ 1 FLOOR-MUSHROOM-COUNT]
-        (set s (lcg s))
-        (let [x (* 2 (math.floor (/ (% s w) 2)))]
-          (set s (lcg s))
-          (let [y (* 2 (math.floor (/ (% s h) 2)))]
-            (ctx.rect x y 2 2 {:fill (. pal :mushroom)}))))
-      ;; central dirt path (slightly darker band)
-      (let [px (- (math.floor (/ w 2)) 30)]
-        (ctx.rect px 0 60 h {:fill [18 22 18]})
-        ;; sunset-gold stones every 24px
-        (for [i 0 (math.floor (/ h 24))]
-          (let [sy (* i 24)
-                sx (+ px 26)]
-            (ctx.rect sx sy 8 4 {:fill (. pal :sunset-gold)})))))))
+(fn lerp-col [a b t]
+  [(math.floor (+ (. a 1) (* (- (. b 1) (. a 1)) t)))
+   (math.floor (+ (. a 2) (* (- (. b 2) (. a 2)) t)))
+   (math.floor (+ (. a 3) (* (- (. b 3) (. a 3)) t)))])
 
-;; ===== Canvas: tree-of-life =====
-;; Static trunk + four diagonal branches drawn as rect segments.
-;; Leaves come in the next task.
+;; Multi-stop colour gradient. `stops` = [[t0 col0] [t1 col1] ...] ascending.
+(fn grad [stops t]
+  (let [tc (math.max 0 (math.min 1 t))]
+    (var result (. (. stops 1) 2))
+    (var done false)
+    (for [i 1 (- (length stops) 1)]
+      (when (not done)
+        (let [s0 (. stops i)
+              s1 (. stops (+ i 1))
+              t0 (. s0 1)
+              t1 (. s1 1)]
+          (when (and (>= tc t0) (<= tc t1))
+            (let [lt (if (> (- t1 t0) 0) (/ (- tc t0) (- t1 t0)) 0)]
+              (set result (lerp-col (. s0 2) (. s1 2) lt))
+              (set done true))))))
+    result))
 
-(fn draw-trunk-and-branches [ctx]
-  ;; trunk: vertical column 16px wide, base at bottom
-  (ctx.rect 112 100 16 220 {:fill (. pal :bark-dark)})
-  (ctx.rect 124 100 4  220 {:fill (. pal :bark-mid)})    ; lit edge
-  ;; A few knot markers on the trunk for texture (pure pixel-art flair).
-  (ctx.rect 114 150 4 4 {:fill (. pal :bark-mid)})
-  (ctx.rect 120 240 4 4 {:fill (. pal :bark-mid)})
-  ;; Branches as discrete tapered chunks: 8×8 at the base shrinking to 4×4
-  ;; at the tip, spaced one chunk-length apart so they don't overlap into
-  ;; stripes. This is what gives the chunky pixel-art feel.
-  (let [paint (fn [x0 y0 x1 y1]
-                (let [steps 9]
-                  (for [i 0 steps]
-                    (let [t (/ i steps)
-                          x (math.floor (+ x0 (* (- x1 x0) t)))
-                          y (math.floor (+ y0 (* (- y1 y0) t)))
-                          ;; taper 8 → 4 from base to tip
-                          thick (math.max 4 (- 8 (math.floor (* t 4))))]
-                      (ctx.rect x y thick thick {:fill (. pal :bark-dark)})
-                      ;; lit edge on the right side of each chunk
-                      (ctx.rect (+ x thick -2) y 2 thick
-                                {:fill (. pal :bark-mid)})))))]
-    (paint 112 200  40 140)
-    (paint 128 200 200 140)
-    (paint 112 130  60  80)
-    (paint 128 130 180  80)))
+;; Both full-window canvases share this horizon so ground + trunk-base align.
+(fn horizon-y [h] (math.floor (* h 0.64)))
 
-;; Three rotating leaf body colors.
+(local sky-stops [[0.0  (. pal :horizon-glow)]
+                  [0.10 (. pal :sky-low)]
+                  [0.40 (. pal :sky-mid)]
+                  [1.0  (. pal :sky-top)]])
+
+;; ===== Tree geometry =====
+;; Trunk height; branch attach/tip offsets relative to the trunk base
+;; (bx, by). Branch entry: [ax-off ay-off tx-off ty-off nslots].
+;; 8 branches (4 pairs, low → crown). Total leaf slots = 34.
+
+(local TRUNK-H 320)
+
+(local branch-template
+       [[0 -105 -140 -205 5]
+        [0 -120  142 -212 5]
+        [0 -175 -112 -300 5]
+        [0 -188  114 -306 5]
+        [0 -245  -64 -358 4]
+        [0 -252   66 -360 4]
+        [0 -290  -28 -392 3]
+        [0 -290   28 -392 3]])
+
+;; ===== Drawing primitives =====
+
+;; A branch/root drawn as discrete tapered chunks (chunky pixel-art feel):
+;; base-thick at the attach point shrinking to 4px at the tip.
+(fn paint-branch [ctx x0 y0 x1 y1 base-thick]
+  ;; Step every ~4px along the branch so chunks overlap into a solid limb
+  ;; (a fixed step count leaves gaps on long branches → dotted-stick look).
+  (let [dx (- x1 x0)
+        dy (- y1 y0)
+        dist (math.sqrt (+ (* dx dx) (* dy dy)))
+        steps (math.max 6 (math.floor (/ dist 4)))]
+    (for [i 0 steps]
+      (let [t (/ i steps)
+            x (math.floor (+ x0 (* dx t)))
+            y (math.floor (+ y0 (* dy t)))
+            thick (math.max 4 (- base-thick (math.floor (* t (- base-thick 4)))))]
+        (ctx.rect x y thick thick {:fill (. pal :bark-dark)})
+        (ctx.rect (+ x thick -2) y 2 thick {:fill (. pal :bark-mid)})))))
+
+;; A pixel-art conifer: stacked narrowing rows from `base` upward.
+(fn conifer [ctx cx base th col]
+  (let [rows (math.max 3 (math.floor (/ th 3)))]
+    (for [r 0 rows]
+      (let [yy (- base (* r 3))
+            half (+ 1 (math.floor (* (/ (- rows r) rows) (/ th 2.4))))]
+        (ctx.rect (- cx half) yy (* 2 half) 3 {:fill col})))
+    (ctx.rect (- cx 1) base 2 4 {:fill col})))
+
+;; ===== Leaves =====
+
 (local leaf-cycle [(. pal :leaf-deep)
                    (. pal :leaf-mid)
                    (. pal :leaf-bright)])
 
-;; Draw one leaf at (x, y), full size, with the given body color.
-;; "Lean" alternates by slot parity: even slots lean right, odd left.
+;; One leaf: dark outline, body fill, bright highlight pixel. `lean`
+;; decides which side it grows toward; `lw`/`lh` set its size.
+(fn draw-one-leaf [ctx x y body lean lw lh]
+  (let [dx (if (= lean :right) 0 (- 4 lw))]
+    (ctx.rect (+ x dx)   y       lw       lh       {:fill (. pal :leaf-deep)})
+    (ctx.rect (+ x dx 1) (+ y 1) (- lw 2) (- lh 2) {:fill body})
+    (ctx.rect (+ x dx 2) (+ y 1) 3        2        {:fill (. pal :leaf-bright)})))
+
+;; A full leaf is a small CLUSTER (main + two satellites) so each todo
+;; reads as a leafy bunch and the canopy looks alive even with few items.
 (fn draw-leaf [ctx x y body lean]
-  (let [dx (if (= lean :right) 0 -8)]
-    ;; outline (3×3 cluster of dark green tiles)
-    (ctx.rect (+ x dx)     y     12 8 {:fill (. pal :leaf-deep)})
-    ;; body fill (slightly inset)
-    (ctx.rect (+ x dx 1)   (+ y 1) 10 6 {:fill body})
-    ;; highlight pixel
-    (ctx.rect (+ x dx 2) (+ y 1) 2 2 {:fill (. pal :leaf-bright)})))
+  (draw-one-leaf ctx (- x 6) (+ y 5) (. pal :leaf-deep) :left  10 7)
+  (draw-one-leaf ctx (+ x 8) (+ y 4) (. pal :leaf-mid)  :right 10 7)
+  (draw-one-leaf ctx x       y       body               lean   14 9))
 
 (fn draw-leaf-fading [ctx x y body lean alpha]
-  (let [dx (if (= lean :right) 0 -8)
-        outline (. pal :leaf-deep)
-        hilight (. pal :leaf-bright)
+  (let [dx (if (= lean :right) 0 -10)
         with-a (fn [c] [(. c 1) (. c 2) (. c 3) alpha])]
-    (ctx.rect (+ x dx)     y       12 8 {:fill (with-a outline)})
-    (ctx.rect (+ x dx 1)   (+ y 1) 10 6 {:fill (with-a body)})
-    (ctx.rect (+ x dx 2)   (+ y 1) 2  2 {:fill (with-a hilight)})))
+    (ctx.rect (+ x dx)     y       14 9 {:fill (with-a (. pal :leaf-deep))})
+    (ctx.rect (+ x dx 1)   (+ y 1) 12 7 {:fill (with-a body)})
+    (ctx.rect (+ x dx 2)   (+ y 1) 3  2 {:fill (with-a (. pal :leaf-bright))})))
 
-;; Draws a leaf at `growth` ∈ [0,1] of its full size. Below 1.0 we draw
-;; a smaller pixel-art "bud" using fewer big-pixels — four discrete
-;; growth stages give the chunky pop.
+;; Leaf at `growth` ∈ [0,1]. Below full size we draw a chunky bud in four
+;; discrete stages for the pixel-art pop.
 (fn draw-leaf-growing [ctx x y body lean growth]
   (let [stage (math.min 4 (math.floor (+ 1 (* growth 4))))]
     (if (>= stage 4)
         (draw-leaf ctx x y body lean)
-        (let [size (* stage 2)
-              dx-full (if (= lean :right) 0 -8)
-              cx (+ x dx-full 6)
+        (let [size (* stage 3)
+              dx-full (if (= lean :right) 0 -10)
+              cx (+ x dx-full 7)
               bx (- cx (math.floor (/ size 2)))]
           (ctx.rect bx y size size {:fill body})))))
+
+;; ===== Leaf-slot ordering =====
+;; Slots run inner→tip along each branch. We then interleave ring-by-ring
+;; ACROSS branches (ring 0 = innermost slot of every branch, ring 1 = next…)
+;; so leaves fill the canopy evenly instead of loading one branch first.
+
+(fn branch-slots [ax ay tx ty n]
+  (let [out []]
+    (for [i 0 (- n 1)]
+      (let [f (+ 0.5 (* (if (> n 1) (/ i (- n 1)) 0) 0.62))
+            jx (if (= 0 (% i 2)) 6 -6)
+            sx (+ (math.floor (+ ax (* (- tx ax) f))) jx)
+            sy (math.floor (+ ay (* (- ty ay) f)))]
+        (table.insert out [sx sy])))
+    out))
+
+(fn compute-leaf-slots [bx by]
+  (let [per []]
+    (each [_ b (ipairs branch-template)]
+      (table.insert per (branch-slots (+ bx (. b 1)) (+ by (. b 2))
+                                      (+ bx (. b 3)) (+ by (. b 4)) (. b 5))))
+    (let [out []]
+      (for [ring 0 4]
+        (each [_ slots (ipairs per)]
+          (when (. slots (+ ring 1))
+            (table.insert out (. slots (+ ring 1))))))
+      out)))
+
+(fn draw-tree [ctx bx by]
+  ;; roots flaring into the ground
+  (paint-branch ctx bx (- by 6) (- bx 60) (+ by 26) 8)
+  (paint-branch ctx bx (- by 6) (+ bx 60) (+ by 26) 8)
+  (paint-branch ctx bx (- by 6) (- bx 28) (+ by 34) 6)
+  (paint-branch ctx bx (- by 6) (+ bx 28) (+ by 34) 6)
+  ;; trunk (lit edge on the right)
+  (ctx.rect (- bx 13) (- by TRUNK-H) 26 TRUNK-H {:fill (. pal :bark-dark)})
+  (ctx.rect (+ bx 6)  (- by TRUNK-H) 7  TRUNK-H {:fill (. pal :bark-mid)})
+  ;; knot markers
+  (ctx.rect (- bx 8) (- by 120) 5 5 {:fill (. pal :bark-mid)})
+  (ctx.rect (- bx 2) (- by 230) 5 5 {:fill (. pal :bark-mid)})
+  ;; branches
+  (each [_ b (ipairs branch-template)]
+    (paint-branch ctx (+ bx (. b 1)) (+ by (. b 2))
+                  (+ bx (. b 3)) (+ by (. b 4)) 11)))
+
+;; ===== Canvas: forest-scene (full-window backdrop) =====
+
+(canvas.register
+  :forest-scene
+  (fn [ctx]
+    (let [w ctx.width
+          h ctx.height
+          horizon (horizon-y h)
+          now (redin.now)
+          band-h 6
+          back-col (lerp-col (. pal :silhouette) (. pal :sky-low) 0.45)
+          front-col (. pal :silhouette)]
+      ;; --- sky gradient (banded) ---
+      (var y 0)
+      (while (< y horizon)
+        (ctx.rect 0 y w band-h {:fill (grad sky-stops (/ (- horizon y) horizon))})
+        (set y (+ y band-h)))
+      ;; --- stars (upper sky; a few twinkle) ---
+      (let [star-top (math.floor (* horizon 0.78))]
+        (var s 991)
+        (for [_ 1 70]
+          (set s (lcg s))
+          (let [sx (* 2 (math.floor (/ (% s w) 2)))]
+            (set s (lcg s))
+            (let [sy (* 2 (math.floor (/ (% s star-top) 2)))]
+              (set s (lcg s))
+              (let [tw (% s 100)
+                    a (if (< tw 35)
+                          (math.floor (+ 110 (* 130 (math.abs (math.sin (+ now (/ sx 40)))))))
+                          210)]
+                (ctx.rect sx sy 2 2 {:fill [210 214 196 a]}))))))
+      ;; --- moon + halo (high-left, behind the canopy) ---
+      (let [mx (math.floor (* w 0.2))
+            my (math.floor (* horizon 0.42))]
+        (ctx.circle mx my 34 {:fill [244 238 214 16]})
+        (ctx.circle mx my 26 {:fill [244 238 214 28]})
+        (ctx.circle mx my 18 {:fill (. pal :moon)})
+        (ctx.circle (- mx 5) (- my 4) 4 {:fill [228 222 198]}))
+      ;; --- distant treeline (two depth layers) ---
+      (for [i 0 11]
+        (conifer ctx (math.floor (* w (/ (+ i 0.3) 12))) horizon
+                 (+ 26 (% (* i 37) 16)) back-col))
+      (for [i 0 8]
+        (conifer ctx (math.floor (* w (/ (+ i 0.7) 9))) (+ horizon 6)
+                 (+ 34 (% (* i 53) 20)) front-col))
+      ;; --- ground gradient ---
+      (var gy horizon)
+      (while (< gy h)
+        (ctx.rect 0 gy w band-h
+                  {:fill (lerp-col (. pal :ground-top) (. pal :ground-bot)
+                                   (/ (- gy horizon) (math.max 1 (- h horizon))))})
+        (set gy (+ gy band-h)))
+      ;; --- dirt path leading to the trunk, with sunset-gold stones ---
+      (let [px (- (math.floor (* w 0.36)) 28)]
+        (ctx.rect px horizon 56 (- h horizon) {:fill [26 24 18 120]})
+        (var i 0)
+        (var sy horizon)
+        (while (< sy h)
+          (ctx.rect (+ px 24 (if (= 0 (% i 2)) -8 8)) sy 8 4 {:fill (. pal :sunset-gold)})
+          (set sy (+ sy 26))
+          (set i (+ i 1))))
+      ;; --- floor texture: moss flecks, capped mushrooms, grass tufts ---
+      (var s 42)
+      (let [gh (math.max 1 (- h horizon))]
+        (for [_ 1 220]
+          (set s (lcg s))
+          (let [x (* 2 (math.floor (/ (% s w) 2)))]
+            (set s (lcg s))
+            (let [yy (+ horizon (* 2 (math.floor (/ (% s gh) 2))))]
+              (ctx.rect x yy 2 2 {:fill (. pal :moss)})))))
+      (let [gh (math.max 1 (- h horizon 30))]
+        (for [_ 1 26]
+          (set s (lcg s))
+          (let [mx (% s w)]
+            (set s (lcg s))
+            (let [my (+ horizon 20 (% s gh))]
+              (ctx.rect mx my 3 5 {:fill (. pal :bone-white)})
+              (ctx.rect (- mx 2) (- my 3) 7 4 {:fill (. pal :mushroom)})
+              (ctx.rect (- mx 1) (- my 2) 2 1 {:fill [232 200 200]})))))
+      (let [front-top (math.floor (* h 0.82))
+            front-h (math.max 1 (math.floor (* h 0.16)))]
+        (for [_ 1 60]
+          (set s (lcg s))
+          (let [gx (% s w)]
+            (set s (lcg s))
+            (let [gyy (+ front-top (% s front-h))]
+              (ctx.rect gx       gyy       1 5 {:fill (. pal :grass)})
+              (ctx.rect (- gx 2) (+ gyy 1) 1 4 {:fill (. pal :grass)})
+              (ctx.rect (+ gx 2) (+ gyy 1) 1 4 {:fill (. pal :grass)})))))
+      ;; --- fireflies (subtle, drifting) ---
+      (for [i 1 7]
+        (let [fx (math.floor (+ (* w (/ i 8)) (* 50 (math.sin (+ (* now 0.7) (* i 1.7))))))
+              fy (math.floor (+ (* h 0.7) (* 40 (math.sin (+ (* now 0.5) (* i 2.3))))))
+              a (math.floor (+ 90 (* 120 (math.abs (math.sin (+ (* now 2.2) i))))))]
+          (ctx.circle fx fy 3 {:fill [200 220 110 (math.floor (/ a 5))]})
+          (ctx.circle fx fy 1.5 {:fill [220 235 140 a]}))))))
+
+;; ===== Canvas: tree-of-life (full-window hero) =====
 
 (canvas.register
   :tree-of-life
   (fn [ctx]
-    (draw-trunk-and-branches ctx)
-    (let [items (subscribe :items)
-          now   (redin.now)]
-      (each [i item (ipairs items)]
-        (let [slot-idx (% (- i 1) 32)
-              slot     (. leaf-slots (+ slot-idx 1))
-              sx       (. slot 1)
-              sy       (. slot 2)
-              sway     (math.floor (* 1 (math.sin (+ (* now 1.3) i))))
-              body     (. leaf-cycle (+ 1 (% (- i 1) 3)))
-              lean     (if (= (% i 2) 0) :right :left)
-              age      (- now (or item.born 0))
-              growth   (math.min 1 (/ age 0.3))]
-          (draw-leaf-growing ctx (+ sx sway) sy body lean growth)))
-      (let [fallen (subscribe :falling-leaves)]
-        (each [_ entry (ipairs (or fallen []))]
-          (let [slot-idx (% entry.slot 32)
-                slot     (. leaf-slots (+ slot-idx 1))
+    (let [w ctx.width
+          h ctx.height
+          bx (math.floor (* w 0.36))
+          by (horizon-y h)
+          now (redin.now)
+          slots (compute-leaf-slots bx by)
+          nslots (length slots)]
+      (draw-tree ctx bx by)
+      (let [items (subscribe :items)]
+        (each [i item (ipairs items)]
+          (let [slot-idx (% (- i 1) nslots)
+                slot     (. slots (+ slot-idx 1))
                 sx       (. slot 1)
                 sy       (. slot 2)
-                age      (- now entry.spawn)
-                t        (/ age 1.6)
-                body     (. leaf-cycle (+ 1 (% entry.slot 3)))
-                draw-x   (math.floor (+ sx (* (math.sin (* age 4)) 8)))
-                draw-y   (math.floor (+ sy (* 250 t t)))
-                alpha    (math.max 0 (math.floor (* 255 (- 1 t))))
-                lean     (if (= (% (+ entry.slot 1) 2) 0) :right :left)]
-            (when (< t 1)
-              (draw-leaf-fading ctx draw-x draw-y body lean alpha))))))))
+                sway     (math.floor (* 1.5 (math.sin (+ (* now 1.3) i))))
+                body     (. leaf-cycle (+ 1 (% (- i 1) 3)))
+                lean     (if (= (% i 2) 0) :right :left)
+                age      (- now (or item.born 0))
+                growth   (math.min 1 (/ age 0.3))]
+            (draw-leaf-growing ctx (+ sx sway) sy body lean growth)))
+        (let [fallen (subscribe :falling-leaves)]
+          (each [_ entry (ipairs (or fallen []))]
+            (let [slot-idx (% entry.slot nslots)
+                  slot     (. slots (+ slot-idx 1))
+                  sx       (. slot 1)
+                  sy       (. slot 2)
+                  age      (- now entry.spawn)
+                  t        (/ age 1.8)
+                  body     (. leaf-cycle (+ 1 (% entry.slot 3)))
+                  draw-x   (math.floor (+ sx (* (math.sin (* age 4)) 10)))
+                  draw-y   (math.floor (+ sy (* 320 t t)))
+                  alpha    (math.max 0 (math.floor (* 255 (- 1 t))))
+                  lean     (if (= (% (+ entry.slot 1) 2) 0) :right :left)]
+              (when (< t 1)
+                (draw-leaf-fading ctx draw-x draw-y body lean alpha)))))))))
 
 ;; ===== Canvas: vine (drag overlay) =====
-;; Decoration on :draggable {:animate ...}. The host gates this to the
-;; drag preview only, so we always know we're being drawn around a
-;; cloned, dragged row.
+;; Wraps the dragged row's preview with a growing vine + hanging tendrils.
 
-;; The canvas (sized via :animate :rect below) hugs the row tightly on
-;; three sides and reserves a strip beneath for hanging tendrils.
-;; Layout in canvas-local coords:
-;;
-;;     ┌─────────────────────────────────┐  ← canvas top  (y=0)
-;;     │  halo  ┌───────────────────┐    │
-;;     │        │   dragged  row    │    │
-;;     │  halo  └───────────────────┘    │
-;;     │        ↓ tendrils hang here ↓   │
-;;     └─────────────────────────────────┘  ← canvas bottom (y=h)
-;;
-;; The perimeter walk traces the halo box (not the full canvas), and the
-;; tendrils drop from the halo's bottom edge into the strip below.
 (canvas.register
   :vine
   (fn [ctx]
@@ -212,14 +346,11 @@
           start (subscribe :drag-start-time)
           now (redin.now)
           age (if start (- now start) 0)
-          ;; Perimeter wraps over the first 1.0s of the drag; tendrils
-          ;; then grow from 1.0s to ~2.0s.
           growth (math.min 1 age)
-          ;; Halo box around the row — 4px margin on top + sides.
           halo-x 4
           halo-y 4
           halo-w (- w (* 2 halo-x))
-          halo-h 50                          ; row 42 + 4 top + 4 bottom
+          halo-h 50
           perimeter (* 2 (+ halo-w halo-h))
           drawn-len (* perimeter growth)
           step 6
@@ -228,10 +359,10 @@
           tuft-every 5]
       (var dist 0)
       (var tuft-i 0)
-      (each [_ edge (ipairs [[halo-x halo-y 1 0]                          ; top
-                             [(+ halo-x halo-w) halo-y 0 1]               ; right
-                             [(+ halo-x halo-w) (+ halo-y halo-h) -1 0]   ; bottom
-                             [halo-x (+ halo-y halo-h) 0 -1]])]           ; left
+      (each [_ edge (ipairs [[halo-x halo-y 1 0]
+                             [(+ halo-x halo-w) halo-y 0 1]
+                             [(+ halo-x halo-w) (+ halo-y halo-h) -1 0]
+                             [halo-x (+ halo-y halo-h) 0 -1]])]
         (let [ex (. edge 1)
               ey (. edge 2)
               dx (. edge 3)
@@ -256,11 +387,6 @@
               (set tuft-i (+ tuft-i 1))
               (set dist (+ dist step))
               (set t (+ t step))))))
-      ;; Tendrils hang from the halo's bottom edge into the strip below
-      ;; the row. They sprout AFTER the perimeter wrap completes, so the
-      ;; eye reads it as the vine "dripping" once it has hugged the row.
-      ;; Each tendril is a 5px-wide chunky stem with a leaf cluster
-      ;; budding every 12px and a heavier leaf at the dangling tip.
       (when (>= growth 1)
         (let [drop-top (+ halo-y halo-h)
               drop-room (- h drop-top)
@@ -271,67 +397,66 @@
                     (+ halo-x (math.floor (/ (* halo-w 2) 3)))
                     (+ halo-x halo-w -20)]]
           (each [col-i cx (ipairs cols)]
-            ;; Each tendril sways independently for a touch of life.
             (let [sway-amp (math.sin (+ (* now 1.2) col-i))]
               (for [j 0 steps]
                 (let [ty (+ drop-top (* j 4))
                       tx (+ cx (math.floor (* sway-amp (* j 0.6))))]
-                  ;; Chunky 5×5 stem segment.
                   (ctx.rect tx ty 5 5 {:fill (. pal :leaf-deep)})
                   (ctx.rect (+ tx 1) (+ ty 1) 2 2 {:fill (. pal :leaf-mid)})
-                  ;; Leaf cluster every 3 segments.
                   (when (and (= (% j 3) 0) (> j 0))
                     (let [side (if (= (% (+ col-i j) 2) 0) 5 -8)]
-                      (ctx.rect (+ tx side) (+ ty 1) 8 6
-                                {:fill (. pal :leaf-deep)})
-                      (ctx.rect (+ tx side 1) (+ ty 2) 6 4
-                                {:fill (. pal :leaf-mid)})
-                      (ctx.rect (+ tx side 2) (+ ty 2) 2 2
-                                {:fill (. pal :leaf-bright)})))))
-              ;; Heavier "berry" leaf at the very tip of the tendril.
+                      (ctx.rect (+ tx side) (+ ty 1) 8 6 {:fill (. pal :leaf-deep)})
+                      (ctx.rect (+ tx side 1) (+ ty 2) 6 4 {:fill (. pal :leaf-mid)})
+                      (ctx.rect (+ tx side 2) (+ ty 2) 2 2 {:fill (. pal :leaf-bright)})))))
               (when (> steps 2)
                 (let [ty (+ drop-top (* steps 4))
                       tx (+ cx (math.floor (* sway-amp (* steps 0.6))))]
                   (ctx.rect (- tx 4) ty 12 8 {:fill (. pal :leaf-deep)})
                   (ctx.rect (- tx 3) (+ ty 1) 10 6 {:fill (. pal :leaf-mid)})
-                  (ctx.rect (- tx 1) (+ ty 2) 3 3
-                            {:fill (. pal :leaf-bright)}))))))))))
+                  (ctx.rect (- tx 1) (+ ty 2) 3 3 {:fill (. pal :leaf-bright)}))))))))))
 
-;; ===== Canvas: vine-grip (grab affordance) =====
-;; A vertical run of 3 small mushroom dots — the grab affordance.
+;; ===== Canvas: vine-grip (leaf-bud drag handle / bullet) =====
 
 (canvas.register
   :vine-grip
   (fn [ctx]
     (let [cx (/ ctx.width 2)
           cy (/ ctx.height 2)]
-      (for [row -1 1]
-        (let [y (math.floor (+ cy (* row 8)))]
-          (ctx.rect (- cx 3) y 2 2 {:fill (. pal :moss)})
-          (ctx.rect (+ cx 1) y 2 2 {:fill (. pal :moss)}))))))
+      ;; stem
+      (ctx.rect (- cx 1) cy 2 8 {:fill (. pal :leaf-deep)})
+      ;; bud leaf
+      (ctx.rect (- cx 5) (- cy 6) 10 8 {:fill (. pal :leaf-deep)})
+      (ctx.rect (- cx 4) (- cy 5) 8  6 {:fill (. pal :leaf-mid)})
+      (ctx.rect (- cx 2) (- cy 4) 2  2 {:fill (. pal :leaf-bright)}))))
 
 ;; ===== Theme =====
 
 (theme-mod.set-theme
-  {:canopy        {:bg [38 46 38] :padding [20 20 20 20] :radius 8}
-   :heading       {:font-size 22 :weight 1 :color (. pal :bone-white)}
+  {:canopy        {:bg [30 38 32]
+                   :padding [20 22 20 22]
+                   :radius 10
+                   :opacity 0.9
+                   :shadow [0 8 28 [0 0 0 160]]}
+   :heading       {:font-size 24 :weight 1 :color (. pal :bone-white)}
    :body          {:font-size 14 :color (. pal :bone-white)}
-   :count-badge   {:font-size 12 :color (. pal :sunset-gold)}
+   :count-badge   {:font-size 12 :weight 1 :color (. pal :night-soil)
+                   :bg (. pal :sunset-gold) :radius 9 :padding [3 10 3 10]}
 
-   :trail         {:padding [4 4 4 4]}
-   :trail#hover   {:bg (. pal :moss) :padding [4 4 4 4]}
+   :trail         {:padding [6 8 6 8] :radius 6}
+   :trail#hover   {:bg (. pal :moss) :padding [6 8 6 8] :radius 6}
    :row-vining    {:bg (. pal :leaf-mid)
                    :color (. pal :night-soil)
-                   :padding [4 4 4 4]
+                   :padding [6 8 6 8]
+                   :radius 6
                    :shadow [0 4 16 [0 0 0 140]]}
-   :row-drop-hot  {:bg [90 130 60] :padding [4 4 4 4]}
-   :muted-armed   {:bg [48 56 48]}
+   :row-drop-hot  {:bg [90 130 60] :padding [6 8 6 8] :radius 6}
+   :muted-armed   {:bg [40 50 42 180] :radius 6}
 
    :bark          {:bg (. pal :bark-dark)
                    :color (. pal :bone-white)
                    :border (. pal :bark-mid)
                    :border-width 1
-                   :radius 4
+                   :radius 6
                    :padding [8 12 8 12]
                    :font-size 14}
    :bark#focus    {:border (. pal :leaf-bright)}
@@ -404,11 +529,8 @@
                              leaves))))
                db))
 
-;; Periodic prune of falling-leaf entries older than 2 seconds.
-;; Re-arms itself via :dispatch-later, so the loop runs forever at
-;; ~2s intervals. The handler returns {:db ... :dispatch-later ...}
-;; — both keys are required: the runtime only delivers effects when
-;; the result table carries :db (src/runtime/dataflow.fnl).
+;; Periodic prune of falling-leaf entries older than 2 seconds; re-arms
+;; itself via :dispatch-later, so the loop runs forever at ~2s intervals.
 (reg-handler :tick/clear-fallen
              (fn [db event]
                (let [now (redin.now)]
@@ -451,12 +573,12 @@
                 count     (length items)]
             [:stack
              {:viewport [[:top_left 0 0 :full :full]
-                         [:bottom_left 16 -16 240 320]
-                         [:top_center 0 32 480 :full]]}
-             [:canvas {:provider :forest-floor :width :full :height :full}]
-             [:canvas {:provider :tree-of-life :width 240 :height 320}]
+                         [:top_left 0 0 :full :full]
+                         [:center_right -40 0 440 :2_3]]}
+             [:canvas {:provider :forest-scene :width :full :height :full}]
+             [:canvas {:provider :tree-of-life :width :full :height :full}]
              [:vbox {:aspect :canopy}
-              [:hbox {:height 32 :layout :center}
+              [:hbox {:height 30 :layout :center}
                [:text {:aspect :heading} "treedo"]
                [:vbox {:width :full}]
                [:text {:aspect :count-badge} (.. count " items")]]
@@ -475,7 +597,8 @@
                          :click [:test/add]} "Plant"]]
               [:vbox {:height 12}]
               [:vbox
-               {:overflow :scroll-y
+               {:height :full
+                :overflow :scroll-y
                 :drag-over [:row-drag {:event :event/over :aspect :muted-armed}]}
                (icollect [i item (ipairs items)]
                  [:hbox {:layout :center :aspect :trail :height 42
@@ -484,12 +607,8 @@
                                       :handle false
                                       :event :event/drag
                                       :aspect :row-vining
-                                      ;; Vine canvas hugs the row tightly
-                                      ;; (8px halo top + sides) and adds a
-                                      ;; 70px strip below for the hanging
-                                      ;; tendrils to drip into.
                                       :animate {:provider :vine
-                                                :rect [:top_left -8 -8 456 120]
+                                                :rect [:top_left -8 -8 416 120]
                                                 :z :above}}
                                      i]
                          :dropable [:row-drag
@@ -503,6 +622,5 @@
                             :width 32 :height 32
                             :click [:test/remove i]} "x"]])]]])))
 
-;; Bootstrap the falling-leaf cleanup loop. The handler re-arms itself
-;; via :dispatch-later, so this single dispatch is enough.
+;; Bootstrap the falling-leaf cleanup loop.
 (dispatch [:tick/clear-fallen])
