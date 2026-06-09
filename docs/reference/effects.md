@@ -69,7 +69,7 @@ Schedule event dispatch after a delay. Accepts a single timer map or a sequence 
                          {:ms 5000 :dispatch [:session/timeout]}]}
 ```
 
-Each entry: `{:ms N :dispatch event-vector}`. The timer fires when `poll-timers` is called with `now >= start + ms`. The host calls `poll-timers` once per frame.
+Each entry: `{:ms N :dispatch event-vector}`. The timer fires when `poll-timers` is called with `now >= start + ms`. The host calls `poll-timers` once per frame. Timers scheduled *during* a poll (a fired handler re-arming itself) wait for the next poll, even with `:ms 0` — so a self-rearming handler fires once per frame, never in a same-poll cascade.
 
 The pending-timer queue is capped at **10,000** entries. A handler that
 schedules a timer every frame without them firing would otherwise grow the

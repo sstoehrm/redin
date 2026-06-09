@@ -28,30 +28,39 @@
 
 ;; ===== Event delivery =====
 
+(fn deliver-one [event]
+  (let [event-type (. event 1)]
+    (if
+      (= event-type :resize) nil
+      (or (= event-type :click) (= event-type :hover)
+          (= event-type :key) (= event-type :char)) nil
+
+      ;; Dispatch wrapper: unwrap and dispatch inner event
+      (= event-type :dispatch)
+      (dataflow.dispatch (. event 2))
+
+      ;; HTTP response from host
+      (= event-type :http-response)
+      (let [effect-mod (require :effect)]
+        (effect-mod.handle-http-response (. event 2)))
+
+      ;; Shell response from host
+      (= event-type :shell-response)
+      (let [effect-mod (require :effect)]
+        (effect-mod.handle-shell-response (. event 2)))
+
+      ;; Default: resolved event, dispatch directly
+      (dataflow.dispatch event))))
+
 (fn M.deliver-events [events]
   (each [_ event (ipairs events)]
-    (let [event-type (. event 1)]
-      (if
-        (= event-type :resize) nil
-        (or (= event-type :click) (= event-type :hover)
-            (= event-type :key) (= event-type :char)) nil
-
-        ;; Dispatch wrapper: unwrap and dispatch inner event
-        (= event-type :dispatch)
-        (dataflow.dispatch (. event 2))
-
-        ;; HTTP response from host
-        (= event-type :http-response)
-        (let [effect-mod (require :effect)]
-          (effect-mod.handle-http-response (. event 2)))
-
-        ;; Shell response from host
-        (= event-type :shell-response)
-        (let [effect-mod (require :effect)]
-          (effect-mod.handle-shell-response (. event 2)))
-
-        ;; Default: resolved event, dispatch directly
-        (dataflow.dispatch event)))))
+    ;; pcall per event: one failing handler must not abort the rest of
+    ;; the frame's batch (a click and an input change can arrive in the
+    ;; same frame). The error is reported, not swallowed.
+    (let [(ok? err) (pcall deliver-one event)]
+      (when (not ok?)
+        (print (.. "Error delivering event " (tostring (. event 1))
+                   ": " (tostring err)))))))
 
 ;; ===== Accessors =====
 

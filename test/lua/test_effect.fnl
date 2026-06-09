@@ -264,4 +264,33 @@
   (assert (= (rawget (dataflow._get-raw-db) :status) 500) "500 routed to on-error")
   (set _G.redin_http nil))
 
+;; --- poll-timers re-entrancy ---
+;; A handler that re-arms itself via :dispatch-later must not fire again
+;; within the same poll, even with :ms 0 — otherwise a self-rearming
+;; handler cascades forever inside one poll-timers call and hangs the app.
+
+(fn t.test-poll-timers-no-same-poll-cascade []
+  (setup)
+  (dataflow.init {})
+  (dataflow.register-globals)
+  (dataflow.set-effect-handler effect.execute)
+  (var fires 0)
+  (dataflow.reg-handler :event/rearm
+    (fn [db event]
+      (set fires (+ fires 1))
+      ;; Re-arm up to 5 times so a regression fails the assert below
+      ;; instead of hanging the test runner in an infinite cascade.
+      (if (< fires 5)
+        {:db db :dispatch-later {:ms 0 :dispatch [:event/rearm]}}
+        db)))
+  (effect.execute {:db nil :dispatch-later {:ms 0 :dispatch [:event/rearm]}})
+  (let [now (* (os.clock) 1000)
+        fired (effect.poll-timers (+ now 1000))]
+    (assert (= fires 1) (.. "one poll fires each due timer once, got " fires))
+    (assert (= fired 1) "poll-timers reports a single firing")
+    (assert (= (effect.pending-timers) 1) "re-armed timer waits for the next poll"))
+  (let [now (* (os.clock) 1000)]
+    (effect.poll-timers (+ now 1000))
+    (assert (= fires 2) "re-armed timer fires on the following poll")))
+
 t

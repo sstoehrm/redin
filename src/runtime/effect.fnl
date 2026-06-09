@@ -47,19 +47,25 @@
 ;; ===== Timer queue =====
 
 (fn M.poll-timers [now-ms]
-  (var fired 0)
-  (var i 1)
-  (while (<= i (length timer-queue))
-    (let [timer (. timer-queue i)]
-      (if (<= timer.at now-ms)
-        (do
-          (let [dispatch-fn (. executors :dispatch)]
-            (when dispatch-fn
-              (dispatch-fn timer.event)))
-          (table.remove timer-queue i)
-          (set fired (+ fired 1)))
-        (set i (+ i 1)))))
-  fired)
+  ;; Collect due timers first, then dispatch. Dispatching while walking
+  ;; the live queue lets a fired handler's own :dispatch-later land in
+  ;; the same poll (its `at` <= the fixed now-ms), so an :ms 0
+  ;; self-rearming handler would cascade forever inside one call.
+  ;; Timers enqueued during this poll wait for the next one.
+  (let [due []]
+    (var i 1)
+    (while (<= i (length timer-queue))
+      (let [timer (. timer-queue i)]
+        (if (<= timer.at now-ms)
+          (do
+            (table.insert due timer)
+            (table.remove timer-queue i))
+          (set i (+ i 1)))))
+    (let [dispatch-fn (. executors :dispatch)]
+      (when dispatch-fn
+        (each [_ timer (ipairs due)]
+          (dispatch-fn timer.event))))
+    (length due)))
 
 (fn M.pending-timers []
   (length timer-queue))
