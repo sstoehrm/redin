@@ -272,8 +272,10 @@ run :: proc(cfg: Config) {
 
 		input.process_text_selection(input_events[:], listeners[:], b.nodes[:], b.paths[:], node_rects[:], b.theme)
 
+		// Content rects, not outer node rects — the drawn scrollbar lives
+		// inside the padding, so hit-testing must use the same rect.
 		scrollbar_consumed := input.apply_scrollbar(
-			input_events[:], b.nodes[:], node_rects[:],
+			input_events[:], b.nodes[:], node_content_rects[:],
 			node_scroll_info, &scroll_offsets, b.theme,
 		)
 		_ = scrollbar_consumed // hooked up by gating tasks (10) later
