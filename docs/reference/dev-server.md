@@ -214,6 +214,10 @@ Response: `{"ok": true}`
 
 Decodes the JSON body and calls `theme.set-theme` in Lua, replacing the entire theme.
 
+Errors: `400 {"error":"invalid JSON"}` for an unparseable body,
+`400 {"error":"body must be a JSON object"}` for a valid-JSON non-object,
+`500 {"error":"set-theme failed"}` when the Lua call errors.
+
 ### `POST /input/takeover` -- take over mouse polling
 
 ```bash

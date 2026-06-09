@@ -846,9 +846,13 @@ status_text :: proc(code: int) -> string {
 	case 404: return "404 Not Found"
 	case 405: return "405 Method Not Allowed"
 	case 408: return "408 Request Timeout"
+	case 409: return "409 Conflict"
 	case 413: return "413 Payload Too Large"
 	case 500: return "500 Internal Server Error"
-	case:     return "200 OK"
+	case 503: return "503 Service Unavailable"
+	// An unmapped code is a handler bug; fail loudly as a server error
+	// rather than emitting a "200 OK" status line over an error body.
+	case:     return "500 Internal Server Error"
 	}
 }
 
@@ -2273,19 +2277,28 @@ handle_put_aspects :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string)
 	L := ds.bridge.L
 	lua_getglobal(L, "require")
 	lua_pushstring(L, "theme")
-	if lua_pcall(L, 1, 1, 0) == 0 {
-		lua_getfield(L, -1, "set-theme")
-		lua_remove(L, -2)
-		pos := 0
-		if json_decode_value(L, body, &pos) {
-			if lua_pcall(L, 1, 0, 0) != 0 {
-				lua_pop(L, 1)
-			}
-		} else {
-			lua_pop(L, 1)
-		}
-	} else {
-		lua_pop(L, 1)
+	if lua_pcall(L, 1, 1, 0) != 0 {
+		lua_pop(L, 1) // error value
+		respond_json_error(ch, 500, `{"error":"theme module unavailable"}`)
+		return
+	}
+	lua_getfield(L, -1, "set-theme")
+	lua_remove(L, -2)
+	pos := 0
+	if !json_decode_value(L, body, &pos) {
+		lua_pop(L, 1) // set-theme fn
+		respond_json_error(ch, 400, `{"error":"invalid JSON"}`)
+		return
+	}
+	if !lua_istable(L, -1) {
+		lua_pop(L, 2) // decoded value + set-theme fn
+		respond_json_error(ch, 400, `{"error":"body must be a JSON object"}`)
+		return
+	}
+	if lua_pcall(L, 1, 0, 0) != 0 {
+		lua_pop(L, 1) // error value
+		respond_json_error(ch, 500, `{"error":"set-theme failed"}`)
+		return
 	}
 	respond_json_ok(ch)
 }

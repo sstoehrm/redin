@@ -82,3 +82,31 @@
 (deftest click-accepts-valid-coords
   (assert (= 200 (click-status {:x 10 :y 10}))
           "Valid in-bounds coordinates must still succeed"))
+
+;; PUT /aspects error handling: invalid JSON and non-object bodies must
+;; be rejected like every other body-taking endpoint, not swallowed with
+;; a 200 {"ok":true} while the theme silently stays unchanged.
+
+(defn- put-aspects-status
+  [body-str]
+  (let [port  (str/trim (slurp ".redin-port"))
+        token (str/trim (slurp ".redin-token"))
+        resp  (http/put (str "http://localhost:" port "/aspects")
+                        {:headers {"Content-Type" "application/json"
+                                   "Authorization" (str "Bearer " token)}
+                         :body body-str
+                         :throw false})]
+    (:status resp)))
+
+(deftest put-aspects-invalid-json-is-400
+  (assert (= 400 (put-aspects-status "{not json"))
+          "Invalid JSON body must be rejected with 400"))
+
+(deftest put-aspects-non-object-is-400
+  (assert (= 400 (put-aspects-status "\"just a string\""))
+          "A non-object JSON body must be rejected with 400"))
+
+(deftest put-aspects-valid-roundtrip-is-200
+  (let [theme (get-theme)]
+    (assert (= 200 (put-aspects-status (json/generate-string theme)))
+            "Replacing the theme with itself must succeed with 200")))
