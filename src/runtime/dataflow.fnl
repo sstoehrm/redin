@@ -61,7 +61,9 @@
   (var v db)
   (var missing false)
   (each [_ k (ipairs path)]
-    (if (or missing (= v nil))
+    (if (or missing (= v nil) (~= (type v) "table"))
+      ;; A non-table intermediate (scalar where the path expects nesting)
+      ;; reads as missing, like nil — rawget on it would error.
       (set missing true)
       (set v (rawget v k))))
   (if (or missing (= v nil)) ?default v))
@@ -73,18 +75,30 @@
   (rawset db key value)
   db)
 
-(fn M.assoc-in [db path value]
-  (record-change path)
-  (var t db)
+;; Walk to the parent of the last path key, creating intermediate tables
+;; for nil slots. A non-table intermediate raises a clear error naming
+;; the operation and key (rawset's own "table expected" names neither);
+;; Clojure's assoc-in throws on the same shape mismatch. Shared by
+;; assoc-in and update-in.
+(fn walk-to-parent [op t path]
+  (var cur t)
   (for [i 1 (- (length path) 1)]
     (let [k (. path i)
-          next-val (rawget t k)]
+          next-val (rawget cur k)]
       (if (= next-val nil)
         (let [new-tbl {}]
-          (rawset t k new-tbl)
-          (set t new-tbl))
-        (set t next-val))))
-  (rawset t (. path (length path)) value)
+          (rawset cur k new-tbl)
+          (set cur new-tbl))
+        (= (type next-val) "table")
+        (set cur next-val)
+        (error (.. op ": path crosses non-table value at key '"
+                   (tostring k) "'")))))
+  cur)
+
+(fn M.assoc-in [db path value]
+  (let [parent (walk-to-parent "assoc-in" db path)]
+    (record-change path)
+    (rawset parent (. path (length path)) value))
   db)
 
 (fn M.update [db key f]
@@ -93,18 +107,10 @@
   db)
 
 (fn M.update-in [db path f]
-  (record-change path)
-  (var t db)
-  (for [i 1 (- (length path) 1)]
-    (let [k (. path i)
-          next-val (rawget t k)]
-      (if (= next-val nil)
-        (let [new-tbl {}]
-          (rawset t k new-tbl)
-          (set t new-tbl))
-        (set t next-val))))
-  (let [k (. path (length path))]
-    (rawset t k (f (rawget t k))))
+  (let [parent (walk-to-parent "update-in" db path)
+        k (. path (length path))]
+    (record-change path)
+    (rawset parent k (f (rawget parent k))))
   db)
 
 (fn M.dissoc [db key]
@@ -120,7 +126,9 @@
     (when (not bail)
       (let [k (. path i)
             next-val (rawget t k)]
-        (if (= next-val nil)
+        ;; A nil or non-table intermediate means there is nothing at the
+        ;; path to remove — deleting from a missing nest is a no-op.
+        (if (or (= next-val nil) (~= (type next-val) "table"))
           (set bail true)
           (set t next-val)))))
   (when (not bail)
@@ -140,8 +148,22 @@
       (set tracking nil)
       (let [result (handler-fn raw-db event)]
         (set tracking saved-tracking)
+        ;; A table result that isn't the db accessor is an fx map. :db
+        ;; normally holds the accessor (== raw-db, already mutated in
+        ;; place); a handler that built a fresh table instead gets it
+        ;; installed as the new state, with a root-path change recorded
+        ;; so every subscription recomputes. An fx map with no :db at
+        ;; all is effects-only (e.g. {:dispatch-later ...}).
         (when (and (~= result nil) (~= result raw-db)
-                   (= (type result) "table") (~= (. result :db) nil))
+                   (= (type result) "table"))
+          (let [new-db (. result :db)]
+            (when (and (~= new-db nil) (~= new-db raw-db))
+              (if (= (type new-db) "table")
+                (do
+                  (set raw-db new-db)
+                  (record-change []))
+                (print (.. "Warning: :db in fx map is not a table; "
+                           "ignoring (event " (tostring key) ")")))))
           (when effect-handler
             (effect-handler result)))))))
 
@@ -183,13 +205,22 @@
           ;; #178: save/restore `tracking` (like M.dispatch) so a query fn
           ;; that itself calls subscribe doesn't clobber it to nil, which
           ;; would drop this sub's deps and later (ipairs nil) in flush.
+          ;; pcall so the restore also happens when the query fn errors —
+          ;; an orphaned tracking table would otherwise collect every
+          ;; later top-level read forever. Re-raise with level 0 to keep
+          ;; the original message verbatim (matches M.dispatch).
           (let [saved-tracking tracking]
             (set tracking [])
-            (let [value (sub.fn raw-db)]
-              (set sub.deps tracking)
-              (set tracking saved-tracking)
-              (set sub.cached value)
-              (set sub.dirty false))))
+            (let [(ok? value) (pcall sub.fn raw-db)]
+              (if ok?
+                (do
+                  (set sub.deps tracking)
+                  (set tracking saved-tracking)
+                  (set sub.cached value)
+                  (set sub.dirty false))
+                (do
+                  (set tracking saved-tracking)
+                  (error value 0))))))
         sub.cached))))
 
 ;; ===== Public API: flush =====
@@ -255,5 +286,6 @@
 
 (fn M._get-changed-paths [] changed-paths)
 (fn M._get-raw-db [] raw-db)
+(fn M._get-tracking [] tracking)
 
 M

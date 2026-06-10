@@ -201,4 +201,30 @@
         (assert (= (rawget (dataflow._get-raw-db) :error-code) 1)
                 "shell error routed to on-error handler")))))
 
+;; --- error resilience ---
+;; One failing handler must not abort the rest of the frame's event batch
+;; (e.g. a click and an input change delivered in the same frame).
+
+(fn t.test-deliver-events-continues-after-handler-error []
+  (setup)
+  (dataflow.init {:count 0})
+  (dataflow.reg-handler :event/boom
+    (fn [db event] (error "boom")))
+  (dataflow.reg-handler :event/inc
+    (fn [db event] (dataflow.update db :count #(+ $1 1))))
+  (view.deliver-events [[:dispatch [:event/boom]]
+                        [:dispatch [:event/inc]]])
+  (assert (= (rawget (dataflow._get-raw-db) :count) 1)
+          "second event still delivered after the first handler errors"))
+
+(fn t.test-deliver-events-continues-after-unknown-event []
+  (setup)
+  (dataflow.init {:count 0})
+  (dataflow.reg-handler :event/inc
+    (fn [db event] (dataflow.update db :count #(+ $1 1))))
+  (view.deliver-events [[:dispatch [:event/no-such-handler]]
+                        [:dispatch [:event/inc]]])
+  (assert (= (rawget (dataflow._get-raw-db) :count) 1)
+          "unknown event does not abort the batch"))
+
 t

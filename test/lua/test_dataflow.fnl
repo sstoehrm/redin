@@ -450,4 +450,93 @@
     (dataflow.flush)
     (assert true "flush completed without ipairs(nil) on sub/a.deps")))
 
+;; --- fx map :db semantics ---
+;; docs/app-api.md: "The :db key is extracted as the new state." The common
+;; case is :db holding the accessor (== raw-db, already mutated in place);
+;; a handler that builds a fresh table must have it installed, with every
+;; subscription invalidated.
+
+(fn t.test-handler-fx-map-fresh-db-installed []
+  (setup)
+  (dataflow.init {:counter 1})
+  (dataflow.reg-sub :sub/counter (fn [db] (dataflow.get db :counter)))
+  (assert (= (dataflow.subscribe :sub/counter) 1) "sub sees initial state")
+  (dataflow.reg-handler :event/replace
+    (fn [db event]
+      {:db {:counter 99}}))
+  (dataflow.dispatch [:event/replace])
+  (assert (= (rawget (dataflow._get-raw-db) :counter) 99)
+          "fresh :db table becomes the new state")
+  (assert (dataflow.has-changes?) "installing a fresh :db records a change")
+  (dataflow.flush)
+  (assert (= (dataflow.subscribe :sub/counter) 99)
+          "subscriptions recompute against the new state"))
+
+;; An fx map with no :db key (effects only) must still reach the effect
+;; handler instead of being silently dropped.
+
+(fn t.test-handler-fx-map-without-db-executes-effects []
+  (setup)
+  (dataflow.init {:counter 0})
+  (let [captured []]
+    (dataflow.set-effect-handler
+      (fn [fx-map] (table.insert captured fx-map)))
+    (dataflow.reg-handler :event/ping
+      (fn [db event]
+        {:ping true}))
+    (dataflow.dispatch [:event/ping])
+    (assert (= (length captured) 1) "effects-only fx map reaches the effect handler")
+    (assert (= (. (. captured 1) :ping) true) "fx map passed through intact")))
+
+;; --- path walkers crossing scalar values ---
+;; Reads are forgiving (return the default); writes raise a clear error
+;; instead of rawset's "table expected, got number"; dissoc-in is a no-op.
+
+(fn t.test-get-in-through-scalar-returns-default []
+  (setup)
+  (let [db (dataflow.init {:a 5})]
+    (assert (= (dataflow.get-in db [:a :b] "dflt") "dflt")
+            "path through scalar yields the default")
+    (assert (= (dataflow.get-in db [:a :b :c]) nil)
+            "path through scalar yields nil without a default")))
+
+(fn t.test-assoc-in-through-scalar-errors-clearly []
+  (setup)
+  (let [db (dataflow.init {:a 5})]
+    (let [(ok err) (pcall dataflow.assoc-in db [:a :b] 1)]
+      (assert (not ok) "assoc-in through a scalar raises")
+      (assert (string.find (tostring err) "assoc-in" 1 true)
+              "error names the operation")
+      (assert (string.find (tostring err) "'a'" 1 true)
+              "error names the offending key"))
+    (assert (= (rawget db :a) 5) "the scalar is left untouched")))
+
+(fn t.test-update-in-through-scalar-errors-clearly []
+  (setup)
+  (let [db (dataflow.init {:a 5})]
+    (let [(ok err) (pcall dataflow.update-in db [:a :b] #(or $1 0))]
+      (assert (not ok) "update-in through a scalar raises")
+      (assert (string.find (tostring err) "update-in" 1 true)
+              "error names the operation"))
+    (assert (= (rawget db :a) 5) "the scalar is left untouched")))
+
+(fn t.test-dissoc-in-through-scalar-is-noop []
+  (setup)
+  (let [db (dataflow.init {:a 5})]
+    (dataflow.dissoc-in db [:a :b])
+    (assert (= (rawget db :a) 5) "dissoc-in through a scalar leaves the value")))
+
+;; --- subscribe restores tracking when a query fn errors ---
+;; Without the restore, the orphaned tracking table collects every later
+;; top-level read forever (unbounded growth, phantom deps).
+
+(fn t.test-subscribe-restores-tracking-on-query-error []
+  (setup)
+  (dataflow.init {:x 1})
+  (dataflow.reg-sub :sub/bad (fn [db] (error "query boom")))
+  (let [(ok _) (pcall dataflow.subscribe :sub/bad)]
+    (assert (not ok) "erroring query fn propagates"))
+  (assert (= (dataflow._get-tracking) nil)
+          "tracking restored to nil after a query error"))
+
 t

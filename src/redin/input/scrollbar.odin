@@ -20,6 +20,44 @@ Scrollbar_Dragging :: struct {
 
 Scrollbar_State :: union { Scrollbar_Hovering, Scrollbar_Dragging }
 
+// Minimum on-screen thumb length in px — keeps the thumb grabbable when
+// total content dwarfs the viewport.
+SCROLLBAR_MIN_THUMB :: f32(20)
+
+// Geometry of a scrollbar thumb along one axis.
+Thumb_Geometry :: struct {
+	pos:        f32, // absolute y (axis .Y) or x (axis .X) of the thumb start
+	len:        f32, // thumb length along the axis
+	max_travel: f32, // gutter length minus thumb length
+	max_scroll: f32, // total content minus viewport
+}
+
+// Derive thumb geometry from the container's *content* rect (post-
+// padding). The draw side (render.draw_box_children) and the hit-test
+// side (apply_scrollbar) must both call this with the same rect — when
+// they computed it independently, the hit-test side used the outer node
+// rect and the drawn thumb disagreed with the clickable one by the
+// padding amount.
+thumb_geometry :: proc(
+	content: rl.Rectangle,
+	total:   f32,
+	off:     f32,
+	axis:    Scrollbar_Axis,
+) -> Thumb_Geometry {
+	viewport := axis == .Y ? content.height : content.width
+	start    := axis == .Y ? content.y : content.x
+	len        := max(viewport * (viewport / total), SCROLLBAR_MIN_THUMB)
+	max_travel := viewport - len
+	max_scroll := total - viewport
+	ratio      := off / max_scroll if max_scroll > 0 else 0
+	return {
+		pos        = start + ratio * max_travel,
+		len        = len,
+		max_travel = max_travel,
+		max_scroll = max_scroll,
+	}
+}
+
 scrollbar: Scrollbar_State
 
 // True for the rest of the frame after apply_scrollbar consumed a
@@ -42,7 +80,10 @@ scrollbar_container_idx :: proc() -> int {
 apply_scrollbar :: proc(
 	events:         []types.InputEvent,
 	nodes:          []types.Node,
-	node_rects:     []rl.Rectangle,
+	// Content rects (post-padding), NOT outer node rects — the drawn bar
+	// lives inside the content rect, so hit-testing must use the same
+	// rect or drawn and clickable thumbs disagree on padded containers.
+	content_rects:  []rl.Rectangle,
 	scroll_info:    map[int]types.Scroll_Info,
 	scroll_offsets: ^map[int]f32,
 	theme:          map[string]types.Theme,
@@ -50,7 +91,7 @@ apply_scrollbar :: proc(
 	scrollbar_consumed_press = false
 
 	// Re-flatten safety.
-	if idx := scrollbar_container_idx(); idx >= 0 && idx >= len(node_rects) {
+	if idx := scrollbar_container_idx(); idx >= 0 && idx >= len(content_rects) {
 		scrollbar = nil
 	}
 
@@ -59,26 +100,20 @@ apply_scrollbar :: proc(
 
 	// Currently dragging? Update offset based on cursor y.
 	if drag_state, dragging := scrollbar.(Scrollbar_Dragging); dragging {
-		container := node_rects[drag_state.container_idx]
+		container := content_rects[drag_state.container_idx]
 		info := scroll_info[drag_state.container_idx]
 
 		if drag_state.axis == .Y && info.total > container.height {
-			gutter_top := container.y
-			thumb_h    := max(container.height * (container.height / info.total), 20)
-			max_thumb  := container.height - thumb_h
-			max_scroll := info.total - container.height
-			new_y_in_gutter := mouse.y - gutter_top - drag_state.grab_offset_in_thumb
+			g := thumb_geometry(container, info.total, 0, .Y)
+			new_y_in_gutter := mouse.y - container.y - drag_state.grab_offset_in_thumb
 			scroll_offsets[drag_state.container_idx] = drag_offset_for_thumb_y(
-				new_y_in_gutter, max_thumb, max_scroll,
+				new_y_in_gutter, g.max_travel, g.max_scroll,
 			)
 		} else if drag_state.axis == .X && info.total > container.width {
-			gutter_left := container.x
-			thumb_w    := max(container.width * (container.width / info.total), 20)
-			max_thumb  := container.width - thumb_w
-			max_scroll := info.total - container.width
-			new_x_in_gutter := mouse.x - gutter_left - drag_state.grab_offset_in_thumb
+			g := thumb_geometry(container, info.total, 0, .X)
+			new_x_in_gutter := mouse.x - container.x - drag_state.grab_offset_in_thumb
 			scroll_offsets[drag_state.container_idx] = drag_offset_for_thumb_y(
-				new_x_in_gutter, max_thumb, max_scroll,
+				new_x_in_gutter, g.max_travel, g.max_scroll,
 			)
 		}
 
@@ -96,8 +131,8 @@ apply_scrollbar :: proc(
 	hovered_idx := -1
 	hovered_axis: Scrollbar_Axis = .Y
 	for idx, info in scroll_info {
-		if idx < 0 || idx >= len(node_rects) do continue
-		container := node_rects[idx]
+		if idx < 0 || idx >= len(content_rects) do continue
+		container := content_rects[idx]
 		if info.total > container.height {
 			gutter := rl.Rectangle{
 				container.x + container.width - bar_w - 4,
@@ -128,55 +163,47 @@ apply_scrollbar :: proc(
 			me, ok := event.(types.MouseEvent)
 			if !ok || me.button != .LEFT do continue
 
-			container := node_rects[hovered_idx]
+			container := content_rects[hovered_idx]
 			info := scroll_info[hovered_idx]
 			cur_off := scroll_offsets[hovered_idx]
 
 			if hovered_axis == .Y {
-				gutter_top := container.y
-				thumb_h    := max(container.height * (container.height / info.total), 20)
-				max_thumb  := container.height - thumb_h
-				max_scroll := info.total - container.height
-				thumb_y    := gutter_top + (cur_off / max_scroll if max_scroll > 0 else 0) * max_thumb
+				g := thumb_geometry(container, info.total, cur_off, .Y)
 
-				if mouse.y >= thumb_y && mouse.y <= thumb_y + thumb_h {
+				if mouse.y >= g.pos && mouse.y <= g.pos + g.len {
 					scrollbar = Scrollbar_Dragging{
 						hovering = Scrollbar_Hovering{
 							container_idx = hovered_idx, axis = .Y,
 						},
-						grab_offset_in_thumb = mouse.y - thumb_y,
+						grab_offset_in_thumb = mouse.y - g.pos,
 					}
-				} else if mouse.y < thumb_y {
+				} else if mouse.y < g.pos {
 					new := cur_off - container.height
 					if new < 0 do new = 0
 					scroll_offsets[hovered_idx] = new
 				} else {
 					new := cur_off + container.height
-					if new > max_scroll do new = max_scroll
+					if new > g.max_scroll do new = g.max_scroll
 					scroll_offsets[hovered_idx] = new
 				}
 				consumed_press = true
 			} else {
-				gutter_left := container.x
-				thumb_w    := max(container.width * (container.width / info.total), 20)
-				max_thumb  := container.width - thumb_w
-				max_scroll := info.total - container.width
-				thumb_x    := gutter_left + (cur_off / max_scroll if max_scroll > 0 else 0) * max_thumb
+				g := thumb_geometry(container, info.total, cur_off, .X)
 
-				if mouse.x >= thumb_x && mouse.x <= thumb_x + thumb_w {
+				if mouse.x >= g.pos && mouse.x <= g.pos + g.len {
 					scrollbar = Scrollbar_Dragging{
 						hovering = Scrollbar_Hovering{
 							container_idx = hovered_idx, axis = .X,
 						},
-						grab_offset_in_thumb = mouse.x - thumb_x,
+						grab_offset_in_thumb = mouse.x - g.pos,
 					}
-				} else if mouse.x < thumb_x {
+				} else if mouse.x < g.pos {
 					new := cur_off - container.width
 					if new < 0 do new = 0
 					scroll_offsets[hovered_idx] = new
 				} else {
 					new := cur_off + container.width
-					if new > max_scroll do new = max_scroll
+					if new > g.max_scroll do new = g.max_scroll
 					scroll_offsets[hovered_idx] = new
 				}
 				consumed_press = true

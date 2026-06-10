@@ -41,6 +41,12 @@ Replaces `app-db` with the given table (or `{}` if nil). Returns the new `app-db
 (get-in db [:user :name] "anonymous")  ;; tracks [:user :name], returns "anonymous" if nil
 ```
 
+A path that crosses a non-table value (e.g. `(get-in db [:a :b])` when
+`db.a` is a number) reads as missing — the default (or `nil`) is returned.
+The write-side walkers raise a clear error on the same shape mismatch
+(`assoc-in: path crosses non-table value at key 'a'`); `dissoc-in`
+treats it as a no-op.
+
 #### Writes
 
 | Function    | Signature                  | Purpose                           |
@@ -123,7 +129,7 @@ end)
      :log  "fetching items..."}))
 ```
 
-The `:db` key is extracted as the new state. All other keys are passed to the effect system. See [Effects](#effects) below.
+The `:db` key is extracted as the new state. Normally it holds the accessor (which `assoc`/`update` already mutated in place); a handler that builds a fresh table instead gets it installed as the new state, and every subscription is invalidated. All other keys are passed to the effect system. The `:db` key may be omitted entirely for an effects-only handler (e.g. `{:dispatch-later {...}}`). See [Effects](#effects) below.
 
 ### `dispatch(event)`
 
@@ -306,7 +312,7 @@ Declarative side effects. Handlers return pure data describing what should happe
 
 ### How effects work
 
-When a handler returns an fx map (a table with a `:db` key plus other keys):
+When a handler returns an fx map (any table other than the db accessor):
 
 ```fennel
 {:db   (assoc db :loading true)   ;; extracted by dataflow, not passed to effects
@@ -314,7 +320,10 @@ When a handler returns an fx map (a table with a `:db` key plus other keys):
  :log  "hello"}                   ;; passed to :log executor
 ```
 
-1. Dataflow extracts `:db` and applies the recorded path changes
+1. Dataflow extracts `:db` and applies the recorded path changes. If `:db`
+   is a fresh table (not the accessor), it is installed as the new state and
+   all subscriptions are invalidated. An fx map with no `:db` key is
+   effects-only.
 2. The remaining keys are passed to `effect.execute`
 3. For each key, the registered executor is called with the value
 4. Unknown keys produce a warning (no crash)

@@ -944,32 +944,27 @@ draw_box_children :: proc(
 		fixed_total := info.total
 		scroll_off := info.off
 
+		// Thumb geometry comes from the shared input.thumb_geometry so the
+		// drawn thumb and the hit-tested thumb (apply_scrollbar) can never
+		// drift apart. Both derive from the content rect.
 		if scrollable_y && fixed_total > content_rect.height {
 			t := resolve_scrollbar_theme(idx, theme)
 			bar_w := f32(t.border_width if t.border_width > 0 else 4)
 			bar_x := content_rect.x + content_rect.width - bar_w
-			visible_ratio := content_rect.height / fixed_total
-			bar_h := max(content_rect.height * visible_ratio, 20)
-			max_scroll := fixed_total - content_rect.height
-			scroll_ratio := scroll_off / max_scroll if max_scroll > 0 else 0
-			bar_y := content_rect.y + scroll_ratio * (content_rect.height - bar_h)
+			g := input.thumb_geometry(content_rect, fixed_total, scroll_off, .Y)
 			roundness := f32(t.radius) * 2 / bar_w if bar_w > 0 else 1
 			rl.DrawRectangleRounded(
-				{bar_x, bar_y, bar_w, bar_h}, roundness, 4,
+				{bar_x, g.pos, bar_w, g.len}, roundness, 4,
 				scrollbar_color(t),
 			)
 		} else if scrollable_x && fixed_total > content_rect.width {
 			t := resolve_scrollbar_theme(idx, theme)
 			bar_h := f32(t.border_width if t.border_width > 0 else 4)
 			bar_y := content_rect.y + content_rect.height - bar_h
-			visible_ratio := content_rect.width / fixed_total
-			bar_w := max(content_rect.width * visible_ratio, 20)
-			max_scroll := fixed_total - content_rect.width
-			scroll_ratio := scroll_off / max_scroll if max_scroll > 0 else 0
-			bar_x := content_rect.x + scroll_ratio * (content_rect.width - bar_w)
+			g := input.thumb_geometry(content_rect, fixed_total, scroll_off, .X)
 			roundness := f32(t.radius) * 2 / bar_h if bar_h > 0 else 1
 			rl.DrawRectangleRounded(
-				{bar_x, bar_y, bar_w, bar_h}, roundness, 4,
+				{g.pos, bar_y, g.len, bar_h}, roundness, 4,
 				scrollbar_color(t),
 			)
 		}
