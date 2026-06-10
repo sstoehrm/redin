@@ -4,6 +4,10 @@
 ;; textured forest glade under a graded twilight sky (moon, stars, distant
 ;; treeline), with the todo list as a translucent field-journal card resting
 ;; on the right. Each todo is a leaf; adding sprouts one, removing drops one.
+;;
+;; The list seeds TREEDO_ITEMS todos (default 100). Crank it up to stress
+;; the render/layout/scroll and leaf-canopy paths under a profile build:
+;;   TREEDO_ITEMS=10000 ./build/redin examples/treedo.fnl   # then GET /profile
 
 (local dataflow (require :dataflow))
 (local theme-mod (require :theme))
@@ -479,10 +483,24 @@
 
 (global redin_get_state (. dataflow :_get-raw-db))
 
-(dataflow.init {:items [{:text "Plant the seed"        :born 0}
-                        {:text "Water the sapling"     :born 0}
-                        {:text "Watch the canopy grow" :born 0}
-                        {:text "Sweep the leaves"      :born 0}]
+;; Seed count from TREEDO_ITEMS (default 100). The four named todos lead;
+;; the rest are generated. born=0 renders every seeded leaf at full growth
+;; (no per-frame growth animation skew when profiling).
+(local starter ["Plant the seed"
+                "Water the sapling"
+                "Watch the canopy grow"
+                "Sweep the leaves"])
+
+(local seed-count (or (tonumber (os.getenv "TREEDO_ITEMS")) 100))
+
+(local seed-items
+       (let [out []]
+         (for [i 1 seed-count]
+           (table.insert out {:text (or (. starter i) (.. "Todo item #" i))
+                              :born 0}))
+         out))
+
+(dataflow.init {:items seed-items
                 :input-value ""
                 :drag-start-time nil
                 :falling-leaves []})
