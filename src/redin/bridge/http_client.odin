@@ -625,10 +625,18 @@ execute_http_request :: proc(req: Http_Request, client: ^Http_Client = nil) -> H
 	if req_err != nil {
 		// `request_on` leaves socket ownership with us on error.
 		net.close(sock)
-		// #162 L4: generic to the caller, detail to stderr.
+		// #162 L4: generic to the caller, detail to stderr. Certificate
+		// rejection is the one distinguishable case: the app must be able
+		// to tell a possible MITM from an unreachable host, and the
+		// message reveals nothing about the response.
 		fmt.eprintfln("redin: http request failed for %s: %v", url_host(req.url), req_err)
 		response.status = 0
-		response.error_msg = strings.clone("http request failed")
+		ssl_err, is_ssl := req_err.(http_client.SSL_Error)
+		if is_ssl && ssl_err == .Certificate_Verification_Failed {
+			response.error_msg = strings.clone("tls certificate verification failed")
+		} else {
+			response.error_msg = strings.clone("http request failed")
+		}
 		return response
 	}
 	// Success: ownership of `sock` transferred to `res`; closed by the
