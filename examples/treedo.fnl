@@ -72,22 +72,67 @@
                   [0.40 (. pal :sky-mid)]
                   [1.0  (. pal :sky-top)]])
 
-;; ===== Tree geometry =====
-;; Trunk height; branch attach/tip offsets relative to the trunk base
-;; (bx, by). Branch entry: [ax-off ay-off tx-off ty-off nslots].
-;; 8 branches (4 pairs, low → crown). Total leaf slots = 34.
+;; ===== Tree geometry: growth stages =====
+;; The tree's size tracks the todo count through hand-tuned stage
+;; templates (see docs/superpowers/specs/2026-06-10-treedo-growth-design.md).
+;; All offsets are relative to the trunk base (bx, by).
+;;   :min       count threshold at which the stage applies
+;;   :h         nominal height, used to keep visual height continuous
+;;              across stage-swap transitions
+;;   :trunk     {:h :w :lit} body height/width and lit-edge width (nil = none)
+;;   :thick     branch base thickness for paint-branch
+;;   :branches  [[ax ay tx ty nslots] ...] attach/tip offsets + slot count
+;;   :roots     [[x0 y0 x1 y1 thick] ...] paint-branch strokes
+;;   :knots     [[dx dy] ...] 5x5 bark-mid markers
+;;   :tip-slots [[dx dy] ...] explicit leaf slots (seedling stem tip)
+;; S5 reproduces the previous fixed tree exactly at rest (trunk 320x26,
+;; 8 branches, 34 slots).
 
-(local TRUNK-H 320)
+(local stages
+  [{:min 0 :h 10 :trunk nil :thick 0
+    :branches [] :roots [] :knots [] :tip-slots []}
+   {:min 1 :h 36 :trunk {:h 36 :w 4 :lit 1} :thick 0
+    :branches []
+    :roots [[0 -2 -10 6 3] [0 -2 10 6 3]]
+    :knots []
+    :tip-slots [[2 -38] [-4 -28]]}
+   {:min 5 :h 110 :trunk {:h 110 :w 10 :lit 3} :thick 6
+    :branches [[0 -70 -70 -120 3] [0 -78 72 -126 3]]
+    :roots [[0 -4 -24 12 5] [0 -4 24 12 5]]
+    :knots []
+    :tip-slots []}
+   {:min 20 :h 200 :trunk {:h 200 :w 16 :lit 4} :thick 8
+    :branches [[0 -90 -100 -165 4] [0 -100 102 -170 4]
+               [0 -140 -70 -218 3] [0 -146 72 -222 3]]
+    :roots [[0 -5 -40 18 6] [0 -5 40 18 6]
+            [0 -5 -18 24 4] [0 -5 18 24 4]]
+    :knots [[-5 -80]]
+    :tip-slots []}
+   {:min 50 :h 270 :trunk {:h 270 :w 22 :lit 6} :thick 10
+    :branches [[0 -100 -125 -180 5] [0 -112 127 -188 5]
+               [0 -160 -95 -260 4] [0 -168 96 -264 4]
+               [0 -215 -55 -310 3] [0 -220 56 -312 3]]
+    :roots [[0 -6 -52 22 7] [0 -6 52 22 7]
+            [0 -6 -24 30 5] [0 -6 24 30 5]]
+    :knots [[-7 -100] [-2 -195]]
+    :tip-slots []}
+   {:min 100 :h 320 :trunk {:h 320 :w 26 :lit 7} :thick 11
+    :branches [[0 -105 -140 -205 5] [0 -120 142 -212 5]
+               [0 -175 -112 -300 5] [0 -188 114 -306 5]
+               [0 -245 -64 -358 4] [0 -252 66 -360 4]
+               [0 -290 -28 -392 3] [0 -290 28 -392 3]]
+    :roots [[0 -6 -60 26 8] [0 -6 60 26 8]
+            [0 -6 -28 34 6] [0 -6 28 34 6]]
+    :knots [[-8 -120] [-2 -230]]
+    :tip-slots []}])
 
-(local branch-template
-       [[0 -105 -140 -205 5]
-        [0 -120  142 -212 5]
-        [0 -175 -112 -300 5]
-        [0 -188  114 -306 5]
-        [0 -245  -64 -358 4]
-        [0 -252   66 -360 4]
-        [0 -290  -28 -392 3]
-        [0 -290   28 -392 3]])
+;; Stages are ascending by :min; the last band the count reaches wins.
+(fn stage-for-count [n]
+  (var found (. stages 1))
+  (each [_ st (ipairs stages)]
+    (when (>= n st.min)
+      (set found st)))
+  found)
 
 ;; ===== Drawing primitives =====
 
@@ -172,34 +217,71 @@
         (table.insert out [sx sy])))
     out))
 
-(fn compute-leaf-slots [bx by]
-  (let [per []]
-    (each [_ b (ipairs branch-template)]
-      (table.insert per (branch-slots (+ bx (. b 1)) (+ by (. b 2))
-                                      (+ bx (. b 3)) (+ by (. b 4)) (. b 5))))
-    (let [out []]
+;; Slots for a stage at scale s: explicit tip slots first, then the
+;; branch slots ring-interleaved across branches (ring 0 = innermost
+;; slot of every branch) so the canopy fills evenly.
+(fn compute-stage-slots [stage bx by s]
+  (let [out []]
+    (each [_ t (ipairs stage.tip-slots)]
+      (table.insert out [(math.floor (+ bx (* (. t 1) s)))
+                         (math.floor (+ by (* (. t 2) s)))]))
+    (let [per []]
+      (each [_ b (ipairs stage.branches)]
+        (table.insert per (branch-slots (+ bx (* (. b 1) s)) (+ by (* (. b 2) s))
+                                        (+ bx (* (. b 3) s)) (+ by (* (. b 4) s))
+                                        (. b 5))))
       (for [ring 0 4]
         (each [_ slots (ipairs per)]
           (when (. slots (+ ring 1))
-            (table.insert out (. slots (+ ring 1))))))
-      out)))
+            (table.insert out (. slots (+ ring 1)))))))
+    out))
 
-(fn draw-tree [ctx bx by]
+;; Draw one stage template at uniform scale s anchored at the trunk
+;; base (bx, by). At s=1 every stage renders at its hand-drawn size.
+(fn draw-stage [ctx bx by stage s]
   ;; roots flaring into the ground
-  (paint-branch ctx bx (- by 6) (- bx 60) (+ by 26) 8)
-  (paint-branch ctx bx (- by 6) (+ bx 60) (+ by 26) 8)
-  (paint-branch ctx bx (- by 6) (- bx 28) (+ by 34) 6)
-  (paint-branch ctx bx (- by 6) (+ bx 28) (+ by 34) 6)
+  (each [_ r (ipairs stage.roots)]
+    (paint-branch ctx (+ bx (* (. r 1) s)) (+ by (* (. r 2) s))
+                  (+ bx (* (. r 3) s)) (+ by (* (. r 4) s))
+                  (math.max 2 (math.floor (* (. r 5) s)))))
   ;; trunk (lit edge on the right)
-  (ctx.rect (- bx 13) (- by TRUNK-H) 26 TRUNK-H {:fill (. pal :bark-dark)})
-  (ctx.rect (+ bx 6)  (- by TRUNK-H) 7  TRUNK-H {:fill (. pal :bark-mid)})
+  (when stage.trunk
+    (let [tr stage.trunk
+          th (math.max 2 (math.floor (* tr.h s)))
+          tw (math.max 2 (math.floor (* tr.w s)))
+          lit (math.floor (* tr.lit s))]
+      (ctx.rect (- bx (math.floor (/ tw 2))) (- by th) tw th
+                {:fill (. pal :bark-dark)})
+      (when (> lit 0)
+        (ctx.rect (- (+ bx (math.ceil (/ tw 2))) lit) (- by th) lit th
+                  {:fill (. pal :bark-mid)}))))
   ;; knot markers
-  (ctx.rect (- bx 8) (- by 120) 5 5 {:fill (. pal :bark-mid)})
-  (ctx.rect (- bx 2) (- by 230) 5 5 {:fill (. pal :bark-mid)})
+  (each [_ k (ipairs stage.knots)]
+    (ctx.rect (math.floor (+ bx (* (. k 1) s)))
+              (math.floor (+ by (* (. k 2) s))) 5 5
+              {:fill (. pal :bark-mid)}))
   ;; branches
-  (each [_ b (ipairs branch-template)]
-    (paint-branch ctx (+ bx (. b 1)) (+ by (. b 2))
-                  (+ bx (. b 3)) (+ by (. b 4)) 11)))
+  (each [_ b (ipairs stage.branches)]
+    (paint-branch ctx (+ bx (* (. b 1) s)) (+ by (* (. b 2) s))
+                  (+ bx (* (. b 3) s)) (+ by (* (. b 4) s))
+                  (math.max 3 (math.floor (* stage.thick s))))))
+
+;; Empty-list marker: a dirt hump with a seed peeking out where the
+;; trunk stood. Scales with s so the seedling visibly settles into it.
+;; The seed is bone-white — the path below runs gold stones, so a gold
+;; seed would vanish against them.
+(fn draw-seed-mound [ctx bx by s]
+  (ctx.rect (math.floor (- bx (* 18 s))) (math.floor (- by (* 5 s)))
+            (math.max 4 (math.floor (* 36 s))) (math.max 2 (math.floor (* 10 s)))
+            {:fill (. pal :ground-top)})
+  (ctx.rect (math.floor (- bx (* 12 s))) (math.floor (- by (* 9 s)))
+            (math.max 3 (math.floor (* 24 s))) (math.max 2 (math.floor (* 7 s)))
+            {:fill (. pal :bark-dark)})
+  (ctx.rect (math.floor (- bx (* 3 s))) (math.floor (- by (* 13 s)))
+            (math.max 2 (math.floor (* 6 s))) (math.max 2 (math.floor (* 6 s)))
+            {:fill (. pal :bone-white)})
+  (ctx.rect (math.floor (- bx (* 1 s))) (math.floor (- by (* 12 s)))
+            2 2 {:fill (. pal :sunset-gold)}))
 
 ;; ===== Canvas: forest-scene (full-window backdrop) =====
 
@@ -300,6 +382,14 @@
 
 ;; ===== Canvas: tree-of-life (full-window hero) =====
 
+;; Transition state for the growth stages: which stage is on screen and
+;; its current scale. After a stage swap the scale starts at
+;; old-visual-height / new-stage-height (visual height stays continuous)
+;; and eases to 1.0, where the stage rests at its hand-drawn size.
+(var shown-stage nil)
+(var shown-scale 1.0)
+(var last-tick nil)
+
 (canvas.register
   :tree-of-life
   (fn [ctx]
@@ -308,36 +398,56 @@
           bx (math.floor (* w 0.36))
           by (horizon-y h)
           now (redin.now)
-          slots (compute-leaf-slots bx by)
-          nslots (length slots)]
-      (draw-tree ctx bx by)
-      (let [items (subscribe :items)]
-        (each [i item (ipairs items)]
-          (let [slot-idx (% (- i 1) nslots)
-                slot     (. slots (+ slot-idx 1))
-                sx       (. slot 1)
-                sy       (. slot 2)
-                sway     (math.floor (* 1.5 (math.sin (+ (* now 1.3) i))))
-                body     (. leaf-cycle (+ 1 (% (- i 1) 3)))
-                lean     (if (= (% i 2) 0) :right :left)
-                age      (- now (or item.born 0))
-                growth   (math.min 1 (/ age 0.3))]
-            (draw-leaf-growing ctx (+ sx sway) sy body lean growth)))
-        (let [fallen (subscribe :falling-leaves)]
-          (each [_ entry (ipairs (or fallen []))]
-            (let [slot-idx (% entry.slot nslots)
-                  slot     (. slots (+ slot-idx 1))
-                  sx       (. slot 1)
-                  sy       (. slot 2)
-                  age      (- now entry.spawn)
-                  t        (/ age 1.8)
-                  body     (. leaf-cycle (+ 1 (% entry.slot 3)))
-                  draw-x   (math.floor (+ sx (* (math.sin (* age 4)) 10)))
-                  draw-y   (math.floor (+ sy (* 320 t t)))
-                  alpha    (math.max 0 (math.floor (* 255 (- 1 t))))
-                  lean     (if (= (% (+ entry.slot 1) 2) 0) :right :left)]
-              (when (< t 1)
-                (draw-leaf-fading ctx draw-x draw-y body lean alpha)))))))))
+          items (subscribe :items)
+          target (stage-for-count (length items))
+          dt (- now (or last-tick now))]
+      (set last-tick now)
+      ;; First frame starts settled: seeding 100 items shows the full
+      ;; tree with no startup animation.
+      (when (= shown-stage nil)
+        (set shown-stage target))
+      (when (~= target shown-stage)
+        (set shown-scale (/ (* shown-stage.h shown-scale) target.h))
+        (set shown-stage target))
+      ;; Exponential ease-out, ~0.9s to settle within 1%, then snap.
+      (set shown-scale (+ shown-scale (* (- 1 shown-scale) (math.min 1 (* dt 5)))))
+      (when (< (math.abs (- 1 shown-scale)) 0.01)
+        (set shown-scale 1.0))
+      (let [s shown-scale]
+        (if (= shown-stage.min 0)
+            (draw-seed-mound ctx bx by s)
+            (draw-stage ctx bx by shown-stage s))
+        (let [slots (compute-stage-slots shown-stage bx by s)
+              nslots (length slots)]
+          ;; nslots = 0 only at the seed mound; items is empty there and
+          ;; falling leaves are skipped (mod 0 is undefined).
+          (when (> nslots 0)
+            (each [i item (ipairs items)]
+              (let [slot-idx (% (- i 1) nslots)
+                    slot     (. slots (+ slot-idx 1))
+                    sx       (. slot 1)
+                    sy       (. slot 2)
+                    sway     (math.floor (* 1.5 (math.sin (+ (* now 1.3) i))))
+                    body     (. leaf-cycle (+ 1 (% (- i 1) 3)))
+                    lean     (if (= (% i 2) 0) :right :left)
+                    age      (- now (or item.born 0))
+                    growth   (math.min 1 (/ age 0.3))]
+                (draw-leaf-growing ctx (+ sx sway) sy body lean growth)))
+            (let [fallen (subscribe :falling-leaves)]
+              (each [_ entry (ipairs (or fallen []))]
+                (let [slot-idx (% entry.slot nslots)
+                      slot     (. slots (+ slot-idx 1))
+                      sx       (. slot 1)
+                      sy       (. slot 2)
+                      age      (- now entry.spawn)
+                      t        (/ age 1.8)
+                      body     (. leaf-cycle (+ 1 (% entry.slot 3)))
+                      draw-x   (math.floor (+ sx (* (math.sin (* age 4)) 10)))
+                      draw-y   (math.floor (+ sy (* 320 t t)))
+                      alpha    (math.max 0 (math.floor (* 255 (- 1 t))))
+                      lean     (if (= (% (+ entry.slot 1) 2) 0) :right :left)]
+                  (when (< t 1)
+                    (draw-leaf-fading ctx draw-x draw-y body lean alpha)))))))))))
 
 ;; ===== Canvas: vine (drag overlay) =====
 ;; Wraps the dragged row's preview with a growing vine + hanging tendrils.
