@@ -26,6 +26,11 @@ jobs:
         uses: laytan/setup-odin@8536d8fa450ec6f1bd9ddc84bbaaf16296c0051d  # v2.12.2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          # Pin the Odin release: the default tracks master, which broke
+          # core:sys/linux (Sig_Action) between dev-2026-04 and -06 and
+          # turned CI red repo-wide. dev-2026-04 is the line the tree
+          # builds and tests clean on. Bump deliberately, not silently.
+          release: dev-2026-04
 
       - name: Run Fennel tests
         run: luajit test/lua/runner.lua test/lua/test_*.fnl
@@ -93,6 +98,11 @@ jobs:
         uses: laytan/setup-odin@8536d8fa450ec6f1bd9ddc84bbaaf16296c0051d  # v2.12.2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          # Pin the Odin release: the default tracks master, which broke
+          # core:sys/linux (Sig_Action) between dev-2026-04 and -06 and
+          # turned CI red repo-wide. dev-2026-04 is the line the tree
+          # builds and tests clean on. Bump deliberately, not silently.
+          release: dev-2026-04
 
       - name: Run Fennel tests
         run: luajit test/lua/runner.lua test/lua/test_*.fnl
