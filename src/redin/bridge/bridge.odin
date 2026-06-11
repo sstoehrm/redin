@@ -2714,6 +2714,8 @@ string_to_key :: proc(name: string) -> rl.KeyboardKey {
 	case "7":         return .SEVEN
 	case "8":         return .EIGHT
 	case "9":         return .NINE
+	case "-":         return .MINUS
+	case "=":         return .EQUAL
 	case "shift":     return .LEFT_SHIFT
 	case "ctrl":      return .LEFT_CONTROL
 	case "alt":       return .LEFT_ALT
