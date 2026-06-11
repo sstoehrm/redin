@@ -661,7 +661,7 @@ push_mouse_buttons :: proc(L: ^Lua_State, parent_idx: i32, field: cstring, query
 
 // Build a Lua table with mouse state for canvas draw functions
 push_canvas_input_state :: proc(L: ^Lua_State, rect: rl.Rectangle) {
-	lua_createtable(L, 0, 6)
+	lua_createtable(L, 0, 8)
 	input_idx := lua_gettop(L)
 
 	m := input.mouse_pos()
@@ -678,6 +678,17 @@ push_canvas_input_state :: proc(L: ^Lua_State, rect: rl.Rectangle) {
 	push_mouse_buttons(L, input_idx, "mouse-down", input.is_mouse_button_down)
 	push_mouse_buttons(L, input_idx, "mouse-pressed", input.is_mouse_button_pressed)
 	push_mouse_buttons(L, input_idx, "mouse-released", input.is_mouse_button_released)
+
+	// Raw raylib wheel deltas for this frame. GetMouseWheelMoveV is a pure
+	// read of the frame's stored value (not consume-once), so reading it
+	// here during render does not race the input poll. The shift→horizontal
+	// promotion in input.poll() is intentionally not replicated — providers
+	// gate on mouse-in? / shift themselves.
+	wheel := rl.GetMouseWheelMoveV()
+	lua_pushnumber(L, f64(wheel.x))
+	lua_setfield(L, input_idx, "wheel-x")
+	lua_pushnumber(L, f64(wheel.y))
+	lua_setfield(L, input_idx, "wheel-y")
 }
 
 // ---------------------------------------------------------------------------

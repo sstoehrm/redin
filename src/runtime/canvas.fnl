@@ -36,6 +36,8 @@
      :mouse-released? (fn [?btn]
                         (let [tbl (. input :mouse-released)]
                           (if tbl (. tbl (or ?btn :left)) false)))
+     :wheel-x (fn [] (or (. input :wheel-x) 0))
+     :wheel-y (fn [] (or (. input :wheel-y) 0))
      :key-down? (fn [key]
                   (let [redin-tbl (rawget _G :redin)]
                     (if (and redin-tbl (rawget redin-tbl :key_down))
