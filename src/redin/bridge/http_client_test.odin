@@ -15,6 +15,7 @@ import "core:fmt"
 import "core:log"
 import "core:mem"
 import "core:net"
+import "core:os"
 import "core:strings"
 import "core:sync"
 import "core:testing"
@@ -946,4 +947,197 @@ test_http_malformed_response_no_header_leak :: proc(t: ^testing.T) {
 	testing.expectf(t, leaks == 0,
 		"malformed response leaked %d allocation(s) — parse_response must free its partial headers (#177)",
 		leaks)
+}
+
+// ---------------------------------------------------------------------------
+// TLS certificate verification (vendored odin-http client).
+//
+// The HTTPS branch of lib/odin-http/client previously created its
+// SSL_CTX with OpenSSL's default SSL_VERIFY_NONE and set no expected
+// hostname, so ANY certificate — self-signed, expired, wrong host —
+// was accepted silently. `redin.http` over https was MITM-able.
+//
+// The test drives a real `openssl s_server` with certs generated at
+// test time. Three scenarios run inside ONE test proc because
+// SSL_CERT_FILE is process-global state and ordering must stay
+// deterministic:
+//   a) no trust configured → self-signed server must be REJECTED
+//   b) SSL_CERT_FILE=good  → trusted cert with matching IP SAN succeeds
+//   c) SSL_CERT_FILE=bad   → trusted cert WITHOUT 127.0.0.1 in its SAN
+//      must be REJECTED (hostname/IP verification)
+// (SSL_CTX_set_default_verify_paths honours SSL_CERT_FILE per request,
+// and the client builds a fresh SSL_CTX per request.)
+//
+// Requires the `openssl` CLI (present on dev machines and ubuntu CI).
+
+@(private = "file")
+TLS_TEST_DIR :: "/tmp/redin-tls-verify-test"
+
+@(private = "file")
+run_openssl :: proc(args: []string) -> bool {
+	desc := os.Process_Desc {
+		command = args,
+	}
+	process, err := os.process_start(desc)
+	if err != nil do return false
+	state, wait_err := os.process_wait(process)
+	return wait_err == nil && state.exit_code == 0
+}
+
+// Bind port 0 on loopback to find a free port, then release it for
+// s_server. (Small bind race, fine for tests.)
+@(private = "file")
+tls_free_port :: proc() -> int {
+	s, err := net.listen_tcp(net.Endpoint{address = net.IP4_Loopback, port = 0})
+	if err != nil do return -1
+	defer net.close(s)
+	ep, ep_err := net.bound_endpoint(s)
+	if ep_err != nil do return -1
+	return ep.port
+}
+
+// Start `openssl s_server` and wait until it accepts TCP connections.
+@(private = "file")
+start_tls_server :: proc(cert, key: string, port: int) -> (process: os.Process, ok: bool) {
+	desc := os.Process_Desc {
+		command = []string{
+			"openssl", "s_server",
+			"-accept", fmt.tprintf("127.0.0.1:%d", port),
+			"-cert", cert, "-key", key,
+			"-www", "-quiet",
+		},
+	}
+	p, err := os.process_start(desc)
+	if err != nil do return p, false
+	ep := net.Endpoint{address = net.IP4_Loopback, port = port}
+	for _ in 0 ..< 100 {
+		s, dial_err := net.dial_tcp(ep)
+		if dial_err == nil {
+			net.close(s)
+			return p, true
+		}
+		time.sleep(50 * time.Millisecond)
+	}
+	_ = os.process_kill(p)
+	_, _ = os.process_wait(p)
+	return p, false
+}
+
+@(private = "file")
+stop_tls_server :: proc(process: os.Process) {
+	_ = os.process_kill(process)
+	_, _ = os.process_wait(process)
+}
+
+@(private = "file")
+tls_get :: proc(url: string) -> Http_Response {
+	req := Http_Request {
+		id     = strings.clone("tls-test"),
+		url    = strings.clone(url),
+		method = strings.clone("GET"),
+	}
+	defer {
+		delete(req.id)
+		delete(req.url)
+		delete(req.method)
+	}
+	return execute_http_request(req)
+}
+
+@(private = "file")
+tls_response_free :: proc(got: ^Http_Response) {
+	delete(got.body)
+	delete(got.error_msg)
+	for k, v in got.headers {
+		delete(k)
+		delete(v)
+	}
+	delete(got.headers)
+}
+
+@(test)
+test_https_verifies_certificates :: proc(t: ^testing.T) {
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+	allow_open_http()
+	defer set_http_whitelist(nil)
+
+	if !os.exists(TLS_TEST_DIR) {
+		if os.make_directory(TLS_TEST_DIR) != nil {
+			testing.fail_now(t, "cannot create scratch dir " + TLS_TEST_DIR)
+		}
+	}
+
+	good_cert :: TLS_TEST_DIR + "/good-cert.pem"
+	good_key :: TLS_TEST_DIR + "/good-key.pem"
+	bad_cert :: TLS_TEST_DIR + "/bad-cert.pem"
+	bad_key :: TLS_TEST_DIR + "/bad-key.pem"
+
+	// Self-signed cert whose SAN covers how the test connects.
+	if !run_openssl([]string{
+		"openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+		"-keyout", good_key, "-out", good_cert, "-days", "1",
+		"-subj", "/CN=redin-tls-test-good",
+		"-addext", "subjectAltName=IP:127.0.0.1",
+	}) {
+		testing.fail_now(t, "openssl req failed (good cert) — is the openssl CLI installed?")
+	}
+	// Self-signed cert whose SAN deliberately does NOT cover 127.0.0.1.
+	if !run_openssl([]string{
+		"openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+		"-keyout", bad_key, "-out", bad_cert, "-days", "1",
+		"-subj", "/CN=redin-tls-test-bad",
+		"-addext", "subjectAltName=DNS:wronghost.invalid",
+	}) {
+		testing.fail_now(t, "openssl req failed (bad cert)")
+	}
+
+	port := tls_free_port()
+	if port <= 0 do testing.fail_now(t, "no free loopback port")
+	server, server_ok := start_tls_server(good_cert, good_key, port)
+	if !server_ok do testing.fail_now(t, "openssl s_server did not come up")
+
+	url := fmt.aprintf("https://127.0.0.1:%d/", port)
+	defer delete(url)
+
+	// (a) No trust store configured: the self-signed cert must be
+	// rejected, not silently accepted.
+	got_a := tls_get(url)
+	testing.expect(t, got_a.status == 0,
+		fmt.tprintf("untrusted self-signed cert was ACCEPTED (status %d)", got_a.status))
+	testing.expect(t, strings.contains(got_a.error_msg, "certificate"),
+		fmt.tprintf("expected a certificate error, got %q", got_a.error_msg))
+	tls_response_free(&got_a)
+
+	// (b) Trusted via SSL_CERT_FILE and the IP SAN matches: succeeds.
+	// Proves verification doesn't break the https happy path.
+	if os.set_env("SSL_CERT_FILE", good_cert) != nil {
+		stop_tls_server(server)
+		testing.fail_now(t, "set_env failed")
+	}
+	defer _ = os.unset_env("SSL_CERT_FILE")
+	got_b := tls_get(url)
+	testing.expect(t, got_b.status == 200,
+		fmt.tprintf("trusted matching cert should give 200, got %d (%q)",
+			got_b.status, got_b.error_msg))
+	tls_response_free(&got_b)
+	stop_tls_server(server)
+
+	// (c) Trusted issuer but the SAN does not cover 127.0.0.1: hostname
+	// verification must reject it.
+	port2 := tls_free_port()
+	if port2 <= 0 do testing.fail_now(t, "no free loopback port (2)")
+	server2, server2_ok := start_tls_server(bad_cert, bad_key, port2)
+	if !server2_ok do testing.fail_now(t, "openssl s_server (2) did not come up")
+	defer stop_tls_server(server2)
+	_ = os.set_env("SSL_CERT_FILE", bad_cert)
+
+	url2 := fmt.aprintf("https://127.0.0.1:%d/", port2)
+	defer delete(url2)
+	got_c := tls_get(url2)
+	testing.expect(t, got_c.status == 0,
+		fmt.tprintf("hostname-mismatched cert was ACCEPTED (status %d)", got_c.status))
+	testing.expect(t, strings.contains(got_c.error_msg, "certificate"),
+		fmt.tprintf("expected a certificate error, got %q", got_c.error_msg))
+	tls_response_free(&got_c)
 }

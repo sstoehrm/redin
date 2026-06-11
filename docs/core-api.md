@@ -87,6 +87,7 @@ For most apps this is fine — the app author chose the URL. If your app embeds 
 Always-on guards (no opt-out):
 
 - **Scheme:** only `http` and `https` URLs are accepted. Other schemes (e.g. `file://`, `ftp://`) fail with `{status: 0, error: "http scheme must be http or https"}`.
+- **TLS verification:** `https` connections verify the server certificate against the system trust store and check the hostname/IP against the certificate's SANs. Rejection fails with `{status: 0, error: "tls certificate verification failed"}`. Custom CAs via the standard `SSL_CERT_FILE`/`SSL_CERT_DIR` environment variables; there is no insecure opt-out.
 - **Headers:** any header key/value containing `\r`, `\n`, or `\x00` fails with `{status: 0, error: "http header contains invalid character"}` (defence against header-splitting).
 - **Redirects:** 3xx responses are **not** auto-followed. The status, headers (including `Location`), and body surface to the caller as-is.
 - **Body cap:** 16 MiB cap on response bodies; oversized responses fail with "Response body too large".
