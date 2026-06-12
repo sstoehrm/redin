@@ -138,7 +138,14 @@ shell_client_request :: proc(sc: ^Shell_Client, req: Shell_Request) {
 	// Count this worker before it starts so shell_client_destroy can wait
 	// for it (#166). The worker decrements last, after its final access.
 	sync.atomic_add(&sc.workers_alive, 1)
-	thread.create_and_start_with_data(data, shell_thread_proc, self_cleanup = true)
+	// Pass the caller's context so the worker allocates Shell_Response
+	// strings (and frees the request + thread data) with the same allocator
+	// the main thread uses on its side of the handoff. Without this, the
+	// worker runs under `runtime.default_context()` (heap), and the main
+	// thread's tracking allocator (REDIN_TRACK_MEM) hits a bad-free
+	// assertion -> SIGILL when it frees the response (#214). Mirrors
+	// Http_Client; core:thread swaps in a per-thread temp allocator.
+	thread.create_and_start_with_data(data, shell_thread_proc, init_context = context, self_cleanup = true)
 }
 
 shell_client_poll :: proc(sc: ^Shell_Client, results: ^[dynamic]Shell_Response) {

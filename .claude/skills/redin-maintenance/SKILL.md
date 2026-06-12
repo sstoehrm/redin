@@ -72,7 +72,7 @@ Every non-OPTIONS request to the dev server needs `Authorization: Bearer <token>
 
 ### Available test suites
 
-`smoke`, `input`, `button`, `canvas`, `drag`, `image`, `line_height`, `modal`, `multiline`, `popout`, `resize`, `scroll`, `scroll_x`, `shadow`, `text_select`, `viewport`, `animate`, `devserver_pool`
+`agent`, `animate`, `button`, `canvas`, `canvas_override_press`, `devserver_pool`, `drag`, `hover_active`, `image`, `input`, `input_parsing`, `json_limits`, `line_height`, `markdown`, `modal`, `multiline`, `nested_click`, `popout`, `profile`, `resize`, `scroll`, `scroll_clip`, `scroll_x`, `scrollbar_drag`, `scrollbar_padded`, `shadow`, `shell`, `smoke`, `text_select`, `viewport`
 
 ### Drag tests and the mouse-takeover pipeline
 
