@@ -101,6 +101,10 @@ All coordinates are canvas-relative. Input state is passed from Odin when invoki
 ;; Mouse inside canvas bounds
 (ctx.mouse-in?)
 
+;; Mouse wheel deltas this frame (0 when idle); gate on mouse-in? as needed
+(ctx.wheel-x)   ;; horizontal scroll delta (raw raylib; shift→horiz promotion not applied)
+(ctx.wheel-y)   ;; vertical scroll delta
+
 ;; Keyboard (when canvas has focus)
 (ctx.key-down? :space)
 (ctx.key-pressed? :enter)

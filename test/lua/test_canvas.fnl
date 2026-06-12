@@ -221,6 +221,28 @@
     (assert (= (length dispatched) 1) "one event dispatched")
     (assert (= (. (. dispatched 1) 1) :test-event) "event name")))
 
+;; --- wheel input queries ---
+
+(fn t.test-wheel-queries-pass-through []
+  (canvas._reset)
+  (var seen nil)
+  (canvas.register :wheel-test
+                   (fn [ctx]
+                     (set seen [(ctx.wheel-x) (ctx.wheel-y)])))
+  (canvas._draw :wheel-test 100 100 {:wheel-x 1.5 :wheel-y -2})
+  (assert (= (. seen 1) 1.5) "wheel-x passes through")
+  (assert (= (. seen 2) -2) "wheel-y passes through"))
+
+(fn t.test-wheel-queries-default-zero []
+  (canvas._reset)
+  (var seen nil)
+  (canvas.register :wheel-default
+                   (fn [ctx]
+                     (set seen [(ctx.wheel-x) (ctx.wheel-y)])))
+  (canvas._draw :wheel-default 100 100 {})
+  (assert (= (. seen 1) 0) "wheel-x defaults to 0")
+  (assert (= (. seen 2) 0) "wheel-y defaults to 0"))
+
 ;; --- init wiring ---
 
 (fn t.test-canvas-global-set-after-register-globals []
