@@ -506,6 +506,39 @@ test_http_whitelist_hostname_case_insensitive :: proc(t: ^testing.T) {
 }
 
 @(test)
+test_http_whitelist_host_trailing_dot :: proc(t: ^testing.T) {
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+
+	// #217 M1: DNS treats "example.com" and the fully-qualified "example.com."
+	// (with the explicit root label) as the same name. A whitelist entry
+	// written without the trailing dot must still match a URL host that
+	// carries one — otherwise a user sees a confusing denial and is tempted
+	// to widen the whitelist to work around it.
+	set_http_whitelist([]string{"example.com"})
+	defer set_http_whitelist(nil)
+
+	rejected, ok := http_whitelist_check("example.com.")
+	testing.expect(t, ok, "fully-qualified host should match dotless whitelist entry")
+	testing.expect_value(t, rejected, "")
+}
+
+@(test)
+test_http_whitelist_entry_trailing_dot :: proc(t: ^testing.T) {
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+
+	// Symmetric case: the root dot is on the whitelist entry instead of the
+	// host. Normalization must strip it from both sides before comparing.
+	set_http_whitelist([]string{"example.com."})
+	defer set_http_whitelist(nil)
+
+	rejected, ok := http_whitelist_check("example.com")
+	testing.expect(t, ok, "dotless host should match trailing-dot whitelist entry")
+	testing.expect_value(t, rejected, "")
+}
+
+@(test)
 test_http_whitelist_cidr_match :: proc(t: ^testing.T) {
 	resp := "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
 	m := mock_start(resp)

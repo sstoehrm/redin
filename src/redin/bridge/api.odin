@@ -564,6 +564,17 @@ set_http_whitelist :: proc(allow: []string) {
 	}
 }
 
+// #217 M1: DNS treats a hostname carrying an explicit trailing root-label dot
+// ("example.com.") as equivalent to the dotless form ("example.com"). Strip a
+// single trailing dot so whitelist comparisons match regardless of which side
+// carries it. Only one dot is removed — a bare "." or a "..": suffix is left
+// as-is so a degenerate entry can't normalize to "" and match everything.
+@(private = "file")
+strip_trailing_dot :: proc(s: string) -> string {
+	if len(s) > 1 && s[len(s) - 1] == '.' do return s[:len(s) - 1]
+	return s
+}
+
 // http_whitelist_check reports whether an *explicit* entry (hostname
 // literal, case-insensitive, or CIDR) matches `host`, or the class is All.
 // It is the string-level check used directly by unit tests; the live
@@ -585,7 +596,7 @@ http_whitelist_check :: proc(host: string) -> (rejected: string, ok: bool) {
 			continue
 		}
 		entry_lower := strings.to_lower(entry, context.temp_allocator)
-		if host_lower == entry_lower do return "", true
+		if strip_trailing_dot(host_lower) == strip_trailing_dot(entry_lower) do return "", true
 	}
 	return host, false
 }
@@ -612,7 +623,7 @@ http_access_allowed :: proc(host: string, addr: net.Address) -> bool {
 			continue
 		}
 		entry_lower := strings.to_lower(entry, context.temp_allocator)
-		if host_lower == entry_lower do return true
+		if strip_trailing_dot(host_lower) == strip_trailing_dot(entry_lower) do return true
 	}
 
 	switch a in addr {

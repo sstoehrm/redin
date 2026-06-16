@@ -528,6 +528,13 @@ handle_one_connection :: proc(ds: ^Dev_Server, client: net.TCP_Socket, stack_buf
 		if total >= 4 {
 			req_str := string(buf[:total])
 			if header_end := strings.index(req_str, "\r\n\r\n"); header_end >= 0 {
+				// #217 M2: two Content-Length headers are ambiguous (a
+				// request-smuggling vector); find_content_length only sees the
+				// first. Reject outright rather than guess.
+				if header_count(req_str[:header_end], "content-length") > 1 {
+					bad_request = true
+					break
+				}
 				// Check Content-Length for body
 				cl := find_content_length(req_str[:header_end])
 				body_start := header_end + 4
@@ -622,14 +629,12 @@ handle_one_connection :: proc(ds: ^Dev_Server, client: net.TCP_Socket, stack_buf
 	// header lookup works with any leading line, and the second
 	// line onward are real headers.
 	headers := req_str
-	body := ""
 	if header_end := strings.index(req_str, "\r\n\r\n"); header_end >= 0 {
 		headers = req_str[:header_end]
-		body_start := header_end + 4
-		if body_start < total {
-			body = req_str[body_start:]
-		}
 	}
+	// #217 M2: bound the body to the declared Content-Length so bytes past it
+	// (a pipelined request that overshot into the buffer) never reach handlers.
+	body := extract_body(req_str)
 
 	// DNS-rebinding defence: require Host: localhost:<port> or
 	// 127.0.0.1:<port>. A malicious site resolving an attacker
@@ -834,6 +839,54 @@ find_content_length :: proc(headers: string) -> int {
 		}
 	}
 	return n
+}
+
+// extract_body returns the request body bounded by the declared
+// Content-Length. #217 M2: the read loop can leave `total` bytes exceeding
+// header_end+4+Content-Length — recv fills whatever buffer space remains, so a
+// pipelined byte that arrives with the headers overshoots into the slack of
+// the stack buffer. Slicing req_str[body_start:] would then leak those trailing
+// bytes into the body handed to handlers. Bound the slice to exactly the
+// announced length, and never past what actually arrived.
+extract_body :: proc(req_str: string) -> string {
+	header_end := strings.index(req_str, "\r\n\r\n")
+	if header_end < 0 do return ""
+	body_start := header_end + 4
+	if body_start >= len(req_str) do return ""
+	cl := find_content_length(req_str[:header_end])
+	if cl <= 0 do return ""
+	body_end := body_start + cl
+	if body_end > len(req_str) do body_end = len(req_str)
+	return req_str[body_start:body_end]
+}
+
+// header_count returns how many real header lines (anchored at a line start,
+// past the request line) begin with `name_lower:`. #217 M2: two Content-Length
+// headers are ambiguous (a request-smuggling vector); find_header_value only
+// ever returns the first, so the caller rejects when this is > 1 rather than
+// silently trusting it. Anchoring mirrors find_header_value so a needle inside
+// the request-line URL/query is not counted.
+header_count :: proc(headers: string, name_lower: string) -> int {
+	lower := ascii_lower(headers, context.temp_allocator)
+	needle := strings.concatenate({name_lower, ":"}, context.temp_allocator)
+
+	start := 0
+	if rl_end := strings.index(lower, "\r\n"); rl_end >= 0 {
+		start = rl_end + 2
+	}
+
+	count := 0
+	pos := start
+	for pos < len(lower) {
+		rel := strings.index(lower[pos:], needle)
+		if rel < 0 do break
+		idx := pos + rel
+		if idx == start || lower[idx - 1] == '\n' {
+			count += 1
+		}
+		pos = idx + len(needle)
+	}
+	return count
 }
 
 status_text :: proc(code: int) -> string {

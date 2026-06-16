@@ -407,6 +407,22 @@ clear_frame :: proc(b: ^Bridge) {
 // Host functions (Lua C callbacks)
 // ---------------------------------------------------------------------------
 
+// lua_clone_string clones a Lua string at `index` into an owned Odin string
+// using the context allocator (same ownership as strings.clone_from_cstring).
+//
+// #217 L3/L4: it reads the *length-carrying* value via lua_tolstring rather
+// than treating the pointer as a C string. Lua strings may contain embedded
+// NUL bytes; a strlen-based read truncates at the first one, silently dropping
+// shell-stdin payload and hiding control bytes from downstream guards like
+// header_safe. Caller must guarantee the value at `index` is a string/number
+// (every call site checks lua_isstring first), so lua_tolstring won't return
+// nil. Mirrors json.odin's lua_tostring_len.
+lua_clone_string :: proc(L: ^Lua_State, index: i32) -> string {
+	n: uint
+	p := lua_tolstring(L, index, &n)
+	return strings.clone(string(([^]u8)(p)[:n]))
+}
+
 redin_log :: proc "c" (L: ^Lua_State) -> i32 {
 	context = g_context
 	n := lua_gettop(L)
@@ -509,10 +525,10 @@ redin_http :: proc "c" (L: ^Lua_State) -> i32 {
 	req: Http_Request
 	req.headers = make(map[string]string)
 
-	if lua_isstring(L, 1) do req.id = strings.clone_from_cstring(lua_tostring_raw(L, 1))
-	if lua_isstring(L, 2) do req.url = strings.clone_from_cstring(lua_tostring_raw(L, 2))
+	if lua_isstring(L, 1) do req.id = lua_clone_string(L, 1)
+	if lua_isstring(L, 2) do req.url = lua_clone_string(L, 2)
 	if lua_isstring(L, 3) {
-		req.method = strings.clone_from_cstring(lua_tostring_raw(L, 3))
+		req.method = lua_clone_string(L, 3)
 	} else {
 		req.method = strings.clone("GET")
 	}
@@ -521,15 +537,15 @@ redin_http :: proc "c" (L: ^Lua_State) -> i32 {
 		lua_pushnil(L)
 		for lua_next(L, headers_idx) != 0 {
 			if lua_isstring(L, -2) && lua_isstring(L, -1) {
-				k := strings.clone_from_cstring(lua_tostring_raw(L, -2))
-				v := strings.clone_from_cstring(lua_tostring_raw(L, -1))
+				k := lua_clone_string(L, -2)
+				v := lua_clone_string(L, -1)
 				req.headers[k] = v
 			}
 			lua_pop(L, 1)
 		}
 	}
 	if lua_isstring(L, 5) {
-		req.body = strings.clone_from_cstring(lua_tostring_raw(L, 5))
+		req.body = lua_clone_string(L, 5)
 	} else {
 		req.body = strings.clone("")
 	}
@@ -1021,7 +1037,7 @@ read_string_array :: proc(L: ^Lua_State, idx: i32) -> (out: []string, ok: bool) 
 	for i in 0 ..< count {
 		lua_rawgeti(L, idx, i32(i + 1))
 		is_str := lua_isstring(L, -1)
-		if is_str do out[i] = strings.clone_from_cstring(lua_tostring_raw(L, -1))
+		if is_str do out[i] = lua_clone_string(L, -1)
 		lua_pop(L, 1)
 		if !is_str {
 			for s in out do if len(s) > 0 do delete(s)
@@ -1038,7 +1054,7 @@ redin_shell :: proc "c" (L: ^Lua_State) -> i32 {
 
 	req: Shell_Request
 
-	if lua_isstring(L, 1) do req.id = strings.clone_from_cstring(lua_tostring_raw(L, 1))
+	if lua_isstring(L, 1) do req.id = lua_clone_string(L, 1)
 
 	// Read cmd table (sequential array of strings).
 	if lua_istable(L, 2) {
@@ -1055,7 +1071,7 @@ redin_shell :: proc "c" (L: ^Lua_State) -> i32 {
 	}
 
 	if lua_isstring(L, 3) {
-		req.stdin = strings.clone_from_cstring(lua_tostring_raw(L, 3))
+		req.stdin = lua_clone_string(L, 3)
 	} else {
 		req.stdin = strings.clone("")
 	}
@@ -1166,7 +1182,7 @@ parse_animate_attr :: proc(L: ^Lua_State, attrs_idx: i32) -> (types.Animate_Deco
 	provider: string
 	lua_getfield(L, a_idx, "provider")
 	if lua_isstring(L, -1) {
-		provider = strings.clone_from_cstring(lua_tostring_raw(L, -1))
+		provider = lua_clone_string(L, -1)
 	}
 	lua_pop(L, 1)
 	if len(provider) == 0 {
@@ -1400,7 +1416,7 @@ lua_flatten_node :: proc(L: ^Lua_State, index: i32, cur: ^[dynamic]u8, b: ^Bridg
 	text_content: string
 	lua_rawgeti(L, abs_idx, 3)
 	if lua_isstring(L, -1) {
-		text_content = strings.clone_from_cstring(lua_tostring_raw(L, -1))
+		text_content = lua_clone_string(L, -1)
 	}
 	lua_pop(L, 1)
 
@@ -1764,7 +1780,7 @@ lua_to_theme :: proc(L: ^Lua_State, index: i32) -> map[string]types.Theme {
 	lua_pushnil(L)
 	for lua_next(L, abs_idx) != 0 {
 		if lua_isstring(L, -2) && lua_istable(L, -1) {
-			key := strings.clone_from_cstring(lua_tostring_raw(L, -2))
+			key := lua_clone_string(L, -2)
 			if key == "font-face" {
 				delete(key)
 				lua_pop(L, 1)
@@ -2261,7 +2277,7 @@ lua_get_string_field :: proc(L: ^Lua_State, index: i32, field: cstring) -> strin
 	lua_getfield(L, index, field)
 	defer lua_pop(L, 1)
 	if lua_isstring(L, -1) {
-		return strings.clone_from_cstring(lua_tostring_raw(L, -1))
+		return lua_clone_string(L, -1)
 	}
 	return ""
 }
@@ -2272,13 +2288,13 @@ lua_get_event_name :: proc(L: ^Lua_State, index: i32, field: cstring) -> string 
 	lua_getfield(L, index, field)
 	defer lua_pop(L, 1)
 	if lua_isstring(L, -1) {
-		return strings.clone_from_cstring(lua_tostring_raw(L, -1))
+		return lua_clone_string(L, -1)
 	}
 	if lua_istable(L, -1) {
 		lua_rawgeti(L, -1, 1)
 		defer lua_pop(L, 1)
 		if lua_isstring(L, -1) {
-			return strings.clone_from_cstring(lua_tostring_raw(L, -1))
+			return lua_clone_string(L, -1)
 		}
 	}
 	return ""
@@ -2341,7 +2357,7 @@ lua_read_tags :: proc(L: ^Lua_State, tbl_idx: i32, slot_idx: i32) -> []string {
 
     if lua_isstring(L, -1) {
         out := make([]string, 1)
-        out[0] = strings.clone_from_cstring(lua_tostring_raw(L, -1))
+        out[0] = lua_clone_string(L, -1)
         return out
     }
 
@@ -2354,7 +2370,7 @@ lua_read_tags :: proc(L: ^Lua_State, tbl_idx: i32, slot_idx: i32) -> []string {
         for i in 1..=n {
             lua_rawgeti(L, list_idx, i32(i))
             if lua_isstring(L, -1) {
-                append(&tmp, strings.clone_from_cstring(lua_tostring_raw(L, -1)))
+                append(&tmp, lua_clone_string(L, -1))
             }
             lua_pop(L, 1)
         }
@@ -2400,7 +2416,7 @@ lua_read_draggable :: proc(L: ^Lua_State, attrs_idx: i32) -> Maybe(types.Draggab
 	// :event (required)
 	lua_getfield(L, opts, "event")
 	if lua_isstring(L, -1) {
-		out.event = strings.clone_from_cstring(lua_tostring_raw(L, -1))
+		out.event = lua_clone_string(L, -1)
 	}
 	lua_pop(L, 1)
 	if len(out.event) == 0 {
@@ -2426,7 +2442,7 @@ lua_read_draggable :: proc(L: ^Lua_State, attrs_idx: i32) -> Maybe(types.Draggab
 	// :aspect (optional)
 	lua_getfield(L, opts, "aspect")
 	if lua_isstring(L, -1) {
-		out.aspect = strings.clone_from_cstring(lua_tostring_raw(L, -1))
+		out.aspect = lua_clone_string(L, -1)
 	}
 	lua_pop(L, 1)
 
@@ -2486,7 +2502,7 @@ lua_read_dropable :: proc(L: ^Lua_State, attrs_idx: i32) -> Maybe(types.Dropable
 
 	lua_getfield(L, opts, "event")
 	if lua_isstring(L, -1) {
-		out.event = strings.clone_from_cstring(lua_tostring_raw(L, -1))
+		out.event = lua_clone_string(L, -1)
 	}
 	lua_pop(L, 1)
 	if len(out.event) == 0 {
@@ -2499,7 +2515,7 @@ lua_read_dropable :: proc(L: ^Lua_State, attrs_idx: i32) -> Maybe(types.Dropable
 
 	lua_getfield(L, opts, "aspect")
 	if lua_isstring(L, -1) {
-		out.aspect = strings.clone_from_cstring(lua_tostring_raw(L, -1))
+		out.aspect = lua_clone_string(L, -1)
 	}
 	lua_pop(L, 1)
 
@@ -2548,13 +2564,13 @@ lua_read_drag_over :: proc(L: ^Lua_State, attrs_idx: i32) -> Maybe(types.Drag_Ov
 	// :event is OPTIONAL on :drag-over (visual-only zones don't need a handler)
 	lua_getfield(L, opts, "event")
 	if lua_isstring(L, -1) {
-		out.event = strings.clone_from_cstring(lua_tostring_raw(L, -1))
+		out.event = lua_clone_string(L, -1)
 	}
 	lua_pop(L, 1)
 
 	lua_getfield(L, opts, "aspect")
 	if lua_isstring(L, -1) {
-		out.aspect = strings.clone_from_cstring(lua_tostring_raw(L, -1))
+		out.aspect = lua_clone_string(L, -1)
 	}
 	lua_pop(L, 1)
 
