@@ -167,7 +167,7 @@ Hostname and CIDR entries are **always allowed**, on top of whatever the class p
 
 **SSRF / DNS-rebinding defence (#162 M3):** the access class is enforced against the **resolved IP**, not the URL text. redin resolves the host itself, checks the resolved address against the class, then dials that exact endpoint. So a public hostname that resolves into a blocked range (`evil.example → 127.0.0.1`) is rejected under `"local"`/`"external"` — a literal-string check would miss it. An explicit hostname or CIDR entry still overrides this (the explicit opt-in is intentional).
 
-Hostname comparison is ASCII-byte case-insensitive. IDN hostnames must be passed in their punycode (`xn--...`) form — `münchen.example` is not equivalent to `xn--mnchen-3ya.example`, and the URL parser punycodes the request host before matching.
+Hostname comparison is ASCII-byte case-insensitive, and a single trailing root-label dot is insignificant on either side — `"example.com"` in the whitelist matches a request to `example.com.` and vice versa. IDN hostnames must be passed in their punycode (`xn--...`) form — `münchen.example` is not equivalent to `xn--mnchen-3ya.example`, and the URL parser punycodes the request host before matching.
 
 Rejection failure (delivered to the `:http` effect's `on-error`): `{status: 0, error: "host <name> not in http whitelist"}`.
 
