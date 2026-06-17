@@ -131,6 +131,8 @@ curl -H "$AUTH" http://localhost:$PORT/screenshot -o screenshot.png
 
 Returns binary PNG. Content-Type: `image/png`. Captures the current Raylib window.
 
+Capture is capped at **16 MP** (`width × height`); a larger window returns `413`. This is deliberately independent of — and smaller than — the `/resize` per-axis limit of `8192` (≈67 MP): a screenshot allocates a transient RGBA buffer plus a PNG-encoded copy (~256 MB at the maximum window), whereas a resize allocates nothing. So a window sized above 16 MP can exist and render but cannot be screenshotted. The two limits guard different resources, by design.
+
 ---
 
 ## Write endpoints
@@ -174,7 +176,7 @@ curl -X POST -H "$AUTH" -d '{"width":1280,"height":800}' \
   http://localhost:$PORT/resize
 ```
 
-Response: `{"ok": true}` on success; `400` if the body is not a JSON object or either dimension is outside `[100, 8192]`. Calls `rl.SetWindowSize`.
+Response: `{"ok": true}` on success; `400` if the body is not a JSON object or either dimension is outside `[100, 8192]`. Calls `rl.SetWindowSize`. Note: a window larger than 16 MP can be set here but cannot be captured by `/screenshot` (separate, smaller cap — see that endpoint).
 
 ### `POST /maximize` -- maximize the window
 
