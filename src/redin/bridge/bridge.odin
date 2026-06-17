@@ -1721,6 +1721,13 @@ validate_font_path :: proc(path: string) -> bool {
 	// colon marks an absolute Windows path regardless of slash direction.
 	if len(path) >= 2 && path[1] == ':' do return false
 	if path[0] == '/' do return false
+	// #217 L2: this validator deliberately does NOT percent-decode or
+	// Unicode-normalize the path. Linux file APIs (rl.LoadFont → open) treat
+	// the bytes literally — they do not decode `%2e%2e` back to `..` — so the
+	// guard sees exactly what the OS will open. Adding a decode step would let
+	// a path the OS treats as benign get rewritten into one this check rejects
+	// (or vice versa), so it is intentionally omitted. Not exploitable.
+	//
 	// Segment-wise check so "foo..bar" (a legit filename that happens
 	// to contain two dots) doesn't trip the guard, but "../etc/passwd"
 	// does. Backslashes are already rejected above, so splitting on '/'

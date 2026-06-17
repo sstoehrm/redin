@@ -193,10 +193,47 @@ drain_incoming_503 :: proc(ds: ^Dev_Server) {
 @(private = "file")
 g_signal_cleanup_installed: bool = false
 
+// #217 L1: exactly what this process wrote into .redin-port / .redin-token,
+// captured at write time so cleanup can prove ownership before unlinking.
+// Two redin instances sharing a CWD clobber each other's files at startup
+// (same fixed filenames), so the live owner is whoever wrote last; a crashing
+// or exiting instance must not remove a file a *different* live instance owns.
+@(private = "file") g_cleanup_port:      [16]u8
+@(private = "file") g_cleanup_port_len:  int
+@(private = "file") g_cleanup_token:     [128]u8
+@(private = "file") g_cleanup_token_len: int
+
+@(private = "file")
+record_cleanup_identity :: proc(port_str: string, token: string) {
+	g_cleanup_port_len  = copy(g_cleanup_port[:], transmute([]u8)port_str)
+	g_cleanup_token_len = copy(g_cleanup_token[:], transmute([]u8)token)
+}
+
+// unlink_if_matches removes `path` only when its current content exactly equals
+// `expect` (#217 L1). Async-signal-safe: it runs from cleanup_on_signal, so it
+// uses only raw syscalls (open/read/close/unlink) and stack memory — no
+// allocation, no Odin context. O_NOFOLLOW so a swapped-in symlink can't
+// redirect the read. A short read or any length/byte difference fails safe
+// (leaves the file) rather than risk deleting another instance's.
+unlink_if_matches :: proc "contextless" (path: cstring, expect: []u8) {
+	if len(expect) == 0 do return
+	fd, oerr := linux.open(path, {.NOFOLLOW, .CLOEXEC})
+	if oerr != .NONE do return
+	buf: [256]u8
+	n, rerr := linux.read(fd, buf[:])
+	linux.close(fd)
+	if rerr != .NONE do return
+	if int(n) != len(expect) do return
+	for i in 0 ..< len(expect) {
+		if buf[i] != expect[i] do return
+	}
+	linux.unlink(path)
+}
+
 @(private = "file")
 cleanup_on_signal :: proc "c" (sig: linux.Signal) {
-	linux.unlink(SIGNAL_PORT_FILE_C)
-	linux.unlink(SIGNAL_TOKEN_FILE_C)
+	unlink_if_matches(SIGNAL_PORT_FILE_C, g_cleanup_port[:g_cleanup_port_len])
+	unlink_if_matches(SIGNAL_TOKEN_FILE_C, g_cleanup_token[:g_cleanup_token_len])
 	// SA_RESETHAND already restored the default handler. Re-raise so
 	// the kernel runs that default disposition (e.g. core dump for
 	// SIGSEGV) on this same signal.
@@ -358,6 +395,9 @@ write_port_and_token_files :: proc(ds: ^Dev_Server, bound_port: int) -> bool {
 		ds.running = false
 		return false
 	}
+	// #217 L1: both files now hold our values — remember them so cleanup only
+	// removes files this instance still owns.
+	record_cleanup_identity(port_str, ds.auth_token)
 	return true
 }
 
@@ -423,8 +463,10 @@ devserver_destroy :: proc(ds: ^Dev_Server) {
 				free(pc)
 			}
 		}
-		os.remove(PORT_FILE)
-		os.remove(TOKEN_FILE)
+		// #217 L1: ownership-checked removal, same as the signal handler —
+		// don't unlink files a co-located live instance overwrote.
+		unlink_if_matches(SIGNAL_PORT_FILE_C, g_cleanup_port[:g_cleanup_port_len])
+		unlink_if_matches(SIGNAL_TOKEN_FILE_C, g_cleanup_token[:g_cleanup_token_len])
 	}
 	if len(ds.auth_token) > 0 do delete(ds.auth_token)
 	if len(ds.expected_host_v4) > 0 do delete(ds.expected_host_v4)
@@ -1575,6 +1617,17 @@ handle_get_state :: proc(ds: ^Dev_Server, ch: ^Response_Channel) {
 	}
 }
 
+// #217 L6: per-segment byte cap on /state/<path>. The number of segments is
+// already capped at MAX_PATH_SEGMENTS and the whole path is bounded by the
+// header buffer, so this is cheap defence-in-depth rather than a live fix.
+// Pure so it's unit-testable without a Lua state.
+MAX_PATH_SEGMENT_LEN :: 128
+
+any_segment_too_long :: proc(segments: []string) -> bool {
+	for seg in segments do if len(seg) > MAX_PATH_SEGMENT_LEN do return true
+	return false
+}
+
 handle_get_state_path :: proc(ds: ^Dev_Server, ch: ^Response_Channel, dot_path: string) {
 	L := ds.bridge.L
 	lua_getglobal(L, "redin_get_state")
@@ -1597,6 +1650,11 @@ handle_get_state_path :: proc(ds: ^Dev_Server, ch: ^Response_Channel, dot_path: 
 	if len(segments) > MAX_PATH_SEGMENTS {
 		lua_pop(L, 1)
 		respond_json_error(ch, 400, `{"error":"path too deep"}`)
+		return
+	}
+	if any_segment_too_long(segments) {
+		lua_pop(L, 1)
+		respond_json_error(ch, 400, `{"error":"path segment too long"}`)
 		return
 	}
 	for seg in segments {
@@ -2308,6 +2366,12 @@ handle_post_resize :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: string)
 
 	width := read_int(L, table_idx, "width")
 	height := read_int(L, table_idx, "height")
+	// #217 L5: this per-axis bound (8192, ≈67 MP) is intentionally larger than
+	// the /screenshot area cap (MAX_SCREENSHOT_PIXELS, 16 MP). A resize
+	// allocates nothing, so it can permit large windows; a screenshot allocates
+	// a transient RGBA + PNG buffer, so it caps area separately. A window set
+	// above 16 MP renders fine but /screenshot returns 413 — by design, not a
+	// bug. Don't "align" these caps without weakening one guard.
 	if width < 100 || height < 100 || width > 8192 || height > 8192 {
 		respond_json_error(ch, 400, `{"error":"width and height must be in [100, 8192]"}`)
 		return
