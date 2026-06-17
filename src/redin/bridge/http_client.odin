@@ -1,5 +1,6 @@
 package bridge
 
+import "base:runtime"
 import "core:bytes"
 import "core:fmt"
 import "core:log"
@@ -404,8 +405,30 @@ http_client_poll :: proc(hc: ^Http_Client, results: ^[dynamic]Http_Response) {
 	clear(&hc.results)
 }
 
+// destroy_thread_temp_arena frees THIS thread's default temp arena. #216: http
+// workers are spawned with init_context set (see http_client_request), and
+// core:thread's _maybe_destroy_default_temp_allocator returns early whenever
+// init_context != nil — it leaves custom-context cleanup to the thread proc.
+// _select_context_for_thread still gave the worker its own thread-local arena
+// (global_default_temp_allocator_data), and the worker allocates from it (the
+// scheme lowercase here + the whitelist host compare in http_access_allowed),
+// so we must free it ourselves at exit. This replicates exactly what the
+// nil-init_context path would have done. The leak bypasses context.allocator,
+// so REDIN_TRACK_MEM never sees it; it is a real RSS leak, one arena per
+// request thread. The guard makes it a no-op under -DODIN_DEFAULT_TO_NIL_ALLOCATOR
+// (where the default temp allocator is the nil allocator).
+destroy_thread_temp_arena :: proc() {
+	if context.temp_allocator.procedure == runtime.default_temp_allocator_proc {
+		runtime.default_temp_allocator_destroy(auto_cast context.temp_allocator.data)
+	}
+}
+
 @(private = "file")
 http_thread_proc :: proc(raw_data_ptr: rawptr) {
+	// #216: free our thread-local temp arena on every exit path. Runs last
+	// (only proc-scope defer), after all temp allocations are done.
+	defer destroy_thread_temp_arena()
+
 	data := cast(^Http_Thread_Data)raw_data_ptr
 	response := execute_http_request(data.request, data.client)
 
