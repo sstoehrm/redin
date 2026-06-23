@@ -408,7 +408,9 @@ clear_frame :: proc(b: ^Bridge) {
 // ---------------------------------------------------------------------------
 
 // lua_clone_string clones a Lua string at `index` into an owned Odin string
-// using the context allocator (same ownership as strings.clone_from_cstring).
+// using `allocator` (the context allocator by default, same ownership as
+// strings.clone_from_cstring; callers that want a frame-scoped clone pass
+// context.temp_allocator).
 //
 // #217 L3/L4: it reads the *length-carrying* value via lua_tolstring rather
 // than treating the pointer as a C string. Lua strings may contain embedded
@@ -417,10 +419,10 @@ clear_frame :: proc(b: ^Bridge) {
 // header_safe. Caller must guarantee the value at `index` is a string/number
 // (every call site checks lua_isstring first), so lua_tolstring won't return
 // nil. Mirrors json.odin's lua_tostring_len.
-lua_clone_string :: proc(L: ^Lua_State, index: i32) -> string {
+lua_clone_string :: proc(L: ^Lua_State, index: i32, allocator := context.allocator) -> string {
 	n: uint
 	p := lua_tolstring(L, index, &n)
-	return strings.clone(string(([^]u8)(p)[:n]))
+	return strings.clone(string(([^]u8)(p)[:n]), allocator)
 }
 
 redin_log :: proc "c" (L: ^Lua_State) -> i32 {
@@ -1364,11 +1366,16 @@ lua_flatten_node :: proc(L: ^Lua_State, index: i32, cur: ^[dynamic]u8, b: ^Bridg
 			lua_pop(L, 1)
 		}
 
-		// Position 3 — source string.
+		// Position 3 — source string. Clone NUL-safely (length-carrying
+		// lua_tolstring) into the temp arena: a strlen-based read truncated
+		// markdown bodies at the first NUL and silently dropped the post-NUL
+		// bytes from the #112 copy-button's verbatim source (#221 M1). The
+		// clone lives in temp_allocator alongside the parse/lower output and is
+		// deep-copied into permanent storage by flatten_subtree's slot pass.
 		source: string
 		lua_rawgeti(L, abs_idx, 3)
 		if lua_isstring(L, -1) {
-			source = string(lua_tostring_raw(L, -1))
+			source = lua_clone_string(L, -1, context.temp_allocator)
 		}
 		lua_pop(L, 1)
 

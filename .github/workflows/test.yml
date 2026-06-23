@@ -15,6 +15,21 @@ jobs:
         with:
           submodules: recursive
 
+      # Assert the resolved odin-http submodule matches the reviewed pin.
+      # `submodules: recursive` resolves the gitlink SHA, but nothing else
+      # here fails if that pointer is moved — by a PR bumping the gitlink or a
+      # history-rewrite at the pinned SHA — the same trust-without-assertion
+      # gap the third-party-action SHA pins close. Bump `expected` to match the
+      # gitlink whenever odin-http is intentionally rolled forward (#221 L1).
+      - name: Verify odin-http submodule SHA
+        run: |
+          expected=9f50972ec8a7f4e31bd050f245b79f63733f31f8
+          actual=$(git -C lib/odin-http rev-parse HEAD)
+          [ "$actual" = "$expected" ] || {
+            echo "::error::odin-http submodule SHA mismatch (got $actual, expected $expected)"
+            exit 1
+          }
+
       - name: Install system dependencies
         run: |
           sudo apt-get update
@@ -68,6 +83,21 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           submodules: recursive
+
+      # Assert the resolved odin-http submodule matches the reviewed pin.
+      # `submodules: recursive` resolves the gitlink SHA, but nothing else
+      # here fails if that pointer is moved — by a PR bumping the gitlink or a
+      # history-rewrite at the pinned SHA — the same trust-without-assertion
+      # gap the third-party-action SHA pins close. Bump `expected` to match the
+      # gitlink whenever odin-http is intentionally rolled forward (#221 L1).
+      - name: Verify odin-http submodule SHA
+        run: |
+          expected=9f50972ec8a7f4e31bd050f245b79f63733f31f8
+          actual=$(git -C lib/odin-http rev-parse HEAD)
+          [ "$actual" = "$expected" ] || {
+            echo "::error::odin-http submodule SHA mismatch (got $actual, expected $expected)"
+            exit 1
+          }
 
       - name: Install system dependencies
         run: |
