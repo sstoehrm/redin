@@ -1193,10 +1193,9 @@ frame_value_to_json :: proc(
 
 	// Emit ["tag", attrs-with-rect, ...children-recursed]
 	strings.write_string(b, "[")
-	// tag
-	strings.write_string(b, `"`)
-	strings.write_string(b, tag)
-	strings.write_string(b, `"`)
+	// tag — #225 L1: a Lua node tag can contain `"` or control chars; emit
+	// through json_string so a hostile tag can't break the JSON structure.
+	json_string(b, tag)
 	// attrs at slot [2]
 	lua_rawgeti(L, idx, 2)
 	strings.write_string(b, ",")
@@ -1283,7 +1282,15 @@ agent_nodes_walker :: proc(b: ^strings.Builder, L: ^Lua_State, index: i32, first
 		if len(mode) > 0 && len(id) > 0 && tag != "canvas" {
 			if !first^ do strings.write_string(b, ",")
 			first^ = false
-			fmt.sbprintf(b, `{{"id":"%s","mode":"%s","type":"%s"}}`, id, mode, tag)
+			// #225 L1: id and tag are app-controlled; escape via json_string
+			// so a `"` in either can't inject a key into the agent-nodes JSON.
+			strings.write_string(b, `{"id":`)
+			json_string(b, id)
+			strings.write_string(b, `,"mode":`)
+			json_string(b, mode)
+			strings.write_string(b, `,"type":`)
+			json_string(b, tag)
+			strings.write_string(b, "}")
 		}
 	}
 	lua_pop(L, 1)
