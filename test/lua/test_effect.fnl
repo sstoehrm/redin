@@ -293,4 +293,34 @@
     (effect.poll-timers (+ now 1000))
     (assert (= fires 2) "re-armed timer fires on the following poll")))
 
+;; --- #225 L7: error isolation ---
+
+;; One timer handler that errors must not abort the other due timers
+;; scheduled for the same tick. Before the fix, dataflow.dispatch re-raised
+;; through the each loop and every later due timer was silently skipped.
+(fn t.test-poll-timers-isolates-handler-error []
+  (setup)
+  (dataflow.init {})
+  (dataflow.register-globals)
+  (dataflow.set-effect-handler effect.execute)
+  (var good-fired false)
+  (dataflow.reg-handler :event/boom (fn [_db _event] (error "boom")))
+  (dataflow.reg-handler :event/ok (fn [db _event] (set good-fired true) db))
+  ;; Both due at the same now-ms; the boom one is enqueued first.
+  (let [now (* (os.clock) 1000)]
+    (effect.execute {:db nil :dispatch-later {:ms 0 :dispatch [:event/boom]}})
+    (effect.execute {:db nil :dispatch-later {:ms 0 :dispatch [:event/ok]}})
+    (let [fired (effect.poll-timers (+ now 1000))]
+      (assert (= fired 2) "both due timers are accounted for")
+      (assert good-fired "the good timer must fire despite the earlier error"))))
+
+;; A failing effect must not drop its sibling effects in the same fx map.
+(fn t.test-execute-isolates-effect-error []
+  (setup)
+  (var good-ran false)
+  (effect.reg-fx :boom-fx (fn [_v] (error "boom")))
+  (effect.reg-fx :good-fx (fn [_v] (set good-ran true)))
+  (effect.execute {:db nil :boom-fx "x" :good-fx "y"})
+  (assert good-ran "the sibling effect must run despite the earlier error"))
+
 t
