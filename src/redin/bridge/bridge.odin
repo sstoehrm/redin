@@ -1816,12 +1816,20 @@ lua_to_theme :: proc(L: ^Lua_State, index: i32) -> map[string]types.Theme {
 			t.color = lua_get_rgb_field(L, props_idx, "color")
 			t.border = lua_get_rgb_field(L, props_idx, "border")
 			t.padding = lua_get_padding_field(L, props_idx, "padding")
-			t.border_width = u8(lua_get_number_field(L, props_idx, "border-width"))
-			t.radius = u8(lua_get_number_field(L, props_idx, "radius"))
-			t.font_size = f16(lua_get_number_field(L, props_idx, "font-size"))
-			t.line_height = lua_get_number_field(L, props_idx, "line-height")
+			// #225 M1: theme numerics can arrive non-finite or absurdly large
+			// — most reachably via `PUT /aspects`, which stores the theme
+			// verbatim and never runs the Fennel validator. An unclamped
+			// +Inf/NaN flows straight into Raylib rectangle / scissor / shadow
+			// math (font_size * line_height, total-height, DrawRectangleRounded)
+			// and crashes or corrupts the render loop. Clamp every numeric to a
+			// finite, sane range here, at the host boundary, so both the app
+			// path and the dev-server path are covered.
+			t.border_width = u8(clamp_theme(lua_get_number_field(L, props_idx, "border-width"), 0, 255))
+			t.radius = u8(clamp_theme(lua_get_number_field(L, props_idx, "radius"), 0, 255))
+			t.font_size = f16(clamp_theme(lua_get_number_field(L, props_idx, "font-size"), 0, 1024))
+			t.line_height = clamp_theme(lua_get_number_field(L, props_idx, "line-height"), 0, 16)
 			t.font = lua_get_string_field(L, props_idx, "font")
-			t.opacity = lua_get_number_field(L, props_idx, "opacity")
+			t.opacity = clamp_theme(lua_get_number_field(L, props_idx, "opacity"), 0, 1)
 			t.shadow = lua_get_shadow_field(L, props_idx, "shadow")
 			t.selection = lua_get_rgba_field(L, props_idx, "selection")
 
@@ -1892,14 +1900,17 @@ lua_get_shadow_field :: proc(L: ^Lua_State, index: i32, field: cstring) -> types
 	if !lua_istable(L, -1) do return {}
 	abs := lua_gettop(L)
 	s: types.Shadow
+	// #225 M1: offsets may be negative but must stay finite; blur must be
+	// non-negative and bounded (draw_shadow only guards on blur <= 0, so
+	// +Inf blur produced 8 passes of DrawRectangleRounded on an infinite rect).
 	lua_rawgeti(L, abs, 1)
-	s.x = f32(lua_tonumber(L, -1))
+	s.x = clamp_theme(f32(lua_tonumber(L, -1)), -4096, 4096)
 	lua_pop(L, 1)
 	lua_rawgeti(L, abs, 2)
-	s.y = f32(lua_tonumber(L, -1))
+	s.y = clamp_theme(f32(lua_tonumber(L, -1)), -4096, 4096)
 	lua_pop(L, 1)
 	lua_rawgeti(L, abs, 3)
-	s.blur = f32(lua_tonumber(L, -1))
+	s.blur = clamp_theme(f32(lua_tonumber(L, -1)), 0, 256)
 	lua_pop(L, 1)
 	lua_rawgeti(L, abs, 4)
 	if lua_istable(L, -1) {
@@ -2366,6 +2377,17 @@ lua_get_number_field :: proc(L: ^Lua_State, index: i32, field: cstring) -> f32 {
 		return f32(lua_tonumber(L, -1))
 	}
 	return 0
+}
+
+// #225 M1: coerce a theme numeric into a finite [lo, hi] range before it
+// reaches Raylib. NaN maps to 0 clamped into range; ±Inf saturate to the
+// range ends (clamp's comparisons already do this: +Inf > hi -> hi,
+// -Inf < lo -> lo). The NaN branch is explicit because every comparison
+// with NaN is false, so a bare clamp would pass NaN straight through — and
+// a NaN width/roundness is exactly what corrupts the render loop.
+clamp_theme :: proc(v: f32, lo: f32, hi: f32) -> f32 {
+	if v != v do return clamp(f32(0), lo, hi) // NaN
+	return clamp(v, lo, hi)
 }
 
 // Reads slot at `slot_idx` of the table at `tbl_idx` as a tag list:
