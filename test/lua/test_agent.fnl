@@ -57,4 +57,35 @@
     (assert (= "literal" (. out 3))
             ":agent :read must not override content")))
 
+;; #225 M2: a malformed agent override (wrong type for the target node)
+;; must not crash rendering or corrupt the node. Reachable via
+;; `POST /events ["event/agent-edit" {:id ... :content <bad>}]`.
+
+(fn t.test-handle-edit-rejects-non-string-non-table-content []
+  (dataflow.init {})
+  (agent.install)
+  (dataflow.dispatch [:event/agent-edit {:id :reply :content 42}])
+  (dataflow.flush)
+  (assert (= nil (?. (dataflow.get-state) :agent :reply))
+          "non-string/non-table content must be rejected, not stored"))
+
+(fn t.test-container-override-non-table-no-crash []
+  ;; A container whose override is a scalar used to raise ipairs(42) every
+  ;; frame. Now it must leave the node's literal children intact.
+  (dataflow.init {:agent {:cards 42}})
+  (let [tree [:vbox {:id :cards :agent :edit}
+                [:text {} "literal child"]]
+        out  (agent.apply-overrides tree)]
+    (assert (= "literal child" (. (. out 3) 3))
+            "malformed container override must leave literal children intact")))
+
+(fn t.test-leaf-override-non-string-ignored []
+  ;; A leaf text node whose override is a table (container-shaped) must not
+  ;; have the table spliced into its text slot.
+  (dataflow.init {:agent {:reply [[:text {} "x"]]}})
+  (let [tree [:text {:id :reply :agent :edit} "keep"]
+        out  (agent.apply-overrides tree)]
+    (assert (= "keep" (. out 3))
+            "non-string override for a leaf text node must be ignored")))
+
 t
