@@ -22,15 +22,31 @@ for arg in "$@"; do
   esac
 done
 
-LAUNCHER=()
-if [ "$HEADLESS" -eq 1 ]; then
+# --headless runs the WHOLE suite under one shared X server, not a fresh
+# `xvfb-run` per test. Per-test wrapping had two coupled failure modes on
+# CI (#132):
+#   1. The first, cold `xvfb-run` spends ~11s spinning up its own Xvfb
+#      before redin's first line even prints — routinely blowing the
+#      dev-server budget in wait_for_server and marking the
+#      alphabetically-first app (agent) as failed. Warm launches take <1s,
+#      so only the first test paid the price.
+#   2. On that timeout the cleanup killed `$!` — the `xvfb-run` wrapper, not
+#      the redin child it forked — so the orphaned app kept booting, grabbed
+#      a port, and clobbered `.redin-port` for the next test (animate), which
+#      then talked to the wrong app and failed every assertion.
+# Re-exec'ing the whole script under a single `xvfb-run` fixes both: the
+# Xvfb cold start is paid once, before the loop, and every redin is launched
+# directly so `$!` is the real PID the cleanup below can actually kill.
+if [ "$HEADLESS" -eq 1 ] && [ -z "${REDIN_XVFB_ACTIVE:-}" ]; then
   if ! command -v xvfb-run >/dev/null 2>&1; then
     echo "ERROR: --headless requires xvfb-run (apt-get install xvfb)" >&2
     exit 2
   fi
   # -a: auto-assign a free display; -s: quiet, 24-bit RGB, 1280x800 (covers
-  # tests that resize up to 1280 wide).
-  LAUNCHER=(xvfb-run -a -s "-screen 0 1280x800x24")
+  # tests that resize up to 1280 wide). REDIN_XVFB_ACTIVE guards the re-exec
+  # so the inner run launches redin directly instead of re-wrapping forever.
+  exec env REDIN_XVFB_ACTIVE=1 \
+    xvfb-run -a -s "-screen 0 1280x800x24" bash "$0" "$@"
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -63,9 +79,11 @@ wait_for_server() {
   # Budget covers the slow path on CI: devserver_init prints "listening"
   # before load_app finishes, so the first /frames request queues on the
   # host thread until the first render frame. On CI's llvmpipe that
-  # routinely takes several seconds. --max-time bounds each curl so the
-  # outer SECONDS check can actually fire if the server is wedged.
-  local timeout=15
+  # routinely takes several seconds, and the very first app of the suite
+  # additionally pays a one-time Mesa/GL cold init (#132). --max-time bounds
+  # each curl so the outer SECONDS check can actually fire if the server is
+  # wedged.
+  local timeout=25
   local start=$SECONDS
   while true; do
     if [ -f "$PORT_FILE" ] && [ -f "$TOKEN_FILE" ]; then
@@ -119,9 +137,12 @@ for test_file in "$SCRIPT_DIR"/test_*.bb; do
     done < "$flags_file"
   fi
 
-  # Start dev server in background
+  # Start dev server in background. Launched directly (no per-test xvfb-run
+  # wrapper — see the --headless re-exec above) so SERVER_PID is redin's own
+  # PID: the timeout and force-kill paths below can then actually stop it,
+  # rather than signalling a wrapper and leaking an orphaned app onto a port.
   rm -f "$PORT_FILE"
-  "${LAUNCHER[@]}" "$BINARY" "${extra_flags[@]}" "$app_file" &
+  "$BINARY" "${extra_flags[@]}" "$app_file" &
   SERVER_PID=$!
 
   if ! wait_for_server; then
