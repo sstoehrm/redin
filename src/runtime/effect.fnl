@@ -41,7 +41,13 @@
     (when (~= key :db)
       (let [executor (. executors key)]
         (if executor
-          (executor value)
+          ;; #225 L7: isolate each effect. A single failing effect (e.g. a
+          ;; bad :dispatch / :dispatch-later payload) must not unwind the
+          ;; `each` and drop its sibling effects in the same fx map.
+          (let [(ok err) (pcall executor value)]
+            (when (not ok)
+              (print (.. "Warning: effect executor error for "
+                         (tostring key) ": " (tostring err)))))
           (print (.. "Warning: no effect executor for: " (tostring key))))))))
 
 ;; ===== Timer queue =====
@@ -64,7 +70,14 @@
     (let [dispatch-fn (. executors :dispatch)]
       (when dispatch-fn
         (each [_ timer (ipairs due)]
-          (dispatch-fn timer.event))))
+          ;; #225 L7: isolate each due timer. One handler that errors must
+          ;; not abort the remaining due timers scheduled for this same tick
+          ;; (dataflow.dispatch re-raises with `(error err 0)`, which would
+          ;; otherwise unwind this loop).
+          (let [(ok err) (pcall dispatch-fn timer.event)]
+            (when (not ok)
+              (print (.. "Warning: dispatch-later handler error: "
+                         (tostring err))))))))
     (length due)))
 
 (fn M.pending-timers []
