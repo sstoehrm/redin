@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [main]
 
+# #225 L8: default the workflow's GITHUB_TOKEN to read-only instead of
+# inheriting the repo default (historically write-all). No job here needs
+# write; a compromised build step then can't escalate with the token.
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest

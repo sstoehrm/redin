@@ -8,6 +8,12 @@ on:
         required: false
         default: ""
 
+# #225 L8: default every job to a read-only GITHUB_TOKEN. The `build` job
+# needs no write scope; only the `release` job escalates to
+# `contents: write` (at job level) to publish the GitHub release.
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
