@@ -44,12 +44,29 @@ test_ip4_is_private :: proc(t: ^testing.T) {
 
 @(test)
 test_ip6_is_private :: proc(t: ^testing.T) {
-	for s in ([]string{"::1", "fe80::1", "fc00::1", "fd12:3456::1"}) {
+	for s in ([]string{
+		"::1", "fe80::1", "fc00::1", "fd12:3456::1",
+		// #225 M3: IPv4-in-IPv6 transition spaces that dial to an internal
+		// v4 target on a dual-stack host. IPv4-mapped (::ffff:0:0/96) of a
+		// private/loopback/metadata v4; 6to4 (2002::/16) embedding one;
+		// NAT64 (64:ff9b::/96); and the unspecified address.
+		"::ffff:127.0.0.1", "::ffff:10.0.0.1", "::ffff:169.254.169.254",
+		"::ffff:192.168.1.1",
+		"2002:7f00:0001::",       // 6to4 of 127.0.0.1
+		"2002:0a00:0001::",       // 6to4 of 10.0.0.1
+		"64:ff9b::7f00:1",        // NAT64 of 127.0.0.1
+		"::",                     // unspecified
+	}) {
 		a, ok := net.parse_ip6_address(s)
 		testing.expect(t, ok, "parse")
 		testing.expectf(t, ip6_is_private_or_local(a), "%s should classify as private/local", s)
 	}
-	for s in ([]string{"2001:4860:4860::8888", "2606:4700::1111"}) {
+	for s in ([]string{
+		"2001:4860:4860::8888", "2606:4700::1111",
+		"::ffff:8.8.8.8",         // IPv4-mapped public stays external
+		"2002:0808:0808::",       // 6to4 of 8.8.8.8 stays external
+		"64:ff9b::0808:0808",     // NAT64 of 8.8.8.8 stays external
+	}) {
 		a, ok := net.parse_ip6_address(s)
 		testing.expect(t, ok, "parse")
 		testing.expectf(t, !ip6_is_private_or_local(a), "%s should classify as external", s)

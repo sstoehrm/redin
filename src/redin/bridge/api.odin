@@ -498,7 +498,30 @@ ip6_is_private_or_local :: proc(a: net.IP6_Address) -> bool {
 	case b[0] == 0xfe && (b[1] & 0xc0) == 0x80: return true // fe80::/10 link-local
 	case (b[0] & 0xfe) == 0xfc:                 return true // fc00::/7 ULA
 	}
+	// #225 M3: IPv4-in-IPv6 transition spaces dial an internal v4 target on a
+	// dual-stack host, bypassing the v6-only checks above. Extract the embedded
+	// v4 and classify it with the (hardened) v4 policy.
+	//
+	// IPv4-mapped  ::ffff:0:0/96  — bytes 0-9 zero, 10-11 == ff:ff, 12-15 = v4.
+	if bytes_are_zero(b[0:10]) && b[10] == 0xff && b[11] == 0xff {
+		return ip4_is_private_or_local(net.IP4_Address{b[12], b[13], b[14], b[15]})
+	}
+	// 6to4  2002::/16  — bytes 2-5 embed the v4.
+	if b[0] == 0x20 && b[1] == 0x02 {
+		return ip4_is_private_or_local(net.IP4_Address{b[2], b[3], b[4], b[5]})
+	}
+	// NAT64  64:ff9b::/96  — bytes 12-15 embed the v4.
+	if b[0] == 0x00 && b[1] == 0x64 && b[2] == 0xff && b[3] == 0x9b && bytes_are_zero(b[4:12]) {
+		return ip4_is_private_or_local(net.IP4_Address{b[12], b[13], b[14], b[15]})
+	}
+	// Unspecified  ::  — never a legitimate dial target.
+	if bytes_are_zero(b[:]) do return true
 	return false
+}
+
+bytes_are_zero :: proc(s: []u8) -> bool {
+	for x in s do if x != 0 do return false
+	return true
 }
 
 // access_decide_ip4 / _ip6: does `class` permit dialing this resolved IP,
