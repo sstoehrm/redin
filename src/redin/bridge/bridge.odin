@@ -982,10 +982,13 @@ deliver_http_response :: proc(b: ^Bridge, resp: ^Http_Response) {
 	// Response data table
 	lua_createtable(L, 0, 5)
 
+	// #225 L4: id must use lua_pushlstring (explicit length) like body /
+	// stdout / stderr — clone_to_cstring + lua_pushstring truncates at the
+	// first NUL. The id is the app-controlled routing key; a NUL-truncated id
+	// no longer matches the app's pending-request slot, so the response
+	// callback silently never fires and the entry leaks.
 	if len(resp.id) > 0 {
-		cid := strings.clone_to_cstring(resp.id)
-		lua_pushstring(L, cid)
-		delete(cid)
+		lua_pushlstring(L, cstring(raw_data(transmute([]u8)resp.id)), uint(len(resp.id)))
 		lua_setfield(L, -2, "id")
 	}
 
@@ -997,10 +1000,8 @@ deliver_http_response :: proc(b: ^Bridge, resp: ^Http_Response) {
 		lua_setfield(L, -2, "body")
 	}
 
-	if len(resp.error_msg) > 0 {
-		cerr := strings.clone_to_cstring(resp.error_msg)
-		lua_pushstring(L, cerr)
-		delete(cerr)
+	if len(resp.error_msg) > 0 { // #225 L4: NUL-safe, mirrors id above
+		lua_pushlstring(L, cstring(raw_data(transmute([]u8)resp.error_msg)), uint(len(resp.error_msg)))
 		lua_setfield(L, -2, "error")
 	}
 
@@ -1030,7 +1031,10 @@ deliver_http_response :: proc(b: ^Bridge, resp: ^Http_Response) {
 // redin.shell(id, cmd_table, stdin) — queue async shell command
 // Reads a Lua sequence at `idx` into an owned []string. Returns ok=false
 // (after freeing any partial result) if any element is not a string, so
-// callers don't silently substitute "" for a non-string argv entry (#172).
+// callers don't silently substitute "" for a non-string argv entry (#172),
+// or if any element contains an embedded NUL, which os.process_start would
+// truncate at when building the C argv for execve (#225 L3) — silently
+// dropping the tail of the argument.
 // lua_isstring here is strict (type == LUA_TSTRING), so numbers/bools/tables
 // are rejected rather than coerced.
 read_string_array :: proc(L: ^Lua_State, idx: i32) -> (out: []string, ok: bool) {
@@ -1039,13 +1043,16 @@ read_string_array :: proc(L: ^Lua_State, idx: i32) -> (out: []string, ok: bool) 
 	for i in 0 ..< count {
 		lua_rawgeti(L, idx, i32(i + 1))
 		is_str := lua_isstring(L, -1)
-		if is_str do out[i] = lua_clone_string(L, -1)
+		s: string
+		if is_str do s = lua_clone_string(L, -1)
 		lua_pop(L, 1)
-		if !is_str {
-			for s in out do if len(s) > 0 do delete(s)
+		if !is_str || strings.index_byte(s, 0) >= 0 {
+			if len(s) > 0 do delete(s)
+			for x in out do if len(x) > 0 do delete(x)
 			delete(out)
 			return nil, false
 		}
+		out[i] = s
 	}
 	return out, true
 }
@@ -1062,10 +1069,11 @@ redin_shell :: proc "c" (L: ^Lua_State) -> i32 {
 	if lua_istable(L, 2) {
 		cmd, ok := read_string_array(L, 2)
 		if !ok {
-			// #172: a non-string argv element would otherwise become "",
-			// silently corrupting the command. Reject with an error result
-			// so the on-error handler fires instead.
-			shell_emit_error(&g_bridge.shell_client, req.id, "shell :cmd contains a non-string element")
+			// #172 / #225 L3: a non-string argv element would otherwise become
+			// "", and an element with an embedded NUL would be truncated at the
+			// NUL by execve — both silently corrupt the command. Reject with an
+			// error result so the on-error handler fires instead.
+			shell_emit_error(&g_bridge.shell_client, req.id, "shell :cmd contains a non-string element or an embedded NUL")
 			if len(req.id) > 0 do delete(req.id)
 			return 0
 		}
@@ -1126,10 +1134,13 @@ deliver_shell_response :: proc(b: ^Bridge, resp: ^Shell_Response) {
 	// Response data table
 	lua_createtable(L, 0, 5)
 
+	// #225 L4: id must use lua_pushlstring (explicit length) like body /
+	// stdout / stderr — clone_to_cstring + lua_pushstring truncates at the
+	// first NUL. The id is the app-controlled routing key; a NUL-truncated id
+	// no longer matches the app's pending-request slot, so the response
+	// callback silently never fires and the entry leaks.
 	if len(resp.id) > 0 {
-		cid := strings.clone_to_cstring(resp.id)
-		lua_pushstring(L, cid)
-		delete(cid)
+		lua_pushlstring(L, cstring(raw_data(transmute([]u8)resp.id)), uint(len(resp.id)))
 		lua_setfield(L, -2, "id")
 	}
 
@@ -1146,10 +1157,8 @@ deliver_shell_response :: proc(b: ^Bridge, resp: ^Shell_Response) {
 	lua_pushnumber(L, f64(resp.exit_code))
 	lua_setfield(L, -2, "exit-code")
 
-	if len(resp.error_msg) > 0 {
-		cerr := strings.clone_to_cstring(resp.error_msg)
-		lua_pushstring(L, cerr)
-		delete(cerr)
+	if len(resp.error_msg) > 0 { // #225 L4: NUL-safe, mirrors id above
+		lua_pushlstring(L, cstring(raw_data(transmute([]u8)resp.error_msg)), uint(len(resp.error_msg)))
 		lua_setfield(L, -2, "error")
 	}
 
