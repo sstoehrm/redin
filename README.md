@@ -68,8 +68,8 @@ odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit -o
 
 | Dependency | Purpose | Required |
 |-----------|---------|----------|
-| **Odin** (nightly) | Compiles the host/renderer | Yes |
-| **Raylib** | Bundled with Odin | -- |
+| **Odin** (dev-2026-07 or newer) | Compiles the host/renderer | Yes |
+| **Raylib** (6.0) | Bundled with Odin (`vendor:raylib`) | -- |
 | **LuaJIT** (`luajit`) | Runs tests, AOT compiles Fennel; the C library is statically linked from `vendor/luajit/` so `libluajit-5.1-dev` is not required | Yes |
 | **OpenSSL** (`libssl-dev`) | HTTPS support via odin-http | Yes |
 | **OpenGL + X11 dev headers** (Linux only — `libgl1-mesa-dev`, `libx11-dev`, `libxrandr-dev`, `libxi-dev`, `libxcursor-dev`, `libxinerama-dev`) | Required by Odin's bundled Raylib at link time | Yes (Linux) |

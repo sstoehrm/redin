@@ -245,10 +245,9 @@ install_signal_cleanup :: proc() {
 	if g_signal_cleanup_installed do return
 	g_signal_cleanup_installed = true
 
-	sa := linux.Sig_Action(rawptr) {
-		handler = cleanup_on_signal,
-		flags   = {.RESETHAND},
-	}
+	sa: linux.Sig_Action
+	sa.handler = cleanup_on_signal
+	sa.flags = {.RESETHAND}
 	signals := []linux.Signal{
 		.SIGINT,
 		.SIGTERM,
@@ -258,8 +257,7 @@ install_signal_cleanup :: proc() {
 		.SIGABRT,
 	}
 	for s in signals {
-		// nil oldact via casting; we don't care about the previous handler.
-		linux.rt_sigaction(s, &sa, (^linux.Sig_Action(rawptr))(nil))
+		linux.rt_sigaction(s, &sa, nil)
 	}
 }
 
