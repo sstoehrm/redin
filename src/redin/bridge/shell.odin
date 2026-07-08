@@ -24,10 +24,9 @@ g_sigpipe_ignored: bool
 ignore_sigpipe :: proc() {
 	if g_sigpipe_ignored do return
 	g_sigpipe_ignored = true
-	sa := linux.Sig_Action(rawptr) {
-		handler = transmute(linux.Sig_Handler_Fn)(uintptr(linux.Sig_Action_Special.SIG_IGN)),
-	}
-	linux.rt_sigaction(.SIGPIPE, &sa, (^linux.Sig_Action(rawptr))(nil))
+	sa: linux.Sig_Action
+	sa.special = .SIG_IGN
+	linux.rt_sigaction(.SIGPIPE, &sa, nil)
 }
 
 Shell_Request :: struct {
