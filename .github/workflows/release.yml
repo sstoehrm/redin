@@ -38,6 +38,15 @@ jobs:
             exit 1
           }
 
+      # #233 M3: LuaJIT (linked into the binary) and Fennel (byte-shipped in
+      # the tarball) are vendored blobs with no submodule pin. Assert their
+      # sha256 before packaging so a tampered blob can't be published. Bump
+      # together with vendor/*/BUILD.md.
+      - name: Verify vendored blob hashes
+        run: |
+          echo "815b62f89420861c76b6ddd48b9efcff93248c10df4688cda18f85cac9e45f3b  vendor/luajit/lib/libluajit-5.1.a" | sha256sum -c -
+          echo "420b3e4771be263066c220aa042f02457ce5848e493ddf463cff4eca76ef9ba1  vendor/fennel/fennel.lua" | sha256sum -c -
+
       # Validate the workflow input before using it anywhere. Without this,
       # a maintainer typo like `v1.0.0; rm -rf /` flows verbatim into the
       # release name and tag (#136 L2). The trigger is workflow_dispatch

@@ -36,6 +36,15 @@ jobs:
             exit 1
           }
 
+      # #233 M3: LuaJIT and Fennel are vendored binary/opaque blobs with no
+      # submodule pin. Assert their sha256 so an unreviewed swap (e.g. a
+      # backdoored libluajit-5.1.a) fails CI instead of merging as an opaque
+      # diff. Bump these together with vendor/*/BUILD.md when rolling forward.
+      - name: Verify vendored blob hashes
+        run: |
+          echo "815b62f89420861c76b6ddd48b9efcff93248c10df4688cda18f85cac9e45f3b  vendor/luajit/lib/libluajit-5.1.a" | sha256sum -c -
+          echo "420b3e4771be263066c220aa042f02457ce5848e493ddf463cff4eca76ef9ba1  vendor/fennel/fennel.lua" | sha256sum -c -
+
       - name: Install system dependencies
         run: |
           sudo apt-get update
@@ -105,6 +114,15 @@ jobs:
             echo "::error::odin-http submodule SHA mismatch (got $actual, expected $expected)"
             exit 1
           }
+
+      # #233 M3: LuaJIT and Fennel are vendored binary/opaque blobs with no
+      # submodule pin. Assert their sha256 so an unreviewed swap (e.g. a
+      # backdoored libluajit-5.1.a) fails CI instead of merging as an opaque
+      # diff. Bump these together with vendor/*/BUILD.md when rolling forward.
+      - name: Verify vendored blob hashes
+        run: |
+          echo "815b62f89420861c76b6ddd48b9efcff93248c10df4688cda18f85cac9e45f3b  vendor/luajit/lib/libluajit-5.1.a" | sha256sum -c -
+          echo "420b3e4771be263066c220aa042f02457ce5848e493ddf463cff4eca76ef9ba1  vendor/fennel/fennel.lua" | sha256sum -c -
 
       - name: Install system dependencies
         run: |
