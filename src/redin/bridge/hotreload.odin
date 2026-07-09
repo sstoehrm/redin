@@ -109,7 +109,30 @@ hotreload_arm_retry :: proc(hr: ^Hot_Reload) {
 	hr.retry_at = time.tick_now()
 }
 
+// #233 M2: get_file_mtime lstat's the watched paths (won't follow a
+// symlink), but the reload itself runs `require("init")`, and Lua's module
+// loader follows symlinks unconditionally when it opens the file. An
+// attacker with write access to src/runtime/ could swap a watched .fnl for
+// a symlink to an arbitrary file and have hotreload load+execute the
+// target. Refuse the reload if any watched runtime path is a symlink; the
+// design intent (see #162 L1) is never to follow one. Returns the
+// offending path and ok=false on the first symlink found.
+hotreload_paths_symlink_free :: proc(paths: []string) -> (offending: string, ok: bool) {
+	for p in paths {
+		fi, err := os.lstat(p, context.temp_allocator)
+		if err != os.ERROR_NONE do continue // missing / unreadable: mtime poll already handles it
+		if fi.type == .Symlink {
+			return p, false
+		}
+	}
+	return "", true
+}
+
 hotreload_execute :: proc(b: ^Bridge) -> (ok: bool) {
+	if offending, safe := hotreload_paths_symlink_free(b.hot_reload.watch_paths[:]); !safe {
+		fmt.eprintfln("Hot reload refused: watched runtime path is a symlink: %s", offending)
+		return false
+	}
 	code := `
 		package.loaded["dataflow"] = nil
 		package.loaded["effect"]   = nil
