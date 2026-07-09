@@ -242,6 +242,50 @@ cursor_to_line :: proc(lines: []Text_Line, cursor: int) -> (line_idx: int, col_o
 	return len(lines) - 1, 0
 }
 
+// Map a target x (pixels, relative to the substring's start) to the closest
+// codepoint boundary in text[start:end]. O(n): accumulates one glyph advance
+// per character the same way compute_lines does (scale by font_size/baseSize,
+// spacing between glyphs), instead of remeasuring the growing prefix via
+// MeasureTextEx on every character — which made the cursor mappings O(n²) and
+// turned a click on a very long line into seconds of CPU (issue #233 L6).
+// Using the same advance source as wrapping also keeps cursor placement
+// consistent with the computed line widths.
+offset_at_x :: proc(
+	text: string,
+	start, end: int,
+	target_x: f32,
+	font_obj: rl.Font,
+	font_size: f32,
+	spacing: f32,
+) -> int {
+	if start >= end do return start
+
+	scale: f32 = 1
+	if font_obj.baseSize > 0 do scale = font_size / f32(font_obj.baseSize)
+
+	best_pos := start
+	best_dist := abs(target_x) // distance at the start (width 0)
+	current_px: f32 = 0
+	char_count := 0
+
+	pos := start
+	for pos < end {
+		r, size := utf8.decode_rune(transmute([]u8)text[pos:])
+		glyph_px := glyph_advance_raw(font_obj, r) * scale
+		if char_count > 0 do current_px += spacing
+		current_px += glyph_px
+		pos += size
+		char_count += 1
+
+		dist := abs(target_x - current_px)
+		if dist < best_dist {
+			best_dist = dist
+			best_pos = pos
+		}
+	}
+	return best_pos
+}
+
 // Map a click position (relative to content area top-left) to a byte offset.
 point_to_cursor :: proc(
 	lines: []Text_Line,
@@ -263,25 +307,8 @@ point_to_cursor :: proc(
 	if line_idx >= len(lines) do line_idx = len(lines) - 1
 
 	line := lines[line_idx]
-	if line.start >= line.end do return line.start
-
 	adjusted_x := x + scroll_x
-	best_pos := line.start
-	best_dist := abs(adjusted_x)
-
-	pos := line.start
-	for pos < line.end {
-		_, size := utf8.decode_rune(transmute([]u8)text[pos:])
-		pos += size
-		w := measure_range(text, line.start, pos, font_obj, font_size, spacing)
-		dist := abs(adjusted_x - w)
-		if dist < best_dist {
-			best_dist = dist
-			best_pos = pos
-		}
-	}
-
-	return best_pos
+	return offset_at_x(text, line.start, line.end, adjusted_x, font_obj, font_size, spacing)
 }
 
 // Compute line height from font size. `ratio` is the theme line-height

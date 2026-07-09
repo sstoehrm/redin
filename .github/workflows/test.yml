@@ -78,6 +78,9 @@ jobs:
       - name: Run Odin canvas tests
         run: odin test src/redin/canvas -collection:lib=lib -collection:luajit=vendor/luajit
 
+      - name: Run Odin text tests
+        run: odin test src/redin/text -collection:lib=lib -collection:luajit=vendor/luajit -define:ODIN_TEST_THREADS=1
+
       - name: Build redin
         run: |
           mkdir -p build
