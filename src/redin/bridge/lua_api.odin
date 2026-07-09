@@ -86,6 +86,19 @@ lua_tostring_raw :: #force_inline proc "contextless" (L: ^Lua_State, index: i32)
 	return lua_tolstring(L, index, nil)
 }
 
+// Read a Lua string with its explicit length, so embedded NULs are preserved.
+// `string(lua_tostring_raw(...))` is strlen-based and truncates at the first
+// NUL; Lua strings carry a length and may legitimately contain NULs. Prefer
+// this for any value that round-trips to a caller (dev-server JSON, agent
+// content) — see #218 and #225 L2. The returned slice borrows Lua's buffer;
+// clone it if it must outlive the current stack value.
+lua_tostring_str :: #force_inline proc "contextless" (L: ^Lua_State, index: i32) -> string {
+	n: uint
+	p := lua_tolstring(L, index, &n)
+	if p == nil do return ""
+	return string(([^]u8)(p)[:n])
+}
+
 lua_getglobal :: #force_inline proc "contextless" (L: ^Lua_State, name: cstring) {
 	lua_getfield(L, LUA_GLOBALSINDEX, name)
 }
