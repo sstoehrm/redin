@@ -147,3 +147,37 @@ test_find_content_length_ignores_request_line :: proc(t: ^testing.T) {
 	headers := "GET /state/x?content-length:9 HTTP/1.1\r\nHost: localhost:8800\r\n"
 	testing.expect_value(t, find_content_length(headers), 0)
 }
+
+// --- #233 L2/L3: header_count backs the duplicate-Host/Authorization and
+// Transfer-Encoding rejections in the request parser. ---
+
+@(test)
+test_header_count_duplicate_host :: proc(t: ^testing.T) {
+	headers := "GET / HTTP/1.1\r\nHost: localhost:8800\r\nHost: evil.com:8800\r\n"
+	testing.expect_value(t, header_count(headers, "host"), 2)
+}
+
+@(test)
+test_header_count_single_host :: proc(t: ^testing.T) {
+	headers := "GET / HTTP/1.1\r\nHost: localhost:8800\r\n"
+	testing.expect_value(t, header_count(headers, "host"), 1)
+}
+
+@(test)
+test_header_count_duplicate_authorization :: proc(t: ^testing.T) {
+	headers := "GET / HTTP/1.1\r\nAuthorization: Bearer a\r\nAuthorization: Bearer b\r\n"
+	testing.expect_value(t, header_count(headers, "authorization"), 2)
+}
+
+@(test)
+test_header_count_transfer_encoding_present :: proc(t: ^testing.T) {
+	headers := "POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n"
+	testing.expect_value(t, header_count(headers, "transfer-encoding"), 1)
+}
+
+@(test)
+test_header_count_host_ignores_request_line :: proc(t: ^testing.T) {
+	// A "host:" inside the request-line URL is not a header line.
+	headers := "GET /x?host:1 HTTP/1.1\r\nHost: localhost:8800\r\n"
+	testing.expect_value(t, header_count(headers, "host"), 1)
+}
