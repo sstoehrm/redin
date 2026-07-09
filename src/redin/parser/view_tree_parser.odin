@@ -121,6 +121,14 @@ _read_keyword :: proc(p: ^_Parser) -> string {
 	return p.text[start:p.pos]
 }
 
+// #233 L5: an arbitrarily long integer literal in a .fnl file would overflow
+// f32 to +Inf, which then flows through f16(num_val) into layout and wedges
+// it. NUM_MAX is far beyond any real coordinate / size / colour literal;
+// digits past it are still consumed so the parser position stays correct,
+// but they don't grow the value, and the result is clamped so it can never
+// be infinite.
+_NUM_MAX :: f32(1e9)
+
 _read_number :: proc(p: ^_Parser) -> f32 {
 	neg: f32 = 1
 	if p.pos < len(p.text) && p.text[p.pos] == '-' {
@@ -132,7 +140,9 @@ _read_number :: proc(p: ^_Parser) -> f32 {
 	for p.pos < len(p.text) {
 		c := p.text[p.pos]
 		if c >= '0' && c <= '9' {
-			result = result * 10 + f32(c - '0')
+			if result < _NUM_MAX {
+				result = result * 10 + f32(c - '0')
+			}
 			p.pos += 1
 		} else {
 			break
@@ -155,6 +165,7 @@ _read_number :: proc(p: ^_Parser) -> f32 {
 		}
 	}
 
+	if result > _NUM_MAX do result = _NUM_MAX
 	return result * neg
 }
 
