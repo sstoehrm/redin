@@ -45,3 +45,21 @@ test_resolve_clears_when_content_shrinks :: proc(t: ^testing.T) {
 	resolve_text_selection(paths, nodes)
 	testing.expect_value(t, state.selection_kind, Selection_Kind.None)
 }
+
+@(test)
+test_resolve_clears_when_only_start_stale :: proc(t: ^testing.T) {
+	// #233 L7: a backwards selection (anchor after focus) whose anchor
+	// (selection_start) is beyond shrunk content while selection_end still
+	// fits must also clear. The old code only checked selection_end.
+	sync.lock(&g_input_test_state_mutex)
+	defer sync.unlock(&g_input_test_state_mutex)
+	state_init()
+	defer state_destroy()
+
+	p := [1]u8{0x01}
+	paths := []types.Path{{value = p[:], length = 1}}
+	nodes := []types.Node{types.NodeText{content = "hi"}}   // len 2
+	set_text_selection([]u8{0x01}, 5, 1) // start=5 stale, end=1 in-bounds
+	resolve_text_selection(paths, nodes)
+	testing.expect_value(t, state.selection_kind, Selection_Kind.None)
+}

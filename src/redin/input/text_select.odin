@@ -249,7 +249,13 @@ resolve_text_selection :: proc(paths: []types.Path, nodes: []types.Node) {
 		clear_text_selection()
 		return
 	}
-	if state.selection_end > len(text_node.content) {
+	// #233 L7: clear when *either* endpoint is stale, not just selection_end.
+	// If the node's content shrank since the selection was made, a
+	// selection_start left beyond len(content) is a latent OOB slice for any
+	// caller that indexes with it directly (today's readers clamp, but the
+	// invariant shouldn't depend on that).
+	if state.selection_start > len(text_node.content) ||
+	   state.selection_end > len(text_node.content) {
 		clear_text_selection()
 	}
 }
