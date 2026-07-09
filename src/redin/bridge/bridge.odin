@@ -1755,6 +1755,35 @@ validate_font_path :: proc(path: string) -> bool {
 	return true
 }
 
+// font_path_escapes_cwd closes the gap validate_font_path can't (#233 M4):
+// the lexical `..` ban confines a font path to the cwd subtree only
+// textually, but a symlink placed inside that subtree ("assets/x.ttf" ->
+// /etc/shadow) still resolves out of it — and the theme, hence the font
+// path, can arrive from an authenticated `PUT /aspects`. Canonicalize the
+// path (os.get_absolute_path opens the file and reads its symlink-resolved
+// /proc/self/fd link) and require the real target to stay within the
+// working directory.
+//
+// Returns false — allow — when the file doesn't exist yet (open fails):
+// rl.LoadFont will simply fail to open it, exactly as before, and the
+// lexical guard already ran. Only an existing file whose real path escapes
+// cwd is rejected, so legitimate relative fonts under the project are
+// unaffected.
+font_path_escapes_cwd :: proc(path: string) -> bool {
+	real, err := os.get_absolute_path(path, context.temp_allocator)
+	if err != nil do return false // missing / unreadable — LoadFont fails on its own
+	cwd, cwd_err := os.get_working_directory(context.temp_allocator)
+	if cwd_err != nil do return false // can't determine cwd; don't block on it
+	if real == cwd do return true // resolves to the cwd directory itself — reject
+	if strings.has_prefix(real, cwd) {
+		rest := real[len(cwd):]
+		// Guard the path boundary so a sibling ("<cwd>2/x") isn't read as
+		// inside "<cwd>". A real subpath starts with the separator.
+		if len(rest) > 0 && rest[0] == '/' do return false
+	}
+	return true
+}
+
 load_font_faces :: proc(L: ^Lua_State, index: i32) {
 	lua_pushnil(L)
 	for lua_next(L, index) != 0 {
@@ -1774,6 +1803,11 @@ load_font_faces :: proc(L: ^Lua_State, index: i32) {
 					path := string(lua_tostring_raw(L, -1))
 					if !validate_font_path(path) {
 						fmt.eprintfln("Rejected font path (must be relative, no ..): %s", path)
+						lua_pop(L, 1)
+						continue
+					}
+					if font_path_escapes_cwd(path) {
+						fmt.eprintfln("Rejected font path (resolves outside project dir): %s", path)
 						lua_pop(L, 1)
 						continue
 					}
