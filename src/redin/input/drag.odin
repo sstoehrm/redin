@@ -83,6 +83,31 @@ drag_matches :: proc(src, target: []string) -> bool {
 	return false
 }
 
+// #225 L5: is `node_idx` still a drag-over zone (resp. drop target) whose
+// tags overlap the drag payload's? Used to revalidate a stored
+// over_zone_idx / over_drop_idx at frame entry: the len-bounds clamp alone
+// doesn't catch a mid-drag re-flatten that reshuffles the tree to the same
+// size, leaving the index pointing at a *different* node. Validating against
+// the freshly-extracted listeners for this frame confirms the node still is
+// our zone/drop before any :leave fires against it.
+drag_over_idx_valid :: proc(node_idx: int, src_tags: []string, listeners: []types.Listener) -> bool {
+	for listener in listeners {
+		l, ok := listener.(types.DragOverListener)
+		if !ok do continue
+		if l.node_idx == node_idx && drag_matches(src_tags, l.tags) do return true
+	}
+	return false
+}
+
+dropable_idx_valid :: proc(node_idx: int, src_tags: []string, listeners: []types.Listener) -> bool {
+	for listener in listeners {
+		l, ok := listener.(types.DropListener)
+		if !ok do continue
+		if l.node_idx == node_idx && drag_matches(src_tags, l.tags) do return true
+	}
+	return false
+}
+
 // Deepest matching DropListener under `pt` whose tags overlap `src_tags`.
 // Deepest = highest node_idx (DFS-ordered nodes guarantee descendants > ancestors).
 deepest_dropable_match :: proc(
@@ -153,7 +178,9 @@ process_drag :: proc(
 			free_captured(s.captured)
 			drag = nil
 		case Drag_Active:
-			if s.over_zone_idx >= 0 && s.over_zone_idx < len(nodes) {
+			// #225 L5: only fire the cancel :leave if the stored zone index
+			// still resolves to a compatible drag-over zone this frame.
+			if s.over_zone_idx >= 0 && drag_over_idx_valid(s.over_zone_idx, s.src_tags, listeners) {
 				if ev := node_over_event(nodes[s.over_zone_idx]); len(ev) > 0 {
 					append(&dispatch, types.Dispatch_Event(types.Drag_Over_Event{
 						event_name = ev,
@@ -261,9 +288,17 @@ process_drag :: proc(
 			drag = nil
 			return dispatch
 		}
-		// Stale zone/drop indices from a previous frame's layout — clear before use.
-		if s.over_zone_idx >= len(nodes) do s.over_zone_idx = -1
-		if s.over_drop_idx >= len(nodes) do s.over_drop_idx = -1
+		// #225 L5: stale zone/drop indices from a previous frame's layout.
+		// A bounds clamp only catches a shrunk tree; a same-size re-flatten
+		// can leave the index pointing at a different node. Drop any stored
+		// index that no longer resolves to a compatible zone/drop for this
+		// drag, so no :leave fires against the wrong node below.
+		if s.over_zone_idx >= 0 && !drag_over_idx_valid(s.over_zone_idx, s.src_tags, listeners) {
+			s.over_zone_idx = -1
+		}
+		if s.over_drop_idx >= 0 && !dropable_idx_valid(s.over_drop_idx, s.src_tags, listeners) {
+			s.over_drop_idx = -1
+		}
 
 		// Hit-test compatible drop targets and zones.
 		new_zone := deepest_drag_over_match(s.src_tags, mouse, listeners, node_rects)
