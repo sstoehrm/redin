@@ -79,3 +79,49 @@ test_sanitize_dim_rejects_oversize :: proc(t: ^testing.T) {
 	_, ok := sanitize_dim(99999)
 	testing.expect(t, !ok, "dimension above the texture-side ceiling must be rejected")
 }
+
+// --- sanitize_coord (issue #233 finding M5) ---
+// Unlike a dimension, a canvas coordinate may be negative (content extends
+// off-screen), but NaN/±Inf must never reach the draw calls.
+
+@(test)
+test_sanitize_coord_accepts_negative :: proc(t: ^testing.T) {
+	v, ok := sanitize_coord(-250)
+	testing.expect(t, ok, "negative coordinate is legal (off-screen content)")
+	testing.expect_value(t, v, f32(-250))
+}
+
+@(test)
+test_sanitize_coord_accepts_normal :: proc(t: ^testing.T) {
+	v, ok := sanitize_coord(640)
+	testing.expect(t, ok)
+	testing.expect_value(t, v, f32(640))
+}
+
+@(test)
+test_sanitize_coord_rejects_nan :: proc(t: ^testing.T) {
+	_, ok := sanitize_coord(math.nan_f32())
+	testing.expect(t, !ok, "NaN coordinate must be rejected")
+}
+
+@(test)
+test_sanitize_coord_rejects_infinity :: proc(t: ^testing.T) {
+	_, ok := sanitize_coord(math.inf_f32(1))
+	testing.expect(t, !ok, "+Inf coordinate must be rejected")
+
+	_, ok2 := sanitize_coord(math.inf_f32(-1))
+	testing.expect(t, !ok2, "-Inf coordinate must be rejected")
+}
+
+@(test)
+test_sanitize_coord_clamps_huge_finite :: proc(t: ^testing.T) {
+	// A finite-but-astronomical value stays finite but is clamped so
+	// downstream transform/scissor math can't blow up.
+	v, ok := sanitize_coord(1e30)
+	testing.expect(t, ok, "huge finite coordinate is clamped, not rejected")
+	testing.expect_value(t, v, f32(COORD_MAX))
+
+	v2, ok2 := sanitize_coord(-1e30)
+	testing.expect(t, ok2)
+	testing.expect_value(t, v2, f32(-COORD_MAX))
+}

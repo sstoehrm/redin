@@ -172,6 +172,8 @@ Primitives: `rect`, `circle`, `ellipse`, `line`, `text`, `polygon`, `image`.
 Input: `mouse-x`, `mouse-y`, `mouse-in?`, `mouse-down?`, `mouse-pressed?`, `mouse-released?`, `key-down?`, `key-pressed?`.
 Style: `fill` = [r g b] or [r g b a], `stroke` = outline color, `stroke-width`, `radius` (rect corners).
 
+Input sanitization (host-side safety valves, not usually relevant to app code): a command whose coordinate is `NaN`/`±Inf` is skipped; huge finite coordinates are clamped to ±1,048,576 px; widths/heights/radii outside `[0, 16384]` are rejected; `polygon` is capped at 4096 vertices.
+
 ### Native canvas (Odin, requires binary rebuild)
 
 ```odin

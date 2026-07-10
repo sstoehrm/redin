@@ -629,6 +629,37 @@ sanitize_dim :: proc(v: f32) -> (f32, bool) {
 	return v, true
 }
 
+// A canvas coordinate (x/y origin, line endpoint, polygon vertex) may be
+// negative — content is allowed to extend off-screen — so it can't use
+// sanitize_dim. But NaN/±Inf must never reach DrawLineEx/DrawTextEx/
+// DrawTriangle (behaviour is undefined and the junk propagates into any
+// scissor/transform math), and a finite-but-astronomical value is clamped
+// to keep downstream arithmetic bounded. Issue #233 finding M5.
+@(private = "package")
+COORD_MAX :: 1 << 20 // ±1,048,576 px — far beyond any real screen, still finite
+
+sanitize_coord :: proc(v: f32) -> (f32, bool) {
+	if math.is_nan(v) || math.is_inf(v) do return 0, false
+	return clamp(v, -COORD_MAX, COORD_MAX), true
+}
+
+// Read table cell `n` at `idx` as a canvas coordinate, sanitize it, and add
+// the host origin offset (itself host-computed and finite). ok=false on
+// NaN/Inf so the caller can skip the whole command.
+canvas_coord :: proc(L: ^Lua_State, idx: i32, n: i32, offset: f32) -> (f32, bool) {
+	v, ok := sanitize_coord(f32(lua_rawgeti_number(L, idx, n)))
+	if !ok do return 0, false
+	return v + offset, true
+}
+
+// Upper bound on canvas polygon vertices. `lua_objlen` is only capped by
+// i32 max, so an adversarial provider returning a 250M-entry point table
+// would `make` a multi-GiB slice every frame (OOM / renderer stall). Cap
+// it to a value aligned with DIM_MAX; skip the command past that rather
+// than truncate to a nonsense shape. Issue #233 finding H2.
+@(private = "file")
+MAX_POLYGON_POINTS :: 4096
+
 // Read a color [r,g,b] or [r,g,b,a] from a table field. Returns ok=false if field missing.
 read_color_field :: proc(L: ^Lua_State, idx: i32, field: cstring) -> (rl.Color, bool) {
 	lua_getfield(L, idx, field)
@@ -766,11 +797,11 @@ execute_canvas_commands :: proc(L: ^Lua_State, buf_idx: i32, rect: rl.Rectangle)
 execute_canvas_command :: proc(L: ^Lua_State, idx: i32, tag: string, ox: f32, oy: f32) {
 	switch tag {
 	case "rect":
-		x := f32(lua_rawgeti_number(L, idx, 2)) + ox
-		y := f32(lua_rawgeti_number(L, idx, 3)) + oy
+		x, x_ok := canvas_coord(L, idx, 2, ox)
+		y, y_ok := canvas_coord(L, idx, 3, oy)
 		w, w_ok := sanitize_dim(f32(lua_rawgeti_number(L, idx, 4)))
 		h, h_ok := sanitize_dim(f32(lua_rawgeti_number(L, idx, 5)))
-		if !w_ok || !h_ok do return
+		if !x_ok || !y_ok || !w_ok || !h_ok do return
 		lua_rawgeti(L, idx, 6)
 		opts := lua_gettop(L)
 
@@ -798,10 +829,10 @@ execute_canvas_command :: proc(L: ^Lua_State, idx: i32, tag: string, ox: f32, oy
 		lua_pop(L, 1)
 
 	case "circle":
-		cx := f32(lua_rawgeti_number(L, idx, 2)) + ox
-		cy := f32(lua_rawgeti_number(L, idx, 3)) + oy
+		cx, cx_ok := canvas_coord(L, idx, 2, ox)
+		cy, cy_ok := canvas_coord(L, idx, 3, oy)
 		cr, cr_ok := sanitize_dim(f32(lua_rawgeti_number(L, idx, 4)))
-		if !cr_ok do return
+		if !cx_ok || !cy_ok || !cr_ok do return
 		lua_rawgeti(L, idx, 5)
 		opts := lua_gettop(L)
 
@@ -814,11 +845,11 @@ execute_canvas_command :: proc(L: ^Lua_State, idx: i32, tag: string, ox: f32, oy
 		lua_pop(L, 1)
 
 	case "ellipse":
-		cx := f32(lua_rawgeti_number(L, idx, 2)) + ox
-		cy := f32(lua_rawgeti_number(L, idx, 3)) + oy
+		cx, cx_ok := canvas_coord(L, idx, 2, ox)
+		cy, cy_ok := canvas_coord(L, idx, 3, oy)
 		rx, rx_ok := sanitize_dim(f32(lua_rawgeti_number(L, idx, 4)))
 		ry, ry_ok := sanitize_dim(f32(lua_rawgeti_number(L, idx, 5)))
-		if !rx_ok || !ry_ok do return
+		if !cx_ok || !cy_ok || !rx_ok || !ry_ok do return
 		lua_rawgeti(L, idx, 6)
 		opts := lua_gettop(L)
 
@@ -831,10 +862,11 @@ execute_canvas_command :: proc(L: ^Lua_State, idx: i32, tag: string, ox: f32, oy
 		lua_pop(L, 1)
 
 	case "line":
-		x1 := f32(lua_rawgeti_number(L, idx, 2)) + ox
-		y1 := f32(lua_rawgeti_number(L, idx, 3)) + oy
-		x2 := f32(lua_rawgeti_number(L, idx, 4)) + ox
-		y2 := f32(lua_rawgeti_number(L, idx, 5)) + oy
+		x1, x1_ok := canvas_coord(L, idx, 2, ox)
+		y1, y1_ok := canvas_coord(L, idx, 3, oy)
+		x2, x2_ok := canvas_coord(L, idx, 4, ox)
+		y2, y2_ok := canvas_coord(L, idx, 5, oy)
+		if !x1_ok || !y1_ok || !x2_ok || !y2_ok do return
 		lua_rawgeti(L, idx, 6)
 		opts := lua_gettop(L)
 
@@ -850,8 +882,9 @@ execute_canvas_command :: proc(L: ^Lua_State, idx: i32, tag: string, ox: f32, oy
 		lua_pop(L, 1)
 
 	case "text":
-		x := f32(lua_rawgeti_number(L, idx, 2)) + ox
-		y := f32(lua_rawgeti_number(L, idx, 3)) + oy
+		x, x_ok := canvas_coord(L, idx, 2, ox)
+		y, y_ok := canvas_coord(L, idx, 3, oy)
+		if !x_ok || !y_ok do return
 		lua_rawgeti(L, idx, 4)
 		// Skip the command instead of feeding nil into DrawTextEx if the
 		// table cell isn't a string. Issue #78 finding L3.
@@ -891,28 +924,39 @@ execute_canvas_command :: proc(L: ^Lua_State, idx: i32, tag: string, ox: f32, oy
 
 		if lua_istable(L, points_idx) {
 			n_points := i32(lua_objlen(L, points_idx))
+			// #233 H2: cap the vertex count so an adversarial point table
+			// can't force a multi-GiB per-frame allocation.
+			if n_points > MAX_POLYGON_POINTS do n_points = MAX_POLYGON_POINTS
 			if n_points >= 3 {
 				points := make([]rl.Vector2, n_points)
 				defer delete(points)
+				// #233 M5: any non-finite vertex poisons the whole polygon;
+				// skip the draw rather than feed NaN/Inf into DrawTriangle.
+				all_finite := true
 				for p: i32 = 1; p <= n_points; p += 1 {
 					lua_rawgeti(L, points_idx, p)
 					pt_idx := lua_gettop(L)
-					points[p - 1] = {
-						f32(lua_rawgeti_number(L, pt_idx, 1)) + ox,
-						f32(lua_rawgeti_number(L, pt_idx, 2)) + oy,
-					}
+					px, px_ok := canvas_coord(L, pt_idx, 1, ox)
+					py, py_ok := canvas_coord(L, pt_idx, 2, oy)
 					lua_pop(L, 1)
+					if !px_ok || !py_ok {
+						all_finite = false
+						break
+					}
+					points[p - 1] = {px, py}
 				}
 
-				if fill, ok := read_color_field(L, opts, "fill"); ok {
-					for i: i32 = 1; i < n_points - 1; i += 1 {
-						rl.DrawTriangle(points[0], points[i], points[i + 1], fill)
+				if all_finite {
+					if fill, ok := read_color_field(L, opts, "fill"); ok {
+						for i: i32 = 1; i < n_points - 1; i += 1 {
+							rl.DrawTriangle(points[0], points[i], points[i + 1], fill)
+						}
 					}
-				}
-				if stroke, ok := read_color_field(L, opts, "stroke"); ok {
-					for i: i32 = 0; i < n_points; i += 1 {
-						next := (i + 1) % n_points
-						rl.DrawLineV(points[i], points[next], stroke)
+					if stroke, ok := read_color_field(L, opts, "stroke"); ok {
+						for i: i32 = 0; i < n_points; i += 1 {
+							next := (i + 1) % n_points
+							rl.DrawLineV(points[i], points[next], stroke)
+						}
 					}
 				}
 			}
@@ -920,11 +964,11 @@ execute_canvas_command :: proc(L: ^Lua_State, idx: i32, tag: string, ox: f32, oy
 		lua_pop(L, 2)
 
 	case "image":
-		x := f32(lua_rawgeti_number(L, idx, 2)) + ox
-		y := f32(lua_rawgeti_number(L, idx, 3)) + oy
+		x, x_ok := canvas_coord(L, idx, 2, ox)
+		y, y_ok := canvas_coord(L, idx, 3, oy)
 		w, w_ok := sanitize_dim(f32(lua_rawgeti_number(L, idx, 4)))
 		h, h_ok := sanitize_dim(f32(lua_rawgeti_number(L, idx, 5)))
-		if !w_ok || !h_ok do return
+		if !x_ok || !y_ok || !w_ok || !h_ok do return
 		rl.DrawRectangleLinesEx({x, y, w, h}, 1, rl.GRAY)
 		rl.DrawText("img", i32(x) + 2, i32(y) + 2, 12, rl.GRAY)
 	}
