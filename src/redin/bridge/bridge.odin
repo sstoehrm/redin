@@ -79,17 +79,22 @@ init :: proc(b: ^Bridge) {
 	// tracking allocator flags as a "Bad free"; the dev-nightly Odin
 	// allocates). Lua copies the cstring on push, so the temp clone is
 	// reclaimed by the first frame's free_all(context.temp_allocator).
-	exe_path := string(os.args[0])
-	exe_dir: string
-	{
-		last_sep := -1
-		for i := len(exe_path) - 1; i >= 0; i -= 1 {
-			if exe_path[i] == '/' || exe_path[i] == '\\' {
-				last_sep = i
-				break
+	//
+	// #233 H1: when redin is on $PATH and invoked bare (`redin app.fnl`),
+	// argv[0] is just "redin" with no separator. Defaulting exe_dir to "."
+	// then makes setup_lua_paths / load_fennel look for
+	// ./vendor/fennel/fennel.lua relative to the *current* directory —
+	// before any source-tree gate — so `cd /tmp/tainted && redin x.fnl`
+	// would execute an attacker-planted ./vendor/fennel/fennel.lua at
+	// startup. Resolve the real binary via /proc/self/exe in that case so
+	// the search stays anchored to the install directory, never cwd.
+	exe_dir, exe_has_sep := path_parent_dir(string(os.args[0]))
+	if !exe_has_sep {
+		if real, err := os.get_executable_path(context.temp_allocator); err == nil {
+			if real_dir, real_has_sep := path_parent_dir(real); real_has_sep {
+				exe_dir = real_dir
 			}
 		}
-		exe_dir = exe_path[:last_sep] if last_sep > 0 else "."
 	}
 	exe_dir_c := strings.clone_to_cstring(exe_dir, context.temp_allocator)
 	lua_pushstring(b.L, exe_dir_c)
