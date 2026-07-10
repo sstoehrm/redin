@@ -25,8 +25,22 @@ Intrinsic_Entry :: struct {
 @(private)
 intrinsic_cache: [dynamic]Intrinsic_Entry
 
-// Grow the cache to at least `n` entries. New slots are initialized
-// as unpopulated. Existing entries are preserved (cross-frame hits).
+// Slack kept when reclaiming the cache after the tree shrinks (#225 L6).
+// We only give the backing array back to the allocator when it is more than
+// this many entries larger than the current need, so normal per-frame node-
+// count fluctuations don't thrash realloc.
+@(private)
+CACHE_SHRINK_SLACK :: 512
+
+// Grow the cache to at least `n` entries. New slots are initialized as
+// unpopulated. Existing entries are preserved (cross-frame hits).
+//
+// #225 L6: the cache previously only ever grew to the peak node count and
+// never shrank, so a transient large tree (e.g. a POST /events that briefly
+// lays out a 10k-node view before reverting) pinned that backing array for
+// the process lifetime. When the tree shrinks well below the high-water
+// mark, free any line slices still held past the new end and hand the
+// backing capacity back.
 ensure_intrinsic_cache :: proc(n: int) {
 	old_len := len(intrinsic_cache)
 	if n > old_len {
@@ -34,6 +48,14 @@ ensure_intrinsic_cache :: proc(n: int) {
 		for i in old_len ..< n {
 			intrinsic_cache[i] = Intrinsic_Entry{width = -1}
 		}
+	} else if old_len - n > CACHE_SHRINK_SLACK {
+		for i in n ..< old_len {
+			if intrinsic_cache[i].lines_valid {
+				delete(intrinsic_cache[i].lines)
+			}
+		}
+		resize(&intrinsic_cache, n)
+		shrink(&intrinsic_cache)
 	}
 }
 
