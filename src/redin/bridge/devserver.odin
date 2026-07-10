@@ -1162,7 +1162,7 @@ frame_value_to_json :: proc(
 	is_node := lua_isstring(L, -1)
 	tag := ""
 	if is_node {
-		tag = string(lua_tostring_raw(L, -1))
+		tag = lua_tostring_str(L, -1)
 		if len(tag) == 0 do is_node = false
 	}
 	lua_pop(L, 1)
@@ -1251,7 +1251,7 @@ agent_nodes_walker :: proc(b: ^strings.Builder, L: ^Lua_State, index: i32, first
 	is_node := lua_isstring(L, -1)
 	tag := ""
 	if is_node {
-		tag = string(lua_tostring_raw(L, -1))
+		tag = lua_tostring_str(L, -1)
 		if len(tag) == 0 do is_node = false
 	}
 	lua_pop(L, 1)
@@ -1265,7 +1265,7 @@ agent_nodes_walker :: proc(b: ^strings.Builder, L: ^Lua_State, index: i32, first
 		lua_getfield(L, attrs_idx, "agent")
 		mode := ""
 		if lua_isstring(L, -1) {
-			s := string(lua_tostring_raw(L, -1))
+			s := lua_tostring_str(L, -1)
 			if s == "read" || s == ":read" do mode = "read"
 			if s == "edit" || s == ":edit" do mode = "edit"
 		}
@@ -1274,7 +1274,7 @@ agent_nodes_walker :: proc(b: ^strings.Builder, L: ^Lua_State, index: i32, first
 		lua_getfield(L, attrs_idx, "id")
 		id := ""
 		if lua_isstring(L, -1) {
-			id = string(lua_tostring_raw(L, -1))
+			id = lua_tostring_str(L, -1)
 		}
 		lua_pop(L, 1)
 		if len(mode) > 0 && len(id) > 0 && tag != "canvas" {
@@ -1344,7 +1344,7 @@ agent_find_by_id :: proc(L: ^Lua_State, index: i32, target_id: string) -> bool {
 		if lua_istable(L, -1) {
 			lua_getfield(L, -1, "id")
 			id := ""
-			if lua_isstring(L, -1) do id = string(lua_tostring_raw(L, -1))
+			if lua_isstring(L, -1) do id = lua_tostring_str(L, -1)
 			lua_pop(L, 1)
 			lua_pop(L, 1) // attrs
 			if id == target_id {
@@ -1380,7 +1380,7 @@ agent_node_attr_string :: proc(L: ^Lua_State, attr: cstring) -> string {
 	lua_getfield(L, -1, attr)
 	defer lua_pop(L, 1)
 	if !lua_isstring(L, -1) do return ""
-	return strings.clone(string(lua_tostring_raw(L, -1)), context.temp_allocator)
+	return strings.clone(lua_tostring_str(L, -1), context.temp_allocator)
 }
 
 agent_node_tag :: proc(L: ^Lua_State) -> string {
@@ -1388,7 +1388,7 @@ agent_node_tag :: proc(L: ^Lua_State) -> string {
 	lua_rawgeti(L, -1, 1)
 	defer lua_pop(L, 1)
 	if !lua_isstring(L, -1) do return ""
-	return strings.clone(string(lua_tostring_raw(L, -1)), context.temp_allocator)
+	return strings.clone(lua_tostring_str(L, -1), context.temp_allocator)
 }
 
 // Emits {"content": ...} JSON for the node at -1 based on its tag.
@@ -1417,7 +1417,7 @@ emit_agent_content :: proc(b: ^strings.Builder, L: ^Lua_State, tag: string) {
 		// Default: leaf-text-like (text, button). Content is slot [3].
 		lua_rawgeti(L, -1, 3)
 		val := ""
-		if lua_isstring(L, -1) do val = string(lua_tostring_raw(L, -1))
+		if lua_isstring(L, -1) do val = lua_tostring_str(L, -1)
 		lua_pop(L, 1)
 		json_string(b, val)
 	}
@@ -2004,7 +2004,7 @@ read_mouse_button :: proc(L: ^Lua_State) -> (rl.MouseButton, bool) {
 	lua_getfield(L, -1, "button")
 	defer lua_pop(L, 1)
 	if !lua_isstring(L, -1) do return .LEFT, false
-	s := string(lua_tostring_raw(L, -1))
+	s := lua_tostring_str(L, -1)
 	switch s {
 	case "left":   return .LEFT,   true
 	case "right":  return .RIGHT,  true
@@ -2221,7 +2221,7 @@ handle_post_input_key :: proc(ds: ^Dev_Server, ch: ^Response_Channel, body: stri
 	}
 	lua_getfield(L, -1, "key")
 	key_str := ""
-	if lua_isstring(L, -1) do key_str = string(lua_tostring_raw(L, -1))
+	if lua_isstring(L, -1) do key_str = lua_tostring_str(L, -1)
 	lua_pop(L, 1)
 	key, ok := key_string_to_raylib(key_str)
 	if !ok {
