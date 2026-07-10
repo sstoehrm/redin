@@ -22,7 +22,7 @@ On startup the server generates a random 256-bit token and writes it to `./.redi
 Authorization: Bearer <contents of .redin-token>
 ```
 
-The server also verifies the `Host` header matches `localhost:<port>` or `127.0.0.1:<port>` to blunt DNS-rebinding attacks. CORS preflight is not served — the endpoint is intended for local tools, not browsers. Missing token → `401`; bad Host → `403`; OPTIONS → `405`; malformed `Content-Length` (more than 12 digits) → `400 Bad Request`.
+The server also verifies the `Host` header matches `localhost:<port>` or `127.0.0.1:<port>` to blunt DNS-rebinding attacks. CORS preflight is not served — the endpoint is intended for local tools, not browsers. Missing token → `401`; bad Host → `403`; OPTIONS → `405`. A request is rejected with `400 Bad Request` when it is ambiguous or unsupported for framing: malformed `Content-Length` (more than 12 digits), a duplicated `Content-Length`, `Host`, or `Authorization` header, or any `Transfer-Encoding` header (only `Content-Length` framing is supported).
 
 If the server cannot write `.redin-token` or `.redin-port` at startup (read-only directory, etc.), it aborts startup and prints a clear stderr line. The dev server never runs without a token file in place.
 

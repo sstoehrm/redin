@@ -575,6 +575,23 @@ handle_one_connection :: proc(ds: ^Dev_Server, client: net.TCP_Socket, stack_buf
 					bad_request = true
 					break
 				}
+				// #233 L2: RFC 7230 §5.4 — more than one Host MUST be a 400;
+				// duplicate Authorization is likewise ambiguous. find_header_value
+				// / check_host_header / check_bearer_token only ever read the
+				// first, so a second occurrence could smuggle a different value
+				// past the rebinding / auth checks. Reject rather than guess.
+				if header_count(req_str[:header_end], "host") > 1 ||
+				   header_count(req_str[:header_end], "authorization") > 1 {
+					bad_request = true
+					break
+				}
+				// #233 L3: bodies are framed by Content-Length only. Transfer-
+				// Encoding (chunked) is never parsed; if present it's a TE/CL
+				// desync smuggling primitive behind a proxy. Reject any TE.
+				if header_count(req_str[:header_end], "transfer-encoding") > 0 {
+					bad_request = true
+					break
+				}
 				// Check Content-Length for body
 				cl := find_content_length(req_str[:header_end])
 				body_start := header_end + 4
