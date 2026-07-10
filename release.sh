@@ -23,9 +23,13 @@ for f in src/runtime/*.fnl; do
   luajit vendor/fennel/fennel.lua --compile "$f" > "${DIST}/runtime/${name}.lua"
 done
 
-# Vendor (fennel + luajit)
-cp -r vendor/fennel "${DIST}/vendor/fennel"
-cp -r vendor/luajit "${DIST}/vendor/luajit"
+# Vendor (fennel + luajit) — copy only the files the build needs, matching
+# release.yml. #225 L9: `cp -r vendor/luajit` pulled in the whole local dir
+# (BUILD.md, any local build artifacts, a stray .git), none of which should
+# ship in a release tarball.
+mkdir -p "${DIST}/vendor/fennel" "${DIST}/vendor/luajit/lib"
+cp vendor/fennel/fennel.lua "${DIST}/vendor/fennel/"
+cp vendor/luajit/lib/libluajit-5.1.a "${DIST}/vendor/luajit/lib/"
 
 # Lib (odin-http submodule, for upgrade-to-native builds).
 # Exclude Windows-only static libs and non-source dirs to keep the tarball small.
@@ -53,13 +57,18 @@ cp .claude/skills/redin-dev/SKILL.md "${DIST}/.claude/skills/redin-dev/"
 # Create tarball
 cd dist
 tar czf "${NAME}.tar.gz" "${NAME}"
+# SHA-256 sidecar, matching release.yml (#136 L4 / #225 L9). Downstream
+# tooling and manual `sha256sum -c` use it to detect a corrupt or swapped
+# tarball. Written next to the tarball inside dist/.
+sha256sum "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256"
 cd ..
 
 echo "  Created: dist/${NAME}.tar.gz"
+echo "  Created: dist/${NAME}.tar.gz.sha256"
 echo ""
 echo "Contents:"
 tar tzf "dist/${NAME}.tar.gz" | head -30
 echo "  ..."
 echo ""
 echo "Upload to GitHub:"
-echo "  gh release create ${VERSION} dist/${NAME}.tar.gz --title ${VERSION}"
+echo "  gh release create ${VERSION} dist/${NAME}.tar.gz dist/${NAME}.tar.gz.sha256 --title ${VERSION}"
