@@ -223,3 +223,27 @@ test_parse_rejects_excessive_nesting :: proc(t: ^testing.T) {
 	if ok do _tree_node_destroy(&tree)
 	testing.expect(t, !ok, "1000-deep nesting must be rejected by MAX_NESTING guard")
 }
+
+// #233 L5: a very long numeric literal must not overflow f32 to +Inf.
+@(test)
+test_read_number_huge_is_finite :: proc(t: ^testing.T) {
+	// 40 nines — well past f32's ~3.4e38 range; naive accumulation overflows.
+	input := "9999999999999999999999999999999999999999"
+	p := _Parser{text = input, pos = 0}
+	got := _read_number(&p)
+	testing.expect(t, got <= _NUM_MAX, "huge literal is clamped to a finite ceiling")
+	testing.expect(t, got == got, "result is not NaN")          // NaN != NaN
+	testing.expect(t, got < 1e30, "result is not +Inf")         // Inf would exceed this
+	// The whole literal is consumed so the parser position stays correct.
+	testing.expect_value(t, p.pos, len(input))
+}
+
+@(test)
+test_read_number_normal_unaffected :: proc(t: ^testing.T) {
+	for tc in ([]struct{s: string, want: f32}{
+		{"0", 0}, {"42", 42}, {"1280", 1280}, {"-16", -16}, {"3.5", 3.5}, {"-2.25", -2.25},
+	}) {
+		p := _Parser{text = tc.s, pos = 0}
+		testing.expect_value(t, _read_number(&p), tc.want)
+	}
+}
