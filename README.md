@@ -39,6 +39,8 @@ redin-cli new-lua my-app
 
 The CLI downloads a pinned redin binary into `.redin/` — no build tools needed. See `redin-cli help` for all commands.
 
+> **⚠️ The shipped binary runs a local control server.** Release binaries (what `redin-cli` downloads) and `./build-dev.sh` builds are compiled with `REDIN_DEV` on, so launching one starts an authenticated HTTP dev server on `localhost`. Any process running as **your own user** can read the per-run token and fully drive the window — dispatch events, run the app's `:shell`/`:http` effects, screenshot it, or shut it down. Read [Security](#security) before running on a shared or untrusted account.
+
 ### Building from source
 
 The one-step path is `./setup.sh`, which installs system packages (via apt / dnf / pacman / brew), pulls submodules, and runs `./build-dev.sh`. The manual equivalent is below.
@@ -74,6 +76,26 @@ odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit -o
 | **OpenSSL** (`libssl-dev`) | HTTPS support via odin-http | Yes |
 | **OpenGL + X11 dev headers** (Linux only — `libgl1-mesa-dev`, `libx11-dev`, `libxrandr-dev`, `libxi-dev`, `libxcursor-dev`, `libxinerama-dev`) | Required by Odin's bundled Raylib at link time | Yes (Linux) |
 | **`lib/odin-http` submodule** | Async HTTP client used by `redin.http` | Yes |
+
+## Security
+
+redin's release binary — the one `redin-cli` downloads, and anything built with `./build-dev.sh` — is compiled with `REDIN_DEV` (plus `REDIN_PROFILE` and `REDIN_TRACK_MEM`) baked in. This is deliberate: the shipped binary's audience is AI-driven workflows that need the HTTP dev server. The trade-off is that **every launch starts an authenticated control server on loopback.**
+
+On startup the server binds `localhost:<port>` and writes a per-run 256-bit token to `./.redin-token` (mode 0600, deleted on shutdown). Every request needs `Authorization: Bearer <token>` and a matching `Host` header (a DNS-rebinding defence). A process running as a *different* user cannot read the token. But any process running **as your own user** can read `.redin-token` and then:
+
+- dispatch arbitrary events (`POST /events`) — including any `:shell` or `:http` effect the app registered, i.e. command execution or network access in your context;
+- inject clicks and keystrokes, resize the window, capture a screenshot, or shut it down;
+- replace the theme (`PUT /aspects`).
+
+On a machine where you trust every process running under your user, this is a convenience. On a shared or untrusted account, treat a running redin window as fully controllable by anything with your uid.
+
+**If you don't want the dev channel**, build a release-stripped binary yourself — no dev server, no profile overlay, no tracking allocator:
+
+```bash
+odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit -out:build/redin
+```
+
+The [Dev Server reference](docs/reference/dev-server.md#runtime-caveats) covers the filesystem-trust and token-as-capability caveats in more detail.
 
 ## Test
 
