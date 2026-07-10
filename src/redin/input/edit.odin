@@ -282,25 +282,6 @@ paste :: proc() {
 
 // --- Click to position ---
 
-click_to_cursor :: proc(text: []u8, click_x: f32, font_obj: rl.Font, font_size: f32, spacing: f32) -> int {
-	if len(text) == 0 do return 0
-	best_pos := 0
-	best_dist: f32 = abs(click_x)
-	pos := 0
-	for pos < len(text) {
-		_, size := utf8.decode_rune(text[pos:])
-		pos += size
-		cstr := strings.clone_to_cstring(string(text[:pos]), context.temp_allocator)
-		measured := rl.MeasureTextEx(font_obj, cstr, font_size, spacing)
-		dist := abs(click_x - measured.x)
-		if dist < best_dist {
-			best_dist = dist
-			best_pos = pos
-		}
-	}
-	return best_pos
-}
-
 // --- Line-aware movement (requires layout lines) ---
 
 // Move cursor up one visual line, preserving X position.
@@ -365,24 +346,10 @@ move_end_line :: proc(lines: []text_pkg.Text_Line, shift: bool) {
 	}
 }
 
-// Find byte offset in a line closest to a given X pixel position.
+// Find byte offset in a line closest to a given X pixel position. Delegates
+// to the O(n) text.offset_at_x (was O(n²) — issue #233 L6).
 x_to_cursor_in_line :: proc(text_str: string, line: text_pkg.Text_Line, target_x: f32, font_obj: rl.Font, font_size: f32, sp: f32) -> int {
-	if line.start >= line.end do return line.start
-	best_pos := line.start
-	best_dist := abs(target_x)
-
-	pos := line.start
-	for pos < line.end {
-		_, size := utf8.decode_rune(transmute([]u8)text_str[pos:])
-		pos += size
-		w := text_pkg.measure_range(text_str, line.start, pos, font_obj, font_size, sp)
-		dist := abs(target_x - w)
-		if dist < best_dist {
-			best_dist = dist
-			best_pos = pos
-		}
-	}
-	return best_pos
+	return text_pkg.offset_at_x(text_str, line.start, line.end, target_x, font_obj, font_size, sp)
 }
 
 // --- Dynamic array helper ---
