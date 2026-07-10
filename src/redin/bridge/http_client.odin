@@ -40,9 +40,11 @@ header_safe :: proc(s: string) -> bool {
 	return true
 }
 
+// authority_extract returns the authority component of a URL — everything
+// between "://" and the first '/', '?' or '#'. "" if there's no scheme
+// separator.
 @(private = "file")
-url_host :: proc(url: string) -> string {
-	// "http://host:port/path" → "host"
+authority_extract :: proc(url: string) -> string {
 	idx := strings.index(url, "://")
 	if idx < 0 do return ""
 	rest := url[idx + 3:]
@@ -51,7 +53,22 @@ url_host :: proc(url: string) -> string {
 		c := rest[i]
 		if c == '/' || c == '?' || c == '#' { end = i; break }
 	}
-	host := rest[:end]
+	return rest[:end]
+}
+
+// authority_host normalizes an authority string ("user@[::1]:8080", or the
+// raw `host` field odin-http's url_parse leaves userinfo/port/brackets/
+// fragment inside) down to the bare host ("::1"). Both the SSRF whitelist
+// name-check and DNS resolution must run on the identical bare host, so this
+// is the single source of truth — see #233 M1.
+@(private = "package")
+authority_host :: proc(authority: string) -> string {
+	host := authority
+	// odin-http's url_parse doesn't split the fragment, so a '#' can survive
+	// into its `host`; terminate the authority at it.
+	if h := strings.index_byte(host, '#'); h >= 0 {
+		host = host[:h]
+	}
 	// Strip userinfo: "user:pass@host" → "host". Last `@` since password may
 	// itself be percent-encoded but cannot contain a literal `@`.
 	if at := strings.last_index_byte(host, '@'); at >= 0 {
@@ -71,20 +88,15 @@ url_host :: proc(url: string) -> string {
 	return host
 }
 
-// url_port extracts the explicit port from a URL host:port, or 0 if absent.
-// Mirrors url_host's parsing (userinfo + IPv6 brackets) so an authority like
-// "user@[::1]:8080" yields 8080. #162 M3.
-@(private = "file")
-url_port :: proc(url: string) -> int {
-	idx := strings.index(url, "://")
-	if idx < 0 do return 0
-	rest := url[idx + 3:]
-	end := len(rest)
-	for i in 0 ..< len(rest) {
-		c := rest[i]
-		if c == '/' || c == '?' || c == '#' { end = i; break }
+// authority_port extracts the explicit port from an authority, or 0 if
+// absent. Mirrors authority_host's parsing (fragment + userinfo + IPv6
+// brackets) so "user@[::1]:8080" yields 8080. #162 M3.
+@(private = "package")
+authority_port :: proc(authority: string) -> int {
+	host := authority
+	if h := strings.index_byte(host, '#'); h >= 0 {
+		host = host[:h]
 	}
-	host := rest[:end]
 	if at := strings.last_index_byte(host, '@'); at >= 0 {
 		host = host[at+1:]
 	}
@@ -103,6 +115,13 @@ url_port :: proc(url: string) -> int {
 		if p, ok := strconv.parse_int(host[colon+1:], 10); ok do return p
 	}
 	return 0
+}
+
+// url_host takes a full URL for logging / diagnostics and routes through the
+// same normalization as the security path, so it can't drift from it.
+@(private = "file")
+url_host :: proc(url: string) -> string {
+	return authority_host(authority_extract(url))
 }
 
 Http_Request :: struct {
@@ -531,8 +550,14 @@ execute_http_request :: proc(req: Http_Request, client: ^Http_Client = nil) -> H
 	parsed_url := http.url_parse(req.url)
 	checked_endpoint: net.Endpoint
 	{
-		host := url_host(req.url)
-		ep4, ep6, resolve_err := net.resolve(parsed_url.host)
+		// #233 M1: derive the whitelist-check host AND the resolved host from
+		// a single normalization of the SAME parsed authority. Previously the
+		// name-check used url_host(req.url) (a second, hand-rolled parser)
+		// while resolution used parsed_url.host raw, so a URL the two parsers
+		// disagreed on (fragment, userinfo, brackets) could name-match a
+		// whitelisted host yet dial the IP resolved from a different one.
+		host := authority_host(parsed_url.host)
+		ep4, ep6, resolve_err := net.resolve(host)
 		if resolve_err != nil {
 			// #162 L4: don't echo the resolver error (it can confirm
 			// internal names); log detail, return generic.
@@ -548,7 +573,7 @@ execute_http_request :: proc(req: Http_Request, client: ^Http_Client = nil) -> H
 			return response
 		}
 		// Fill in the port the same way odin-http's parse_endpoint would.
-		checked_endpoint.port = url_port(req.url)
+		checked_endpoint.port = authority_port(parsed_url.host)
 		if checked_endpoint.port == 0 {
 			checked_endpoint.port = parsed_url.scheme == "https" ? 443 : 80
 		}
