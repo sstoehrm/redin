@@ -21,6 +21,8 @@ import "core:sync"
 import "core:testing"
 import "core:thread"
 import "core:time"
+import "base:runtime"
+import http "lib:odin-http"
 
 // Tests that mutate the package-level HTTP whitelist (g_http_whitelist) share
 // process state. Odin's test runner runs tests in parallel by default, so a
@@ -1173,4 +1175,243 @@ test_https_verifies_certificates :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(got_c.error_msg, "certificate"),
 		fmt.tprintf("expected a certificate error, got %q", got_c.error_msg))
 	tls_response_free(&got_c)
+}
+
+// #162 M3: SSRF hardening for redin.http. The whitelist now carries an
+// access *class* keyword — "all" / "local" / "external" — that classifies
+// the *resolved* IP, so a public hostname that resolves to a loopback or
+// private address is caught (DNS-rebinding defence). Explicit hostname /
+// CIDR entries still allow on top of the class. These tests cover the
+// pure pieces: IP classification and the access decision.
+
+// --- IP classification ---
+
+@(test)
+test_ip_is_loopback :: proc(t: ^testing.T) {
+	v4_lo, _ := net.parse_ip4_address("127.0.0.1")
+	v4_lo2, _ := net.parse_ip4_address("127.255.255.254")
+	v4_pub, _ := net.parse_ip4_address("8.8.8.8")
+	testing.expect(t, ip4_is_loopback(v4_lo), "127.0.0.1 is loopback")
+	testing.expect(t, ip4_is_loopback(v4_lo2), "127/8 is loopback")
+	testing.expect(t, !ip4_is_loopback(v4_pub), "8.8.8.8 is not loopback")
+
+	v6_lo, _ := net.parse_ip6_address("::1")
+	v6_pub, _ := net.parse_ip6_address("2001:4860:4860::8888")
+	testing.expect(t, ip6_is_loopback(v6_lo), "::1 is loopback")
+	testing.expect(t, !ip6_is_loopback(v6_pub), "public v6 is not loopback")
+}
+
+@(test)
+test_ip4_is_private :: proc(t: ^testing.T) {
+	for s in ([]string{"10.0.0.1", "172.16.5.4", "172.31.255.1", "192.168.1.1",
+	                    "169.254.169.254", "127.0.0.1"}) {
+		a, ok := net.parse_ip4_address(s)
+		testing.expect(t, ok, "parse")
+		testing.expectf(t, ip4_is_private_or_local(a), "%s should classify as private/local", s)
+	}
+	for s in ([]string{"8.8.8.8", "1.1.1.1", "172.32.0.1", "192.169.0.1", "11.0.0.1"}) {
+		a, ok := net.parse_ip4_address(s)
+		testing.expect(t, ok, "parse")
+		testing.expectf(t, !ip4_is_private_or_local(a), "%s should classify as external", s)
+	}
+}
+
+@(test)
+test_ip6_is_private :: proc(t: ^testing.T) {
+	for s in ([]string{
+		"::1", "fe80::1", "fc00::1", "fd12:3456::1",
+		// #225 M3: IPv4-in-IPv6 transition spaces that dial to an internal
+		// v4 target on a dual-stack host. IPv4-mapped (::ffff:0:0/96) of a
+		// private/loopback/metadata v4; 6to4 (2002::/16) embedding one;
+		// NAT64 (64:ff9b::/96); and the unspecified address.
+		"::ffff:127.0.0.1", "::ffff:10.0.0.1", "::ffff:169.254.169.254",
+		"::ffff:192.168.1.1",
+		"2002:7f00:0001::",       // 6to4 of 127.0.0.1
+		"2002:0a00:0001::",       // 6to4 of 10.0.0.1
+		"64:ff9b::7f00:1",        // NAT64 of 127.0.0.1
+		"::",                     // unspecified
+	}) {
+		a, ok := net.parse_ip6_address(s)
+		testing.expect(t, ok, "parse")
+		testing.expectf(t, ip6_is_private_or_local(a), "%s should classify as private/local", s)
+	}
+	for s in ([]string{
+		"2001:4860:4860::8888", "2606:4700::1111",
+		"::ffff:8.8.8.8",         // IPv4-mapped public stays external
+		"2002:0808:0808::",       // 6to4 of 8.8.8.8 stays external
+		"64:ff9b::0808:0808",     // NAT64 of 8.8.8.8 stays external
+	}) {
+		a, ok := net.parse_ip6_address(s)
+		testing.expect(t, ok, "parse")
+		testing.expectf(t, !ip6_is_private_or_local(a), "%s should classify as external", s)
+	}
+}
+
+// --- access decision ---
+
+@(test)
+test_access_class_parse :: proc(t: ^testing.T) {
+	testing.expect_value(t, parse_access_class("all"), Access_Class.All)
+	testing.expect_value(t, parse_access_class("*"), Access_Class.All)   // back-compat alias
+	testing.expect_value(t, parse_access_class("local"), Access_Class.Local)
+	testing.expect_value(t, parse_access_class("external"), Access_Class.External)
+	testing.expect_value(t, parse_access_class("example.com"), Access_Class.None) // not a class keyword
+}
+
+@(test)
+test_access_decide_all :: proc(t: ^testing.T) {
+	lo, _ := net.parse_ip4_address("127.0.0.1")
+	pub, _ := net.parse_ip4_address("8.8.8.8")
+	testing.expect(t, access_decide_ip4(.All, lo), "all allows loopback")
+	testing.expect(t, access_decide_ip4(.All, pub), "all allows external")
+}
+
+@(test)
+test_access_decide_local :: proc(t: ^testing.T) {
+	lo, _ := net.parse_ip4_address("127.0.0.1")
+	priv, _ := net.parse_ip4_address("10.0.0.1")
+	pub, _ := net.parse_ip4_address("8.8.8.8")
+	testing.expect(t, access_decide_ip4(.Local, lo), "local allows loopback")
+	testing.expect(t, !access_decide_ip4(.Local, priv), "local denies RFC1918")
+	testing.expect(t, !access_decide_ip4(.Local, pub), "local denies external")
+}
+
+@(test)
+test_access_decide_external :: proc(t: ^testing.T) {
+	lo, _ := net.parse_ip4_address("127.0.0.1")
+	priv, _ := net.parse_ip4_address("192.168.1.1")
+	meta, _ := net.parse_ip4_address("169.254.169.254")
+	pub, _ := net.parse_ip4_address("8.8.8.8")
+	testing.expect(t, !access_decide_ip4(.External, lo), "external denies loopback")
+	testing.expect(t, !access_decide_ip4(.External, priv), "external denies RFC1918")
+	testing.expect(t, !access_decide_ip4(.External, meta), "external denies metadata IP")
+	testing.expect(t, access_decide_ip4(.External, pub), "external allows public")
+}
+
+@(test)
+test_access_decide_none :: proc(t: ^testing.T) {
+	pub, _ := net.parse_ip4_address("8.8.8.8")
+	testing.expect(t, !access_decide_ip4(.None, pub), "no class set denies by default")
+}
+
+// #233 M1: the SSRF whitelist name-check and DNS resolution must run on the
+// *same* bare host. Previously the name-check used a hand-rolled parser
+// (url_host) while resolution used odin-http's parsed_url.host raw — two
+// parsers that can disagree on the authority, so a URL could name-match a
+// whitelisted host yet dial the IP resolved from a different one. Both paths
+// now normalize the single parsed authority via authority_host; these tests
+// pin that normalization, including the odin-http quirk that leaves a
+// fragment inside `host`.
+
+@(test)
+test_authority_host_plain :: proc(t: ^testing.T) {
+	testing.expect_value(t, authority_host("example.com"), "example.com")
+}
+
+@(test)
+test_authority_host_strips_port :: proc(t: ^testing.T) {
+	testing.expect_value(t, authority_host("example.com:8080"), "example.com")
+}
+
+@(test)
+test_authority_host_strips_userinfo :: proc(t: ^testing.T) {
+	testing.expect_value(t, authority_host("user:pass@example.com"), "example.com")
+	testing.expect_value(t, authority_host("user@169.254.169.254"), "169.254.169.254")
+}
+
+@(test)
+test_authority_host_ipv6_brackets :: proc(t: ^testing.T) {
+	testing.expect_value(t, authority_host("[::1]:8080"), "::1")
+	testing.expect_value(t, authority_host("[2001:db8::1]"), "2001:db8::1")
+}
+
+@(test)
+test_authority_host_strips_fragment :: proc(t: ^testing.T) {
+	// odin-http's url_parse leaves a '#fragment' inside host; the bare host
+	// is what precedes it.
+	testing.expect_value(t, authority_host("example.com#@169.254.169.254"), "example.com")
+}
+
+@(test)
+test_authority_port :: proc(t: ^testing.T) {
+	testing.expect_value(t, authority_port("example.com:8080"), 8080)
+	testing.expect_value(t, authority_port("example.com"), 0)
+	testing.expect_value(t, authority_port("[::1]:443"), 443)
+	testing.expect_value(t, authority_port("user@host:1234"), 1234)
+	// A ':N' living inside the fragment must not be read as a port.
+	testing.expect_value(t, authority_port("example.com#x:9"), 0)
+}
+
+// The core invariant: the bare host we derive for the whitelist / resolve is
+// taken from odin-http's own parse of the URL, so name-check and dial can
+// never target different hosts. For the fragment-injection URL, the derived
+// host is the benign prefix, NOT the injected internal address.
+@(test)
+test_parsed_authority_matches_security_host :: proc(t: ^testing.T) {
+	cases := []struct {
+		url:  string,
+		want: string,
+	}{
+		{"http://example.com/path", "example.com"},
+		{"http://example.com:8080/path?q=1", "example.com"},
+		{"http://user@example.com/", "example.com"},
+		{"http://[::1]:80/", "::1"},
+		// Fragment injection: we must resolve/dial example.com, not the
+		// internal metadata address hidden after the '#'.
+		{"http://example.com#@169.254.169.254/", "example.com"},
+	}
+	for c in cases {
+		parsed := http.url_parse(c.url)
+		got := authority_host(parsed.host)
+		testing.expectf(t, got == c.want, "url %q: got host %q, want %q", c.url, got, c.want)
+	}
+}
+
+// #216: http workers are spawned with init_context set (http_client.odin), so
+// core:thread's teardown skips _maybe_destroy_default_temp_allocator — it
+// leaves custom-context cleanup to the thread proc. _select_context_for_thread
+// still hands the worker its OWN thread-local default temp arena, and the
+// worker path allocates from it (scheme lowercasing + the whitelist host
+// compare), so without an explicit destroy each request leaks one arena. The
+// leak is invisible to REDIN_TRACK_MEM (the arena bypasses context.allocator),
+// so this test observes the runtime arena state directly: a live block exists
+// after a temp alloc, and must be gone after the worker's cleanup runs.
+
+@(private = "file")
+Arena_Probe :: struct {
+	block_after_alloc:   bool,
+	block_after_cleanup: bool,
+}
+
+@(private = "file")
+arena_probe_proc :: proc(raw: rawptr) {
+	p := cast(^Arena_Probe)raw
+
+	// Allocate from the thread-local default temp arena, exactly like
+	// execute_http_request's strings.to_lower(..., context.temp_allocator).
+	_ = strings.to_lower("ABC", context.temp_allocator)
+	p.block_after_alloc = runtime.global_default_temp_allocator_data.arena.curr_block != nil
+
+	// The fix under test: free this thread's temp arena before it exits.
+	destroy_thread_temp_arena()
+	p.block_after_cleanup = runtime.global_default_temp_allocator_data.arena.curr_block != nil
+}
+
+@(test)
+test_http_worker_frees_thread_temp_arena :: proc(t: ^testing.T) {
+	probe := new(Arena_Probe)
+	defer free(probe)
+
+	// Mirror http_client_request: spawn with init_context set (the condition
+	// that makes the runtime skip its own temp-arena cleanup).
+	worker_ctx := context
+	th := thread.create_and_start_with_data(probe, arena_probe_proc,
+		init_context = worker_ctx, self_cleanup = false)
+	thread.join(th)
+	thread.destroy(th)
+
+	testing.expect(t, probe.block_after_alloc,
+		"a temp alloc must initialize the thread-local arena (test precondition)")
+	testing.expect(t, !probe.block_after_cleanup,
+		"#216: the worker must free its thread-local temp arena before exit")
 }
