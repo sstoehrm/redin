@@ -200,6 +200,12 @@ test_shell_timeout_kills_child :: proc(t: ^testing.T) {
 
 @(test)
 test_shell_worker_uses_caller_allocator :: proc(t: ^testing.T) {
+	// Spawns a real child, so it reads g_shell_env_allowlist and relies on the
+	// deny-by-default nil state (absolute /bin/echo, no PATH needed). Serialize
+	// against the allowlist-mutating tests so neither races on that global.
+	sync.lock(&g_test_shell_state_mutex)
+	defer sync.unlock(&g_test_shell_state_mutex)
+
 	// Mirror REDIN_TRACK_MEM: wrap this test's allocator in a tracking
 	// allocator. Record bad frees instead of panicking (the default
 	// callback traps -> SIGILL) so a regression fails with a message.
@@ -360,6 +366,11 @@ test_sigpipe_ignored :: proc(t: ^testing.T) {
 // the child's entire lifetime.
 @(test)
 test_shell_large_stdin_respects_timeout :: proc(t: ^testing.T) {
+	// Spawns a real child (reads g_shell_env_allowlist), so lock to serialize
+	// against the allowlist-mutating tests.
+	sync.lock(&g_test_shell_state_mutex)
+	defer sync.unlock(&g_test_shell_state_mutex)
+
 	ignore_sigpipe() // the kill-on-timeout closes the child's stdin read end
 
 	big := make([]u8, 256 * 1024) // > pipe buffer: can't be written in one go
