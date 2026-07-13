@@ -259,6 +259,27 @@ test_frame_tag_is_json_escaped :: proc(t: ^testing.T) {
 	testing.expectf(t, !strings.contains(out, `ev"il"`), "tag must not close the JSON string early: %s", out)
 }
 
+// #250 L1: /selection built its body with Odin's %q, which emits Odin escapes
+// (\a for 0x07, \x00 for NUL, \xNN for invalid UTF-8) that are not valid JSON.
+// selection_json now routes the text through json_string, so control bytes
+// become \u00XX and the body stays strict-JSON parseable.
+@(test)
+test_selection_json_escapes_control_bytes :: proc(t: ^testing.T) {
+	b := strings.builder_make()
+	defer strings.builder_destroy(&b)
+
+	// "a" + NUL + "b" + BEL(0x07) + "c" — the two control bytes %q would have
+	// emitted as \x00 and \a.
+	selection_json(&b, "text", 0, 5, "a\x00b\x07c")
+	got := strings.to_string(b)
+
+	want := `{"kind":"text","start":0,"end":5,"text":"a` + `\u0000` + `b` + `\u0007` + `c"}`
+	testing.expectf(t, got == want, "got %q, want %q", got, want)
+	// The invalid Odin escapes must not appear.
+	testing.expectf(t, !strings.contains(got, `\a`), "must not emit Odin \\a escape: %s", got)
+	testing.expectf(t, !strings.contains(got, `\x00`), "must not emit Odin \\x00 escape: %s", got)
+}
+
 // agent_nodes_walker is compiled only in REDIN_AGENT builds, so this test
 // is too. Run it with: odin test src/redin/bridge ... -define:REDIN_AGENT=true
 when REDIN_AGENT {
