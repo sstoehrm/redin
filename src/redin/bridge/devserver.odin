@@ -1667,13 +1667,16 @@ handle_get_state_path :: proc(ds: ^Dev_Server, ch: ^Response_Channel, dot_path: 
 	// an app that sets __index on a state table could otherwise be
 	// coaxed into executing Lua via crafted URL paths.
 	MAX_PATH_SEGMENTS :: 32
-	segments := strings.split(dot_path, ".")
-	defer delete(segments)
-	if len(segments) > MAX_PATH_SEGMENTS {
+	// #250 I1: reject before the split. strings.split materializes the full
+	// []string first; `count(".") + 1` equals the eventual segment count, so
+	// count separators up front and refuse an over-deep path before allocating.
+	if strings.count(dot_path, ".") + 1 > MAX_PATH_SEGMENTS {
 		lua_pop(L, 1)
 		respond_json_error(ch, 400, `{"error":"path too deep"}`)
 		return
 	}
+	segments := strings.split(dot_path, ".")
+	defer delete(segments)
 	if any_segment_too_long(segments) {
 		lua_pop(L, 1)
 		respond_json_error(ch, 400, `{"error":"path segment too long"}`)
@@ -1757,6 +1760,18 @@ handle_get_profile :: proc(ch: ^Response_Channel) {
 	respond_json(ch, strings.to_string(b))
 }
 
+// Build the /selection JSON body for a resolved selection. Split out so the
+// escaping is unit-testable without driving the full input state + response
+// channel. #250 L1: the `text` field must go through json_string, not Odin's
+// `%q` — `%q` routes through strconv.quote and emits Odin escapes (\a, \v,
+// \xNN, \u{..}) that are not valid JSON. `kind` is a fixed "input"/"text"
+// literal (not user-controlled), so interpolating it is safe.
+selection_json :: proc(b: ^strings.Builder, kind: string, lo, hi: int, text: string) {
+	fmt.sbprintf(b, `{{"kind":"%s","start":%d,"end":%d,"text":`, kind, lo, hi)
+	json_string(b, text)
+	strings.write_byte(b, '}')
+}
+
 handle_get_selection :: proc(ds: ^Dev_Server, ch: ^Response_Channel) {
 	b := strings.builder_make()
 	defer strings.builder_destroy(&b)
@@ -1780,10 +1795,7 @@ handle_get_selection :: proc(ds: ^Dev_Server, ch: ^Response_Channel) {
 		if clamped_hi > len(content) do clamped_hi = len(content)
 		sub := ""
 		if lo < clamped_hi do sub = content[lo:clamped_hi]
-		fmt.sbprintf(&b,
-			`{{"kind":"input","start":%d,"end":%d,"text":%q}}`,
-			lo, clamped_hi, sub,
-		)
+		selection_json(&b, "input", lo, clamped_hi, sub)
 
 	case .Text:
 		// Resolve the selected path back to a NodeText.
@@ -1796,10 +1808,7 @@ handle_get_selection :: proc(ds: ^Dev_Server, ch: ^Response_Channel) {
 		if clamped_hi > len(content) do clamped_hi = len(content)
 		sub := ""
 		if lo < clamped_hi do sub = content[lo:clamped_hi]
-		fmt.sbprintf(&b,
-			`{{"kind":"text","start":%d,"end":%d,"text":%q}}`,
-			lo, clamped_hi, sub,
-		)
+		selection_json(&b, "text", lo, clamped_hi, sub)
 	}
 
 	respond_json(ch, strings.to_string(b))
@@ -2317,7 +2326,15 @@ handle_get_scroll_info :: proc(ds: ^Dev_Server, ch: ^Response_Channel) {
 	for idx, info in ds.current_scroll_info {
 		if !first do strings.write_string(&b, ",")
 		first = false
-		fmt.sbprintf(&b, `"%d":{{"total":%g,"off":%g}}`, idx, info.total, info.off)
+		// #250 L2: total/off via json_number (emits null for NaN/±Inf) rather
+		// than %g, which prints bare +Inf/-Inf/NaN tokens that aren't valid
+		// JSON. No non-finite path reaches here after #184, so this is
+		// defence-in-depth / codebase-convention consistency.
+		fmt.sbprintf(&b, `"%d":{{"total":`, idx)
+		json_number(&b, f64(info.total))
+		strings.write_string(&b, `,"off":`)
+		json_number(&b, f64(info.off))
+		strings.write_byte(&b, '}')
 	}
 	strings.write_string(&b, "}")
 	respond_json(ch, strings.to_string(b))
