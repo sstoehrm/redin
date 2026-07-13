@@ -2,6 +2,7 @@ package bridge
 
 import "core:fmt"
 import "core:os"
+import "core:path/filepath"
 import "core:strings"
 import "core:sys/linux"
 import "core:testing"
@@ -83,4 +84,33 @@ test_hotreload_symlink_free_ignores_missing :: proc(t: ^testing.T) {
 	// guard must not treat "unreadable" as "unsafe" (that would wedge reload).
 	_, ok := hotreload_paths_symlink_free([]string{"does/not/exist.fnl"})
 	testing.expect(t, ok, "missing watched path is not treated as a symlink")
+}
+
+// #250 I4: runtime_watch_files is hand-maintained. A new src/runtime/*.fnl
+// module that isn't listed escapes both the mtime watch and the symlink guard
+// that runs before require("init") loads it transitively via fennel.path. This
+// asserts the list covers every runtime module so that omission is a CI
+// failure, not a silent gap.
+@(test)
+test_watch_list_covers_runtime_dir :: proc(t: ^testing.T) {
+	matches, err := filepath.glob("src/runtime/*.fnl", context.temp_allocator)
+	if err != nil || len(matches) == 0 {
+		// The suite may run from a cwd where the source tree isn't present;
+		// the guard only makes sense in-tree, so skip rather than fail.
+		fmt.eprintln("skipping watch-list coverage: src/runtime/*.fnl not found")
+		return
+	}
+	for m in matches {
+		base := filepath.base(m)
+		found := false
+		for w in runtime_watch_files {
+			if filepath.base(w) == base {
+				found = true
+				break
+			}
+		}
+		testing.expectf(t, found,
+			"src/runtime/%s is missing from runtime_watch_files (hotreload.odin); add it (#250 I4)",
+			base)
+	}
 }
