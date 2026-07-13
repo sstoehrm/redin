@@ -32,23 +32,32 @@ Hot_Reload :: struct {
 	retry_at:       time.Tick,
 }
 
+// The runtime .fnl modules watched for hot reload. Kept as an explicit list
+// (rather than globbed at runtime) so the watch set is deterministic and free
+// of directory-read failure modes on the reload hot path. #250 I4: a module
+// missing from this list escapes both the mtime watch AND the symlink guard
+// that hotreload_execute runs before require("init") transitively loads it via
+// fennel.path — so test_watch_list_covers_runtime_dir asserts this stays in
+// sync with src/runtime/*.fnl, turning "forgot to add the new module" (which
+// already happened once, see the #183 note below) into a CI failure.
+runtime_watch_files := []string {
+	"src/runtime/dataflow.fnl",
+	"src/runtime/effect.fnl",
+	"src/runtime/frame.fnl",
+	"src/runtime/theme.fnl",
+	"src/runtime/view.fnl",
+	"src/runtime/init.fnl",
+	// #183: also watch these so editing them triggers a reload.
+	"src/runtime/agent.fnl",
+	"src/runtime/markdown.fnl",
+	"src/runtime/canvas.fnl",
+}
+
 hotreload_init :: proc(hr: ^Hot_Reload, source_tree: bool) {
 	hr.check_interval = 60
 	if !source_tree do return  // #129 H6: cwd-relative watch list only
 	                            // active inside the redin source tree.
-	files := []string{
-		"src/runtime/dataflow.fnl",
-		"src/runtime/effect.fnl",
-		"src/runtime/frame.fnl",
-		"src/runtime/theme.fnl",
-		"src/runtime/view.fnl",
-		"src/runtime/init.fnl",
-		// #183: also watch these so editing them triggers a reload.
-		"src/runtime/agent.fnl",
-		"src/runtime/markdown.fnl",
-		"src/runtime/canvas.fnl",
-	}
-	for f in files {
+	for f in runtime_watch_files {
 		append(&hr.watch_paths, f)
 		hr.last_mtimes[f] = get_file_mtime(f)
 	}
