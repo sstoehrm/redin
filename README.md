@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/redin-logo-dark.svg">
-    <img src="docs/assets/redin-logo.svg" width="520" alt="redin: Native desktop UI with the magic intact.">
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/redin-logo-horizontal-dark.svg">
+    <img src="docs/assets/redin-logo-horizontal.svg" width="520" alt="redin: Native desktop UI with the magic intact.">
   </picture>
 </p>
 
