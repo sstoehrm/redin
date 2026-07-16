@@ -30,6 +30,11 @@ On_Shutdown_Proc :: #type proc()
 // Internal state (file-private)
 // ---------------------------------------------------------------------------
 
+// 256px raster of docs/assets/redin-favicon.svg, baked into the binary so
+// the window icon needs no runtime file lookup.
+@(private = "file")
+WINDOW_ICON_PNG := #load("assets/window-icon.png")
+
 @(private = "file")
 Window_Config :: struct {
 	width, height: i32,
@@ -147,6 +152,15 @@ run :: proc(cfg: Config) {
 	// Escape key (drag-cancel, modal-dismiss, etc.); the window closes via
 	// the close button or `redin.request_shutdown()`.
 	rl.SetExitKey(.KEY_NULL)
+
+	// Window/taskbar icon, embedded at compile time. No-op on Wayland and
+	// macOS, where the windowing system doesn't take a per-window icon.
+	icon := rl.LoadImageFromMemory(".png", raw_data(WINDOW_ICON_PNG), i32(len(WINDOW_ICON_PNG)))
+	if rl.IsImageValid(icon) {
+		rl.ImageFormat(&icon, .UNCOMPRESSED_R8G8B8A8)
+		rl.SetWindowIcon(icon)
+		rl.UnloadImage(icon)
+	}
 
 	font.init()
 	defer font.destroy()
