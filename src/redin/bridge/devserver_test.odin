@@ -2,6 +2,7 @@ package bridge
 
 import "core:container/queue"
 import "core:fmt"
+import "core:math"
 import "core:os"
 import "core:strings"
 import "core:sync"
@@ -229,6 +230,61 @@ test_header_count_ignores_request_line :: proc(t: ^testing.T) {
 	// header lines, anchored at a line start, do (mirrors find_header_value).
 	headers := "GET /state/content-length:5 HTTP/1.1\r\nHost: localhost:8800"
 	testing.expect_value(t, header_count(headers, "content-length"), 0)
+}
+
+// #256 L1: header lines are terminated by CRLF (RFC 7230); a bare LF byte
+// embedded inside another header's value must not anchor a header line.
+// Previously `idx == start || lower[idx-1] == '\n'` accepted the bare-LF
+// position, so `X-Junk: \nAuthorization: ...` smuggled an Authorization
+// "header" past both the duplicate check (header_count) and the lookup
+// (find_header_value).
+
+@(test)
+test_find_header_value_bare_lf_not_line_boundary :: proc(t: ^testing.T) {
+	headers := "GET / HTTP/1.1\r\nX-Junk: \nAuthorization: Bearer smuggled\r\nHost: localhost:8800\r\n"
+	// The smuggled occurrence sits after a bare LF — not a header line.
+	testing.expect_value(t, find_header_value(headers, "authorization"), "")
+	// A real header after a proper CRLF is still found.
+	testing.expect_value(t, find_header_value(headers, "host"), "localhost:8800")
+}
+
+@(test)
+test_find_header_value_bare_cr_not_line_boundary :: proc(t: ^testing.T) {
+	// A lone CR (no LF) is not a line terminator either.
+	headers := "GET / HTTP/1.1\r\nX-Junk: \rAuthorization: Bearer smuggled\r\nHost: localhost:8800\r\n"
+	testing.expect_value(t, find_header_value(headers, "authorization"), "")
+}
+
+@(test)
+test_header_count_bare_lf_not_line_boundary :: proc(t: ^testing.T) {
+	headers := "GET / HTTP/1.1\r\nX-Junk: \nAuthorization: Bearer smuggled\r\nHost: localhost:8800\r\n"
+	testing.expect_value(t, header_count(headers, "authorization"), 0)
+	// The duplicate-rejection primitive must still see a bare-LF-smuggled
+	// second occurrence as NOT a second header (count stays 1)...
+	dup := "GET / HTTP/1.1\r\nHost: a\r\nX-Junk: \nHost: b\r\n"
+	testing.expect_value(t, header_count(dup, "host"), 1)
+	// ...while two real CRLF-anchored occurrences still count as 2.
+	real_dup := "GET / HTTP/1.1\r\nHost: a\r\nHost: b\r\n"
+	testing.expect_value(t, header_count(real_dup, "host"), 2)
+}
+
+// #256 L2: /frames rect coordinates were emitted with %g, which prints
+// NaN/±Inf as bare unquoted tokens — invalid JSON. rect_json routes each
+// coordinate through json_number (null for non-finite), matching the
+// convention adopted for /scroll-info (#250 L2) and PUT /aspects.
+
+@(test)
+test_rect_json_finite :: proc(t: ^testing.T) {
+	testing.expect_value(t, rect_json(rl.Rectangle{1, 2.5, 3, 4}), `,"rect":[1,2.5,3,4]`)
+}
+
+@(test)
+test_rect_json_non_finite_emits_null :: proc(t: ^testing.T) {
+	testing.expect_value(
+		t,
+		rect_json(rl.Rectangle{math.nan_f32(), 2, math.inf_f32(1), math.inf_f32(-1)}),
+		`,"rect":[null,2,null,null]`,
+	)
 }
 
 // #225 L1: /frames and /agent/nodes emitted the node `tag` / `id` raw, so a
