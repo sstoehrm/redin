@@ -8,6 +8,7 @@ import "core:net"
 import "core:strconv"
 import "core:strings"
 import "core:sync"
+import "core:sys/linux"
 import "core:thread"
 import "core:time"
 import http "lib:odin-http"
@@ -170,12 +171,12 @@ Http_Client :: struct {
 	// while the worker is still running. Issue #99 M1 B.
 	workers_alive: i32,
 	// Socket fds of in-flight requests, keyed by request id. Workers
-	// dial via `http_client.dial`, insert here while `request_on` is
-	// running, and remove on completion. `http_client_destroy`
-	// force-closes any still registered to unblock workers parked in
-	// `parse_response`'s blocking `net.recv_tcp`. The fork's `defer`
-	// in `parse_response` frees the scanner buffer once recv returns
-	// Connection_Closed. Issue #156.
+	// open the fd via `tcp_socket_open`, insert here BEFORE connecting
+	// (#256 L3, so destroy can interrupt a mid-dial worker too), and
+	// remove on completion. `http_client_destroy` force-closes any still
+	// registered to unblock workers parked in `parse_response`'s blocking
+	// `net.recv_tcp`. The fork's `defer` in `parse_response` frees the
+	// scanner buffer once recv returns Connection_Closed. Issue #156.
 	sockets:       map[string]net.TCP_Socket,
 	sockets_mutex: sync.Mutex,
 }
@@ -513,6 +514,112 @@ http_request_destroy :: proc(req: ^Http_Request) {
 	delete(req.headers)
 }
 
+// #256 L3: net.dial_tcp offers no connect timeout — against a peer that
+// silently drops the SYN it blocks for the OS retry schedule (~63 s on
+// Linux), long after the Lua-level timeout has synthesized a response,
+// and http_client_destroy cannot interrupt it because the fd used to be
+// registered only after dial returned. The dial is therefore split:
+// tcp_socket_open creates a non-blocking socket (registered by the
+// caller before connecting), and tcp_connect_bounded drives the connect
+// with a poll loop that honours both timeout_ms and a cancel flag.
+
+// tcp_socket_open creates a non-blocking TCP socket for the endpoint's
+// address family. The caller owns the fd (net.close on failure paths).
+tcp_socket_open :: proc(endpoint: net.Endpoint) -> (net.TCP_Socket, bool) {
+	family: linux.Address_Family
+	switch _ in endpoint.address {
+	case net.IP4_Address:
+		family = .INET
+	case net.IP6_Address:
+		family = .INET6
+	}
+	fd, errno := linux.socket(family, .STREAM, {.CLOEXEC, .NONBLOCK}, .TCP)
+	if errno != .NONE {
+		return {}, false
+	}
+	return net.TCP_Socket(fd), true
+}
+
+// Upper bound on a single poll slice while connecting, so a cancel
+// (destroy's `destroying` flag) is noticed promptly even if closing the
+// fd from another thread doesn't wake this poll.
+@(private = "file")
+CONNECT_POLL_SLICE_MS :: 250
+
+// tcp_connect_bounded connects a socket from tcp_socket_open to
+// `endpoint`, waiting at most timeout_ms (<=0 falls back to
+// HTTP_DEFAULT_TIMEOUT_MS). `cancel` may be nil; when it becomes true the
+// connect is abandoned within one poll slice. On success the socket is
+// switched back to blocking (the send/recv path relies on
+// .Receive_Timeout) and NODELAY is set, matching net.dial_tcp.
+tcp_connect_bounded :: proc(sock: net.TCP_Socket, endpoint: net.Endpoint, timeout_ms: int, cancel: ^bool) -> bool {
+	fd := linux.Fd(sock)
+	addr := endpoint_to_sockaddr(endpoint)
+	errno := linux.connect(fd, &addr)
+	// POSIX: EINTR on a non-blocking connect means the attempt continues
+	// asynchronously, same as EINPROGRESS.
+	if errno != .NONE && errno != .EINPROGRESS && errno != .EINTR {
+		return false
+	}
+	if errno != .NONE {
+		budget := timeout_ms <= 0 ? HTTP_DEFAULT_TIMEOUT_MS : timeout_ms
+		deadline := time.time_add(time.now(), time.Duration(budget) * time.Millisecond)
+		wait: for {
+			if cancel != nil && sync.atomic_load(cancel) {
+				return false
+			}
+			remaining := time.diff(time.now(), deadline)
+			if remaining <= 0 {
+				return false
+			}
+			slice_ms := i32(remaining / time.Millisecond)
+			if slice_ms > CONNECT_POLL_SLICE_MS do slice_ms = CONNECT_POLL_SLICE_MS
+			if slice_ms < 1 do slice_ms = 1
+			pfds := [1]linux.Poll_Fd{{fd = fd, events = {.OUT}}}
+			n, perr := linux.poll(pfds[:], slice_ms)
+			if perr == .EINTR do continue
+			if perr != .NONE {
+				return false
+			}
+			if n == 0 do continue // slice elapsed; re-check cancel/deadline
+			if .NVAL in pfds[0].revents {
+				// fd force-closed under us (destroy Phase 2).
+				return false
+			}
+			// Writable — or failed; SO_ERROR below distinguishes.
+			break wait
+		}
+		// getsockopt_base, not the getsockopt group: the _sock wrapper's
+		// where-clause rejects ^i32 (it constrains T, not ^T).
+		soerr: i32 = -1
+		_, gerr := linux.getsockopt_base(fd, cast(int)linux.SOL_SOCKET, linux.Socket_Option.ERROR, &soerr)
+		if gerr != .NONE || soerr != 0 {
+			return false
+		}
+	}
+	flags, ferr := linux.fcntl_getfl(fd, linux.F_GETFL)
+	if ferr != .NONE {
+		return false
+	}
+	if linux.fcntl_setfl(fd, linux.F_SETFL, flags - {.NONBLOCK}) != .NONE {
+		return false
+	}
+	no_delay: b32 = true
+	_ = linux.setsockopt(fd, linux.SOL_TCP, linux.Socket_TCP_Option.NODELAY, &no_delay)
+	return true
+}
+
+@(private = "file")
+endpoint_to_sockaddr :: proc(endpoint: net.Endpoint) -> linux.Sock_Addr_Any {
+	switch a in endpoint.address {
+	case net.IP4_Address:
+		return {ipv4 = {sin_family = .INET, sin_port = u16be(endpoint.port), sin_addr = ([4]u8)(a)}}
+	case net.IP6_Address:
+		return {ipv6 = {sin6_family = .INET6, sin6_port = u16be(endpoint.port), sin6_addr = transmute([16]u8)a}}
+	}
+	unreachable()
+}
+
 // `client` is optional. When non-nil, the request's socket is registered
 // in `client.sockets` while in flight so `http_client_destroy` can
 // force-close it during shutdown. Tests that drive `execute_http_request`
@@ -619,36 +726,24 @@ execute_http_request :: proc(req: Http_Request, client: ^Http_Client = nil) -> H
 		bytes.buffer_write_string(&http_req.body, req.body)
 	}
 
-	// Dial first, then register the socket so destroy can force-close
-	// it. Splitting the dial out is what makes this possible — the old
-	// monolithic `request()` never exposed the underlying fd. When
-	// `client` is nil (sync test callers) we skip the registry dance
-	// entirely.
-	// Dial the endpoint we already resolved and vetted — NOT req.url, which
-	// would make odin-http re-resolve and reopen the rebinding window.
+	// Open the socket first and register it BEFORE connecting, so destroy
+	// can force-close a mid-dial worker (#256 L3 — previously the fd was
+	// only registered after dial returned, and net.dial_tcp itself blocked
+	// for the OS SYN-retry schedule, ~63 s on Linux, regardless of the
+	// Lua-level timeout). When `client` is nil (sync test callers) we skip
+	// the registry dance entirely.
+	// Connect to the endpoint we already resolved and vetted — NOT req.url,
+	// which would make odin-http re-resolve and reopen the rebinding window.
 	url := parsed_url
-	sock, dial_err := net.dial_tcp(checked_endpoint)
-	if dial_err != nil {
-		// #162 L4: the raw dial error names the host/IP and the OS-level
-		// reason ("connection refused on 10.0.x.x:80", "no route to
-		// host"), which lets an authenticated caller map the internal
-		// network one host at a time. Log the detail to stderr for the
-		// developer; return a generic message to the app.
-		fmt.eprintfln("redin: http dial failed for %s: %v", url_host(req.url), dial_err)
+	sock, sock_ok := tcp_socket_open(checked_endpoint)
+	if !sock_ok {
+		fmt.eprintfln("redin: http socket open failed for %s", url_host(req.url))
 		response.status = 0
 		response.error_msg = strings.clone("http request failed")
 		return response
 	}
 
-	// #169: bound the socket read. The poll-side timeout in http_client_poll
-	// only synthesizes a response and frees the in-flight slot; it never
-	// touches the socket, so without this a worker parked in
-	// request_on -> recv against a hung/tarpit peer would block (and hold
-	// its fd) forever, defeating MAX_INFLIGHT_HTTP. A real receive deadline
-	// makes recv return and the worker unwind.
-	recv_timeout_ms := req.timeout_ms <= 0 ? HTTP_DEFAULT_TIMEOUT_MS : req.timeout_ms
-	net.set_option(sock, .Receive_Timeout, time.Duration(recv_timeout_ms) * time.Millisecond)
-
+	cancel: ^bool
 	if client != nil {
 		sync.lock(&client.sockets_mutex)
 		if sync.atomic_load(&client.destroying) {
@@ -660,7 +755,29 @@ execute_http_request :: proc(req: Http_Request, client: ^Http_Client = nil) -> H
 		}
 		client.sockets[req.id] = sock
 		sync.unlock(&client.sockets_mutex)
+		cancel = &client.destroying
 	}
+
+	// #169 / #256 L3: bound both the connect and the socket read. The
+	// poll-side timeout in http_client_poll only synthesizes a response and
+	// frees the in-flight slot; it never touches the socket, so without
+	// these a worker parked against a hung/tarpit peer would block (and
+	// hold its fd) for the OS default, defeating MAX_INFLIGHT_HTTP.
+	timeout_ms := req.timeout_ms <= 0 ? HTTP_DEFAULT_TIMEOUT_MS : req.timeout_ms
+	if !tcp_connect_bounded(sock, checked_endpoint, timeout_ms, cancel) {
+		if client != nil {
+			sync.lock(&client.sockets_mutex)
+			delete_key(&client.sockets, req.id)
+			sync.unlock(&client.sockets_mutex)
+		}
+		net.close(sock)
+		// #162 L4: generic to the caller, detail (host only) to stderr.
+		fmt.eprintfln("redin: http dial failed for %s (refused, unreachable, or connect timeout)", url_host(req.url))
+		response.status = 0
+		response.error_msg = strings.clone("http request failed")
+		return response
+	}
+	net.set_option(sock, .Receive_Timeout, time.Duration(timeout_ms) * time.Millisecond)
 
 	res, req_err := http_client.request_on(&http_req, sock, url, context.allocator)
 
