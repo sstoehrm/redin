@@ -1415,3 +1415,65 @@ test_http_worker_frees_thread_temp_arena :: proc(t: ^testing.T) {
 	testing.expect(t, !probe.block_after_cleanup,
 		"#216: the worker must free its thread-local temp arena before exit")
 }
+
+// #256 L3: net.dial_tcp blocks for the OS SYN-retry schedule (~63 s on
+// Linux against a silent-drop peer) with no way to honour req.timeout_ms
+// or to be interrupted by http_client_destroy (the fd was only registered
+// after dial returned). The dial is now split: tcp_socket_open creates a
+// non-blocking socket (so the fd can be registered before connecting),
+// and tcp_connect_bounded drives the connect with a poll loop that
+// honours both the timeout and a cancel flag.
+
+@(test)
+test_tcp_connect_bounded_success :: proc(t: ^testing.T) {
+	// A loopback listener completes the handshake from its backlog — no
+	// accept needed, so no mock thread (a mock_serve with no client hangs).
+	listener, lerr := net.listen_tcp(net.Endpoint{address = net.IP4_Loopback, port = 0})
+	if lerr != nil {
+		testing.fail_now(t, "loopback listen failed (sandboxed environment?)")
+	}
+	defer net.close(listener)
+	ep, eperr := net.bound_endpoint(listener)
+	testing.expect(t, eperr == nil, "bound_endpoint failed")
+
+	sock, ok := tcp_socket_open(ep)
+	testing.expect(t, ok, "tcp_socket_open failed for loopback")
+	defer net.close(sock)
+	testing.expect(t, tcp_connect_bounded(sock, ep, 5000, nil),
+		"connect to a live loopback listener must succeed within the bound")
+}
+
+@(test)
+test_tcp_connect_bounded_times_out :: proc(t: ^testing.T) {
+	// 10.255.255.1:9 — RFC 1918 space that either silently drops the SYN
+	// (the case under test: pre-fix this parked the worker for ~63 s) or
+	// fails fast with no-route. Either way the call must return false well
+	// inside the OS SYN-retry schedule.
+	blackhole := net.Endpoint{address = net.IP4_Address{10, 255, 255, 1}, port = 9}
+	start := time.tick_now()
+	sock, ok := tcp_socket_open(blackhole)
+	testing.expect(t, ok, "tcp_socket_open should not fail before connect")
+	defer net.close(sock)
+	connected := tcp_connect_bounded(sock, blackhole, 500, nil)
+	elapsed := time.tick_since(start)
+	testing.expect(t, !connected, "connect to a blackhole must not report success")
+	testing.expectf(t, elapsed < 10 * time.Second,
+		"bounded connect took %v — timeout_ms was not honoured (#256 L3)", elapsed)
+}
+
+@(test)
+test_tcp_connect_bounded_cancel :: proc(t: ^testing.T) {
+	// A pre-set cancel flag (http_client_destroy's `destroying`) must make
+	// the connect bail within one poll slice, regardless of timeout_ms.
+	blackhole := net.Endpoint{address = net.IP4_Address{10, 255, 255, 1}, port = 9}
+	cancel := true
+	start := time.tick_now()
+	sock, ok := tcp_socket_open(blackhole)
+	testing.expect(t, ok, "tcp_socket_open should not fail before connect")
+	defer net.close(sock)
+	connected := tcp_connect_bounded(sock, blackhole, 30_000, &cancel)
+	elapsed := time.tick_since(start)
+	testing.expect(t, !connected, "cancelled connect must not report success")
+	testing.expectf(t, elapsed < 5 * time.Second,
+		"cancelled connect took %v — cancel flag was not honoured (#256 L3)", elapsed)
+}
