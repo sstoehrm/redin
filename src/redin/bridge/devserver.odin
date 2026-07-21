@@ -836,7 +836,12 @@ find_header_value :: proc(headers: string, name_lower: string) -> string {
 		rel := strings.index(lower[pos:], needle)
 		if rel < 0 do return ""
 		idx := pos + rel
-		if idx == start || lower[idx - 1] == '\n' {
+		// #256 L1: a header line starts only after the two-byte CRLF RFC 7230
+		// mandates. Accepting a bare '\n' let a LF byte embedded in another
+		// header's value smuggle a header past this lookup (and past
+		// header_count's duplicate rejection).
+		if idx == start ||
+		   (idx >= start + 2 && lower[idx - 2] == '\r' && lower[idx - 1] == '\n') {
 			rest := headers[idx + len(needle):]
 			end := strings.index_any(rest, "\r\n")
 			if end < 0 do end = len(rest)
@@ -938,7 +943,10 @@ header_count :: proc(headers: string, name_lower: string) -> int {
 		rel := strings.index(lower[pos:], needle)
 		if rel < 0 do break
 		idx := pos + rel
-		if idx == start || lower[idx - 1] == '\n' {
+		// #256 L1: anchor on the full CRLF, mirroring find_header_value —
+		// a bare '\n' inside a header value is not a line boundary.
+		if idx == start ||
+		   (idx >= start + 2 && lower[idx - 2] == '\r' && lower[idx - 1] == '\n') {
 			count += 1
 		}
 		pos = idx + len(needle)
@@ -1158,6 +1166,24 @@ handle_get_frames :: proc(ds: ^Dev_Server, ch: ^Response_Channel) {
 // For non-frame values (numbers, strings, primitive children inside
 // e.g. canvas attribute tables), defers to lua_value_to_json.
 //
+// rect_json renders a node's layout rect as the `,"rect":[x,y,w,h]`
+// attribute fragment spliced into /frames output (temp-allocated).
+// #256 L2: each coordinate goes through json_number (null for NaN/±Inf) —
+// %g printed non-finite values as bare tokens, which is not valid JSON.
+rect_json :: proc(r: rl.Rectangle) -> string {
+	b := strings.builder_make(context.temp_allocator)
+	strings.write_string(&b, `,"rect":[`)
+	json_number(&b, f64(r.x))
+	strings.write_byte(&b, ',')
+	json_number(&b, f64(r.y))
+	strings.write_byte(&b, ',')
+	json_number(&b, f64(r.width))
+	strings.write_byte(&b, ',')
+	json_number(&b, f64(r.height))
+	strings.write_byte(&b, ']')
+	return strings.to_string(b)
+}
+
 // Mirrors lua_read_node's flattening order. dfs_idx must be incremented
 // exactly once per node (vector with a tag at slot 1) — except for
 // [:markdown], which lowers to N flat-array nodes via flatten_subtree;
@@ -1200,8 +1226,7 @@ frame_value_to_json :: proc(
 	}
 	rect_str := ""
 	if my_idx >= 0 && my_idx < len(rects) {
-		r := rects[my_idx]
-		rect_str = fmt.tprintf(`,"rect":[%g,%g,%g,%g]`, r.x, r.y, r.width, r.height)
+		rect_str = rect_json(rects[my_idx])
 	} else {
 		rect_str = `,"rect":null`
 	}
