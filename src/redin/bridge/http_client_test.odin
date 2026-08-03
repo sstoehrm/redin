@@ -1461,6 +1461,141 @@ test_tcp_connect_bounded_times_out :: proc(t: ^testing.T) {
 		"bounded connect took %v — timeout_ms was not honoured (#256 L3)", elapsed)
 }
 
+// #263 M1: the per-request deadline is enforced by http_client_poll, but
+// the timeout path only removed the `pending` entry — it never touched
+// `hc.sockets`. Against a server that trickles bytes faster than the
+// per-recv Receive_Timeout, SO_RCVTIMEO never fires either, so the worker
+// (and its fd) stayed parked long after the app was told "timeout" and the
+// in-flight slot was freed. Each new request against the same tarpit
+// leaked another worker + fd, unbounded. The fix shuts the socket down
+// (never closes — the worker keeps sole fd ownership, same discipline as
+// #260 L1) in the same poll that synthesizes the timeout response.
+
+@(private = "file")
+drip_mock_serve :: proc(m: ^Mock_Server) {
+	defer sync.sema_post(&m.done)
+	client, _, err := net.accept_tcp(m.sock)
+	if err != nil do return
+	defer net.close(client)
+	buf: [4096]u8
+	total := 0
+	for total < len(buf) {
+		n, rerr := net.recv_tcp(client, buf[total:])
+		if rerr != nil || n <= 0 do break
+		total += n
+		if strings.contains(string(buf[:total]), "\r\n\r\n") do break
+	}
+	// Full header block at once, then drip the body one byte per 100 ms —
+	// each recv is satisfied well inside the per-recv timeout, but the
+	// overall deadline is blown. ~3 s worst case bounds the test.
+	head := "HTTP/1.1 200 OK\r\nContent-Length: 10000\r\nConnection: close\r\n\r\n"
+	if _, serr := net.send_tcp(client, transmute([]u8)head); serr != nil do return
+	one := []u8{'x'}
+	for _ in 0 ..< 30 {
+		time.sleep(100 * time.Millisecond)
+		if _, serr := net.send_tcp(client, one); serr != nil do return
+	}
+}
+
+@(private = "file")
+mock_start_drip :: proc() -> ^Mock_Server {
+	m := mock_bind()
+	if m == nil do return nil
+	m.thread = thread.create_and_start_with_poly_data(m, drip_mock_serve, context)
+	return m
+}
+
+@(test)
+test_http_timeout_unparks_tarpit_worker :: proc(t: ^testing.T) {
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+	allow_open_http()
+	defer set_http_whitelist(nil)
+
+	m := mock_start_drip()
+	if m == nil do testing.fail_now(t, "could not bind a loopback mock server")
+	defer mock_stop(m)
+
+	hc: Http_Client
+	http_client_init(&hc)
+	defer http_client_destroy(&hc)
+
+	req := Http_Request{
+		id         = strings.clone("tarpit-1"),
+		url        = strings.clone(fmt.tprintf("http://127.0.0.1:%d/", m.port)),
+		method     = strings.clone("GET"),
+		timeout_ms = 400, // mock drips a byte every 100 ms for ~3 s
+	}
+	http_client_request(&hc, req)
+
+	// Collect the app-facing timeout response.
+	deadline := time.time_add(time.now(), 2 * time.Second)
+	results: [dynamic]Http_Response
+	defer { for &r in results do http_response_destroy(&r); delete(results) }
+	for time.diff(time.now(), deadline) > 0 {
+		http_client_poll(&hc, &results)
+		if len(results) > 0 do break
+		time.sleep(50 * time.Millisecond)
+	}
+	testing.expect(t, len(results) == 1, "expected the synthesized timeout result")
+	if len(results) == 1 {
+		testing.expect(t, strings.contains(results[0].error_msg, "timeout"),
+			fmt.tprintf("expected 'timeout' in error_msg, got %q", results[0].error_msg))
+	}
+
+	// The worker must unwind promptly — the timeout poll shut its socket
+	// down. Pre-fix it stayed parked until the mock stopped dripping (~3 s).
+	drain_deadline := time.time_add(time.now(), 1 * time.Second)
+	for sync.atomic_load(&hc.workers_alive) != 0 && time.diff(time.now(), drain_deadline) > 0 {
+		time.sleep(20 * time.Millisecond)
+	}
+	testing.expect(t, sync.atomic_load(&hc.workers_alive) == 0,
+		"timed-out worker still parked against the drip server — poll must shut down the socket (#263 M1)")
+}
+
+// #263 L5: `destroying` was read outside pending_mutex, before the insert.
+// A destroy that flips the flag and observes workers_alive == 0 in that
+// window frees the pending/sockets maps while the submitter goes on to
+// insert and spawn a worker — UAF. The check now happens under
+// pending_mutex atomically with the insert and the workers_alive bump.
+@(test)
+test_http_request_during_destroy_rejected :: proc(t: ^testing.T) {
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+
+	hc: Http_Client
+	http_client_init(&hc)
+	defer http_client_destroy(&hc)
+
+	sync.atomic_store(&hc.destroying, true)
+
+	req := Http_Request{
+		id     = strings.clone("destroy-race-1"),
+		url    = strings.clone("http://127.0.0.1:1/"),
+		method = strings.clone("GET"),
+	}
+	http_client_request(&hc, req)
+
+	testing.expect(t, sync.atomic_load(&hc.workers_alive) == 0,
+		"a request submitted during destroy must not spawn a worker (#263 L5)")
+	sync.lock(&hc.pending_mutex)
+	pending_len := len(hc.pending)
+	sync.unlock(&hc.pending_mutex)
+	testing.expect(t, pending_len == 0,
+		"a request submitted during destroy must not insert into pending (#263 L5)")
+
+	results: [dynamic]Http_Response
+	defer { for &r in results do http_response_destroy(&r); delete(results) }
+	http_client_poll(&hc, &results)
+	found := false
+	for r in results {
+		if strings.contains(r.error_msg, "shutting down") do found = true
+	}
+	testing.expect(t, found, "expected a 'shutting down' rejection result")
+
+	sync.atomic_store(&hc.destroying, false) // let the deferred destroy run cleanly
+}
+
 @(test)
 test_tcp_connect_bounded_cancel :: proc(t: ^testing.T) {
 	// A pre-set cancel flag (http_client_destroy's `destroying`) must make

@@ -189,8 +189,14 @@ http_client_destroy :: proc(hc: ^Http_Client) {
 	// after `execute_http_request` returns and decrement `workers_alive`
 	// LAST, so a worker count of 0 means no worker holds a pointer into
 	// `hc`. Atomic store so the socket hook can observe shutdown
-	// without locking `pending_mutex`.
+	// without locking `pending_mutex`. The store itself happens under
+	// pending_mutex (#263 L5): http_client_request checks the flag and
+	// bumps workers_alive under the same lock, so once we release it,
+	// every submitter either already bumped the count (we'll wait for its
+	// worker) or will observe the flag and reject.
+	sync.lock(&hc.pending_mutex)
 	sync.atomic_store(&hc.destroying, true)
+	sync.unlock(&hc.pending_mutex)
 
 	// Phase 1: wait up to 3 s for workers to drain naturally. The
 	// timeout sweep also runs here to mark long-running requests as
@@ -283,14 +289,14 @@ http_client_request :: proc(hc: ^Http_Client, req: Http_Request) {
 	// In-flight cap. Soft check: two simultaneous submitters could both
 	// see `inflight = 63` and both proceed, briefly reaching 65. That's
 	// fine — we're enforcing a soft cap, not a hard one. Issue #99 M1 B.
-	// We also peek at `destroying` under the same lock so a request issued
-	// concurrently with http_client_destroy can't write into a freed
-	// pending map. Production callers are main-thread only; this hardens
-	// the contract for callers on other threads.
+	// `destroying` is checked below, under the same pending_mutex hold as
+	// the insert, so a request issued concurrently with http_client_destroy
+	// can't write into a freed pending map. Production callers are
+	// main-thread only; this hardens the contract for callers on other
+	// threads.
 	sync.lock(&hc.pending_mutex)
 	inflight := len(hc.pending)
 	sync.unlock(&hc.pending_mutex)
-	shutting_down := sync.atomic_load(&hc.destroying)
 
 	if inflight >= MAX_INFLIGHT_HTTP {
 		// Move req.id into the rejection response (mirrors execute_http_request,
@@ -311,7 +317,36 @@ http_client_request :: proc(hc: ^Http_Client, req: Http_Request) {
 		return
 	}
 
+	timeout := req.timeout_ms <= 0 ? HTTP_DEFAULT_TIMEOUT_MS : req.timeout_ms
+
+	// Clone req.id for the pending map. The same allocation is used as
+	// both the map key and id_owned, so a single delete frees both.
+	// #263 L5: `destroying` must be read under the SAME pending_mutex hold
+	// as the insert and the workers_alive bump. Read outside it, destroy
+	// could flip the flag and observe workers_alive == 0 between our check
+	// and the insert, then free pending/sockets while we write into them
+	// and spawn a worker that reads them. http_client_destroy stores the
+	// flag under pending_mutex, so whichever side takes the lock first
+	// wins consistently: either we insert+bump before destroy sees the
+	// count, or we observe the flag and reject.
+	id_clone := strings.clone(req.id)
+	sync.lock(&hc.pending_mutex)
+	shutting_down := sync.atomic_load(&hc.destroying)
+	dup: bool
+	if !shutting_down {
+		_, dup = hc.pending[id_clone]
+		if !dup {
+			hc.pending[id_clone] = Pending_Http{
+				id_owned = id_clone,
+				deadline = time.time_add(time.now(), time.Duration(timeout) * time.Millisecond),
+			}
+			sync.atomic_add(&hc.workers_alive, 1)
+		}
+	}
+	sync.unlock(&hc.pending_mutex)
+
 	if shutting_down {
+		delete(id_clone)
 		r := Http_Response{
 			id        = req.id,
 			status    = 0,
@@ -325,21 +360,6 @@ http_client_request :: proc(hc: ^Http_Client, req: Http_Request) {
 		http_request_destroy(&req)
 		return
 	}
-
-	timeout := req.timeout_ms <= 0 ? HTTP_DEFAULT_TIMEOUT_MS : req.timeout_ms
-
-	// Clone req.id for the pending map. The same allocation is used as
-	// both the map key and id_owned, so a single delete frees both.
-	id_clone := strings.clone(req.id)
-	sync.lock(&hc.pending_mutex)
-	_, dup := hc.pending[id_clone]
-	if !dup {
-		hc.pending[id_clone] = Pending_Http{
-			id_owned = id_clone,
-			deadline = time.time_add(time.now(), time.Duration(timeout) * time.Millisecond),
-		}
-	}
-	sync.unlock(&hc.pending_mutex)
 
 	// #174: a duplicate in-flight id would overwrite the first entry's
 	// map-key allocation (leak) and cause the second worker's real response
@@ -373,9 +393,11 @@ http_client_request :: proc(hc: ^Http_Client, req: Http_Request) {
 	// odin-http logs Connection_Closed at log.errorf, which the test
 	// runner counts as a test failure even when it's the expected
 	// outcome of a slow/flaky remote.
+	// workers_alive was already bumped inside the pending_mutex hold above
+	// (#263 L5) so destroy can never observe 0 workers after we committed
+	// to spawning one.
 	worker_ctx := context
 	worker_ctx.logger = log.nil_logger()
-	sync.atomic_add(&hc.workers_alive, 1)
 	thread.create_and_start_with_data(data, http_thread_proc, init_context = worker_ctx, self_cleanup = true)
 }
 
@@ -398,6 +420,25 @@ http_client_poll :: proc(hc: ^Http_Client, results: ^[dynamic]Http_Response) {
 		delete_key(&hc.pending, id)
 	}
 	sync.unlock(&hc.pending_mutex)
+
+	// Phase 1b (#263 M1): shut down each timed-out request's socket so the
+	// worker actually unwinds. Removing the pending entry alone frees the
+	// in-flight slot while the worker stays parked in recv — a server that
+	// trickles bytes inside the per-recv Receive_Timeout window would pin
+	// the worker, its fd, and the sockets entry indefinitely, leaking one
+	// of each per request. Shutdown (never close) keeps fd ownership with
+	// the worker's own error path — same single-owner discipline as
+	// #260 L1. A socket still mid-connect answers ENOTCONN; that worker's
+	// connect loop is bounded by timeout_ms on its own.
+	if len(timed_out_ids) > 0 {
+		sync.lock(&hc.sockets_mutex)
+		for id in timed_out_ids {
+			if sock, ok := hc.sockets[id]; ok {
+				_ = net.shutdown(sock, .Both)
+			}
+		}
+		sync.unlock(&hc.sockets_mutex)
+	}
 
 	// Phase 2: synthesize timeout responses. Ownership of id (the
 	// erstwhile id_owned) transfers into Http_Response.id; the caller's
@@ -781,14 +822,24 @@ execute_http_request :: proc(req: Http_Request, client: ^Http_Client = nil) -> H
 
 	res, req_err := http_client.request_on(&http_req, sock, url, context.allocator)
 
-	if client != nil {
-		sync.lock(&client.sockets_mutex)
-		delete_key(&client.sockets, req.id)
-		sync.unlock(&client.sockets_mutex)
-	}
+	// #263 M1: the socket stays REGISTERED until just before whichever
+	// path closes it. It used to be deregistered here, right after
+	// request_on — but request_on only parses the response headers; the
+	// body is read below in response_body, on the same socket. A server
+	// that dripped its body one byte per Receive_Timeout window would park
+	// the worker in an unregistered-socket recv, where neither the
+	// timeout sweep in http_client_poll nor destroy's force-shutdown could
+	// reach it. Deregistration must precede the close (never follow it):
+	// a registered-but-closed fd is exactly the recycled-fd shutdown
+	// hazard of #260 L1.
 
 	if req_err != nil {
 		// `request_on` leaves socket ownership with us on error.
+		if client != nil {
+			sync.lock(&client.sockets_mutex)
+			delete_key(&client.sockets, req.id)
+			sync.unlock(&client.sockets_mutex)
+		}
 		net.close(sock)
 		// #162 L4: generic to the caller, detail to stderr. Certificate
 		// rejection is the one distinguishable case: the app must be able
@@ -833,6 +884,12 @@ execute_http_request :: proc(req: Http_Request, client: ^Http_Client = nil) -> H
 		response.headers[strings.clone(k)] = strings.clone(v)
 	}
 
+	// Deregister before response_destroy closes the fd (#263 M1, see above).
+	if client != nil {
+		sync.lock(&client.sockets_mutex)
+		delete_key(&client.sockets, req.id)
+		sync.unlock(&client.sockets_mutex)
+	}
 	http_client.response_destroy(&res, body, was_alloc)
 
 	return response
