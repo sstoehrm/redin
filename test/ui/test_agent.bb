@@ -49,6 +49,21 @@
                        {:headers (auth-headers) :throw false})]
     (assert (= 404 (:status resp)) (str "expected 404, got " (:status resp)))))
 
+;; #263 L1: an empty id ("/agent/content/" with trailing slash) used to match
+;; the first node whose attrs table has no :id — leaking the root subtree on
+;; GET and, on PUT, writing into any un-id'd :agent :edit node.
+(deftest agent-get-empty-id-404
+  (let [resp (http/get (str (base-url) "/agent/content/")
+                       {:headers (auth-headers) :throw false})]
+    (assert (= 404 (:status resp)) (str "expected 404 for empty id, got " (:status resp)))))
+
+(deftest agent-put-empty-id-404
+  (let [resp (http/put (str (base-url) "/agent/content/")
+                       {:headers (merge (auth-headers) {"Content-Type" "application/json"})
+                        :body (json/generate-string {:content "pwned"})
+                        :throw false})]
+    (assert (= 404 (:status resp)) (str "expected 404 for empty id, got " (:status resp)))))
+
 ;; -- PUT --
 
 (deftest agent-put-text-replaces-content

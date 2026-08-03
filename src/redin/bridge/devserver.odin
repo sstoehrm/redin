@@ -1374,6 +1374,12 @@ handle_get_agent_nodes :: proc(ds: ^Dev_Server, ch: ^Response_Channel) {
 // onto the Lua stack at -1 if found and return true. Otherwise leaves
 // the stack unchanged and returns false. Caller must lua_pop(L, 1) on success.
 agent_find_by_id :: proc(L: ^Lua_State, index: i32, target_id: string) -> bool {
+	// #263 L1: the walker defaults a node's id to "" when the attrs table
+	// has no `:id` field, so an empty target would match the first
+	// DFS-visited un-id'd node (in practice the root — or, on the PUT
+	// path, any `:agent :edit` node the app didn't bother to id). Absent
+	// must never equal empty; refuse the lookup outright.
+	if len(target_id) == 0 do return false
 	idx := index < 0 ? lua_gettop(L) + index + 1 : index
 	if !lua_istable(L, idx) do return false
 
@@ -1467,6 +1473,12 @@ emit_agent_content :: proc(b: ^strings.Builder, L: ^Lua_State, tag: string) {
 }
 
 handle_get_agent_content :: proc(ds: ^Dev_Server, ch: ^Response_Channel, id: string) {
+	// #263 L1 defence in depth: reject "/agent/content/" (empty id) before
+	// touching the frame; agent_find_by_id refuses empty targets too.
+	if len(id) == 0 {
+		respond_json_error(ch, 404, `{"error":"id required"}`)
+		return
+	}
 	L := ds.bridge.L
 	lua_getglobal(L, "require")
 	lua_pushstring(L, "view")
@@ -1498,6 +1510,11 @@ handle_get_agent_content :: proc(ds: ^Dev_Server, ch: ^Response_Channel, id: str
 }
 
 handle_put_agent_content :: proc(ds: ^Dev_Server, ch: ^Response_Channel, id: string, body: string) {
+	// #263 L1 defence in depth: see handle_get_agent_content.
+	if len(id) == 0 {
+		respond_json_error(ch, 404, `{"error":"id required"}`)
+		return
+	}
 	L := ds.bridge.L
 
 	// 1. Decode body. Expect {"content": <string-or-array>}.
