@@ -172,16 +172,47 @@ Http_Client :: struct {
 	workers_alive: i32,
 	// Socket fds of in-flight requests, keyed by request id. Workers
 	// open the fd via `tcp_socket_open`, insert here BEFORE connecting
-	// (#256 L3, so destroy can interrupt a mid-dial worker too), and
-	// remove on completion. `http_client_destroy` force-closes any still
-	// registered to unblock workers parked in `parse_response`'s blocking
-	// `net.recv_tcp`. The fork's `defer` in `parse_response` frees the
-	// scanner buffer once recv returns Connection_Closed. Issue #156.
+	// (#256 L3, which also closes the register-vs-`destroying` race), and
+	// remove on completion. `http_client_destroy` *shuts down* — never
+	// closes — any still registered, to unblock workers parked in
+	// `parse_response`'s blocking `net.recv_tcp` while leaving fd ownership
+	// with the worker (#260 L1). The fork's `defer` in `parse_response`
+	// frees the scanner buffer once recv returns Connection_Closed. #156.
 	sockets:       map[string]net.TCP_Socket,
 	sockets_mutex: sync.Mutex,
 }
 
 http_client_init :: proc(hc: ^Http_Client) {
+}
+
+// Tear down both halves of every registered in-flight socket WITHOUT
+// closing the fd. A worker parked in odin-http's blocking `net.recv_tcp`
+// sees the shut-down read side as EOF, which surfaces as
+// `Connection_Closed` and unwinds it through the same error path a
+// force-close used to produce (#156) — but the fd stays valid and owned
+// by the worker, which closes it exactly once on its way out (directly,
+// or via `response_destroy` on the success path).
+//
+// #260 L1: this used to `net.close(sock)` and leave the entry in the map,
+// so every worker cleanup site then closed the same fd a second time.
+// A stale close is normally a no-op EBADF, but during shutdown other
+// threads are still winding down, so the fd number can be recycled in the
+// window between the two closes — at which point the second close kills
+// an unrelated fd. Shutting down instead of closing removes the second
+// close entirely rather than trying to race-guard it.
+//
+// Split out of `http_client_destroy` so the invariant it encodes
+// (unblock, never take ownership) is directly testable.
+http_client_unblock_sockets :: proc(hc: ^Http_Client) {
+	sync.lock(&hc.sockets_mutex)
+	for _, sock in hc.sockets {
+		// Best-effort: a socket still mid-connect answers ENOTCONN. That
+		// worker is cancelled by the `destroying` flag inside
+		// `tcp_connect_bounded`'s poll loop instead (within one 250 ms
+		// slice, so well before this phase runs).
+		_ = net.shutdown(sock, .Both)
+	}
+	sync.unlock(&hc.sockets_mutex)
 }
 
 http_client_destroy :: proc(hc: ^Http_Client) {
@@ -208,16 +239,12 @@ http_client_destroy :: proc(hc: ^Http_Client) {
 		delete(dummy)
 	}
 
-	// Phase 2: force-close any sockets still registered. Workers parked
+	// Phase 2: unblock any sockets still registered. Workers parked
 	// inside odin-http's `parse_response → net.recv_tcp` only return
-	// when the socket dies, so close them ourselves. The upstream defer
-	// (commits on the fork branch) frees the scanner buffer along the
-	// way, eliminating the 4 KiB-per-stuck-worker leak from #156.
-	sync.lock(&hc.sockets_mutex)
-	for _, sock in hc.sockets {
-		net.close(sock)
-	}
-	sync.unlock(&hc.sockets_mutex)
+	// when the read side dies, so tear it down ourselves. The upstream
+	// defer (commits on the fork branch) frees the scanner buffer along
+	// the way, eliminating the 4 KiB-per-stuck-worker leak from #156.
+	http_client_unblock_sockets(hc)
 
 	// Phase 3: wait up to 1 s more for workers to unwind through the
 	// now-unblocked recv. Continue sweeping timeouts so newly-failed
@@ -583,7 +610,10 @@ tcp_connect_bounded :: proc(sock: net.TCP_Socket, endpoint: net.Endpoint, timeou
 			}
 			if n == 0 do continue // slice elapsed; re-check cancel/deadline
 			if .NVAL in pfds[0].revents {
-				// fd force-closed under us (destroy Phase 2).
+				// fd closed under us. Destroy no longer does this (#260 L1
+				// shuts down rather than closes, and a connecting socket
+				// answers ENOTCONN anyway) — kept as a guard so a closed fd
+				// can never spin this loop until the deadline.
 				return false
 			}
 			// Writable — or failed; SO_ERROR below distinguishes.
@@ -621,8 +651,8 @@ endpoint_to_sockaddr :: proc(endpoint: net.Endpoint) -> linux.Sock_Addr_Any {
 }
 
 // `client` is optional. When non-nil, the request's socket is registered
-// in `client.sockets` while in flight so `http_client_destroy` can
-// force-close it during shutdown. Tests that drive `execute_http_request`
+// in `client.sockets` while in flight so `http_client_destroy` can shut the
+// socket down and unblock this worker. Tests that drive `execute_http_request`
 // synchronously (no thread, no destroy) pass nil and skip registration.
 execute_http_request :: proc(req: Http_Request, client: ^Http_Client = nil) -> Http_Response {
 	response: Http_Response
@@ -726,12 +756,14 @@ execute_http_request :: proc(req: Http_Request, client: ^Http_Client = nil) -> H
 		bytes.buffer_write_string(&http_req.body, req.body)
 	}
 
-	// Open the socket first and register it BEFORE connecting, so destroy
-	// can force-close a mid-dial worker (#256 L3 — previously the fd was
-	// only registered after dial returned, and net.dial_tcp itself blocked
-	// for the OS SYN-retry schedule, ~63 s on Linux, regardless of the
-	// Lua-level timeout). When `client` is nil (sync test callers) we skip
-	// the registry dance entirely.
+	// Open the socket first and register it BEFORE connecting, so the
+	// `destroying` check below and the registry insert are one atomic step
+	// (#256 L3 — previously the fd was only registered after dial returned,
+	// and net.dial_tcp itself blocked for the OS SYN-retry schedule, ~63 s
+	// on Linux, regardless of the Lua-level timeout). A mid-dial worker is
+	// cancelled by the `destroying` flag threaded into tcp_connect_bounded,
+	// not by destroy touching the fd. When `client` is nil (sync test
+	// callers) we skip the registry dance entirely.
 	// Connect to the endpoint we already resolved and vetted — NOT req.url,
 	// which would make odin-http re-resolve and reopen the rebinding window.
 	url := parsed_url

@@ -18,6 +18,7 @@ import "core:net"
 import "core:os"
 import "core:strings"
 import "core:sync"
+import "core:sys/linux"
 import "core:testing"
 import "core:thread"
 import "core:time"
@@ -649,7 +650,7 @@ test_http_timeout_fires :: proc(t: ^testing.T) {
 
 @(test)
 // Fills the in-flight cap with slow requests so the destroy path has to
-// force-close every registered socket. Together with the upstream defer
+// shut down every registered socket. Together with the upstream defer
 // in parse_response, this exercises the full #156 fix end-to-end —
 // previously this test leaked 64 × 4 KiB of scanner buffers at shutdown.
 test_http_inflight_cap_rejects :: proc(t: ^testing.T) {
@@ -702,6 +703,49 @@ test_http_inflight_cap_rejects :: proc(t: ^testing.T) {
 		}
 	}
 	testing.expect(t, found, "expected overflow request to be rejected with 'concurrent' error")
+}
+
+// #260 L1: destroy's Phase 2 used to `net.close` every registered in-flight
+// socket while leaving the map entry in place, so the worker that owns the
+// fd closed it a second time on its way out (directly on the error paths,
+// via `response_destroy` on the success path). If another thread had been
+// handed the recycled fd number in between, that second close killed an
+// unrelated fd. Phase 2 must unblock the socket WITHOUT taking ownership:
+// a parked read ends promptly, but the fd stays open for its owner.
+@(test)
+test_http_unblock_sockets_does_not_close_fd :: proc(t: ^testing.T) {
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+
+	m := mock_start_slow() // accepts, then sleeps instead of replying
+	if m == nil { testing.fail_now(t, "could not bind a loopback mock server") }
+	defer mock_stop(m)
+
+	sock, dial_err := net.dial_tcp(net.Endpoint{address = net.IP4_Loopback, port = m.port})
+	if dial_err != nil { testing.fail_now(t, "could not dial the loopback mock server") }
+	defer net.close(sock)
+
+	hc: Http_Client
+	http_client_init(&hc)
+	hc.sockets["unblock-1"] = sock
+	defer delete(hc.sockets)
+
+	http_client_unblock_sockets(&hc)
+
+	// The fd must still be ours — a closed fd fails F_GETFD with EBADF.
+	_, ferr := linux.fcntl_getfd(linux.Fd(sock), linux.F_GETFD)
+	testing.expectf(t, ferr == .NONE,
+		"Phase 2 must leave fd ownership with the worker (#260 L1); F_GETFD gave %v", ferr)
+
+	// ...and the read must be unblocked: EOF now, not after the mock's 2 s.
+	buf: [64]u8
+	start := time.now()
+	n, rerr := net.recv_tcp(sock, buf[:])
+	elapsed := time.diff(start, time.now())
+	testing.expectf(t, n == 0 || rerr != nil,
+		"expected the parked read to end, got n=%d err=%v", n, rerr)
+	testing.expectf(t, elapsed < 1 * time.Second,
+		"Phase 2 must unblock a parked recv promptly, took %v", elapsed)
 }
 
 @(test)
