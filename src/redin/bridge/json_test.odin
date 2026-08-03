@@ -194,3 +194,36 @@ test_json_encode_preserves_embedded_nul :: proc(t: ^testing.T) {
 	testing.expectf(t, strings.contains(out, "0000"),
 		"embedded NUL should be escaped, not dropped; got %q (#173)", out)
 }
+
+// #263 L4 pinned down: the audit claimed lua_tolstring on a numeric key
+// mid-lua_next could derail the object-branch traversal (a real Lua 5.1
+// hazard — the coercing C-API lua_isstring answers true for numbers).
+// This codebase's lua_isstring binding is a STRICT LUA_TSTRING check, so
+// numeric keys never reach lua_tolstring: they are dropped from the
+// output, and the traversal is unaffected. This test pins both halves of
+// that contract — the drop and the surviving string keys — so a future
+// realignment of lua_isstring with C-API coercion semantics can't
+// silently reintroduce the hazard.
+@(test)
+test_json_encode_object_drops_numeric_key_keeps_rest :: proc(t: ^testing.T) {
+	L := luaL_newstate()
+	luaL_openlibs(L)
+	defer lua_close(L)
+
+	// No [1] entry → object branch; one numeric key + one string key.
+	testing.expect(t,
+		luaL_dostring(L, `local t = {} t[2] = "b" t.x = "y" return t`) == 0,
+		"lua build failed")
+
+	b := strings.builder_make()
+	defer strings.builder_destroy(&b)
+	lua_value_to_json(&b, L, lua_gettop(L))
+	out := strings.to_string(b)
+
+	testing.expectf(t, strings.contains(out, `"x":"y"`),
+		"string keys must survive a numeric sibling key; got %q (#263 L4)", out)
+	testing.expectf(t, !strings.contains(out, `"b"`),
+		"numeric-keyed entries are dropped in the object branch; got %q (#263 L4)", out)
+	testing.expectf(t, strings.has_prefix(out, "{") && strings.has_suffix(out, "}"),
+		"object must stay structurally intact; got %q (#263 L4)", out)
+}

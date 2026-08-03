@@ -465,6 +465,11 @@ redin_now :: proc "c" (L: ^Lua_State) -> i32 {
 
 redin_measure_text :: proc "c" (L: ^Lua_State) -> i32 {
 	context = g_context
+	// #263 L2: same argument guard as every sibling cfunc. Without it a
+	// nil/table text reaches rl.MeasureTextEx as a NULL cstring; current
+	// raylib happens to NULL-guard TextLength, but that's its internal
+	// detail, not a contract.
+	if !lua_isstring(L, 1) do return 0
 	text := lua_tostring_raw(L, 1)
 	font_size := f32(lua_tonumber(L, 2))
 	font_name := "sans"
