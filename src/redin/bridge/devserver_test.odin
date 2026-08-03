@@ -361,6 +361,37 @@ test_agent_nodes_id_is_json_escaped :: proc(t: ^testing.T) {
 	testing.expectf(t, strings.contains(out, `"mode":"edit"`), "mode present: %s", out)
 	testing.expectf(t, strings.contains(out, `"type":"text"`), "type present: %s", out)
 }
+// #263 L1: `GET/PUT /agent/content/` (trailing slash, empty id) reached
+// agent_find_by_id with target_id == "". The walker defaults a node's id
+// to "" when its attrs table has no `:id` field, so the empty target
+// matched the first DFS-visited un-id'd node — leaking the root subtree
+// on GET, and on PUT writing into any `:agent :edit` node that happens to
+// lack an id. An empty target must never match anything; the id attr is
+// the discriminator, and "absent" must not equal "empty".
+@(test)
+test_agent_find_by_id_empty_target_never_matches :: proc(t: ^testing.T) {
+	L := luaL_newstate()
+	luaL_openlibs(L)
+	defer lua_close(L)
+
+	// Root without :id, child with agent=edit but no :id either — the
+	// exact shape the PUT-side authorization gap needs.
+	testing.expect(
+		t,
+		luaL_dostring(L, `return {'vbox', {}, {'input', {agent='edit'}, 'hello'}}`) == 0,
+		"lua build failed",
+	)
+
+	testing.expect(t, !agent_find_by_id(L, lua_gettop(L), ""),
+		"empty target id must not match a node whose attrs lack :id (#263 L1)")
+
+	// Sanity: a real id still matches.
+	testing.expect(t, luaL_dostring(L, `return {'vbox', {}, {'input', {agent='edit', id='x'}}}`) == 0,
+		"lua build failed")
+	testing.expect(t, agent_find_by_id(L, lua_gettop(L), "x"),
+		"non-empty id lookup must still work")
+	lua_pop(L, 1)
+}
 } // when REDIN_AGENT
 
 // Tests for the dev-server handler-pool queue introduced for
