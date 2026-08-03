@@ -63,6 +63,11 @@ g_context: runtime.Context
 // one-time warning rather than crashing.
 MAX_VIEW_DEPTH :: 256
 g_view_depth_warned: bool
+// #180 / #263 L3: path steps are u8; a container with >256 direct
+// children wraps and its path-keyed identity (text selection) can
+// collide across siblings. Warned once, not fixed — see #180 for why
+// widening the encoding is deferred.
+g_path_step_overflow_warned: bool
 
 init :: proc(b: ^Bridge) {
 	g_bridge = b
@@ -1525,6 +1530,17 @@ lua_flatten_node :: proc(L: ^Lua_State, index: i32, cur: ^[dynamic]u8, b: ^Bridg
 				if len(cur) < MAX_VIEW_DEPTH {
 					child_idx := i32(len(b.nodes))
 					append(&child_indices, child_idx)
+					// #180 / #263 L3: the u8 step wraps past 255, so this
+					// child's path collides with an earlier sibling's.
+					// Selection identity may then resolve to the wrong
+					// node. Diagnose once; the encoding itself stays u8
+					// (widening is deferred, see #180).
+					if len(child_indices) - 1 > int(max(u8)) && !g_path_step_overflow_warned {
+						g_path_step_overflow_warned = true
+						fmt.eprintfln(
+							"redin: a container has more than 256 direct children; node path steps wrap and text-selection identity can collide across its children (#180)",
+						)
+					}
 					append(cur, u8(len(child_indices) - 1))
 					lua_flatten_node(L, lua_gettop(L), cur, b, my_idx)
 					pop(cur)
