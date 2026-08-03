@@ -159,10 +159,22 @@ lua_value_to_json_inner :: proc(b: ^strings.Builder, L: ^Lua_State, index: i32, 
 			first := true
 			lua_pushnil(L)
 			for lua_next(L, abs_idx) != 0 {
+				// Non-string keys are dropped: our lua_isstring is a
+				// strict LUA_TSTRING check (lua_api.odin), NOT the
+				// coercing C-API predicate — that strictness is
+				// load-bearing here. Lua 5.1 forbids lua_tolstring on a
+				// non-string key mid-lua_next (it converts the key slot
+				// in place and derails the traversal), so a coercing
+				// predicate would let numeric keys corrupt the walk
+				// (#263 L4). Stringify a copy anyway, so the invariant
+				// holds even if lua_isstring is ever aligned with the
+				// C API's coercion semantics.
 				if lua_isstring(L, -2) {
 					if !first do json_comma(b)
 					first = false
-					json_key(b, lua_tostring_len(L, -2))
+					lua_pushvalue(L, -2)
+					json_key(b, lua_tostring_len(L, -1))
+					lua_pop(L, 1)
 					lua_value_to_json_inner(b, L, -1, ctx)
 				}
 				lua_pop(L, 1)
