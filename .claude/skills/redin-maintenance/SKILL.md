@@ -15,7 +15,7 @@ odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit -o
 
 `src/cmd/redin/` is the thin CLI entry point (`package main`, arg parsing + memory tracking + `redin.run` call). The framework itself lives in `src/redin/` (`package redin`).
 
-Requires: Odin dev-2026-07 or newer (raylib 6 ships in `vendor:raylib`), `libssl-dev`, the X11/GL dev libs (`libgl1-mesa-dev libx11-dev libxrandr-dev libxi-dev libxcursor-dev libxinerama-dev`), and the `lib/odin-http` git submodule (`git submodule update --init`).
+Requires: Odin dev-2026-08 or newer (raylib 6 ships in `vendor:raylib`), `libssl-dev`, the X11/GL dev libs (`libgl1-mesa-dev libx11-dev libxrandr-dev libxi-dev libxcursor-dev libxinerama-dev`), and the `lib/odin-http` git submodule (`git submodule update --init`).
 
 ## Fennel runtime tests
 
