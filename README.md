@@ -26,7 +26,7 @@ The easiest way to start is with [redin-cli](https://github.com/sstoehrm/redin-c
 
 ```bash
 # Install the CLI (requires Babashka)
-curl -sL https://raw.githubusercontent.com/sstoehrm/redin-cli/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/sstoehrm/redin-cli/main/install.sh | bash
 
 # Create a Fennel project
 redin-cli new-fnl my-app
@@ -76,6 +76,13 @@ odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit -o
 | **OpenSSL** (`libssl-dev`) | HTTPS support via odin-http | Yes |
 | **OpenGL + X11 dev headers** (Linux only — `libgl1-mesa-dev`, `libx11-dev`, `libxrandr-dev`, `libxi-dev`, `libxcursor-dev`, `libxinerama-dev`) | Required by Odin's bundled Raylib at link time | Yes (Linux) |
 | **`lib/odin-http` submodule** | Async HTTP client used by `redin.http` | Yes |
+
+## Claude Code skills
+
+redin ships [Claude Code](https://claude.com/claude-code) skills. There is nothing to install manually — they arrive with the code:
+
+- **App projects** — `redin-cli new-fnl` / `new-lua` installs the `redin-dev` skill into the project's `.claude/skills/` (extracted from the release bundle in `.redin/`), and `redin-cli update` refreshes it alongside the binary, so the skill always matches the pinned redin version.
+- **This repository** — the skills are checked in at [`.claude/skills/`](.claude/skills/) (`redin-dev` for building apps and extending the framework, `redin-maintenance` for the verification workflow) and load automatically when you open a clone in Claude Code.
 
 ## Security
 

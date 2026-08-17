@@ -372,7 +372,7 @@ For `proc "c"` cfuncs (escape hatch — usually not needed), use `bridge.registe
 
 ## redin-cli
 
-Project manager for redin. Install: `curl -sL https://raw.githubusercontent.com/sstoehrm/redin-cli/main/install.sh | bash` (requires Babashka).
+Project manager for redin. Install: `curl -fsSL https://raw.githubusercontent.com/sstoehrm/redin-cli/main/install.sh | bash` (requires Babashka).
 
 | Command | Description |
 |---|---|

@@ -12,7 +12,7 @@ echo "  Binary built: build/redin"
 
 echo "Packaging ${NAME}.tar.gz..."
 rm -rf dist
-mkdir -p "${DIST}/docs/guide" "${DIST}/docs/reference" "${DIST}/runtime" "${DIST}/vendor" "${DIST}/lib" "${DIST}/.claude/skills/redin-dev"
+mkdir -p "${DIST}/docs/guide" "${DIST}/docs/reference" "${DIST}/runtime" "${DIST}/vendor" "${DIST}/lib" "${DIST}/skills/redin-dev"
 
 # Binary
 cp build/redin "${DIST}/redin"
@@ -51,8 +51,11 @@ cp docs/guide/*.md "${DIST}/docs/guide/"
 # Docs — reference
 cp docs/reference/*.md "${DIST}/docs/reference/"
 
-# Skill
-cp .claude/skills/redin-dev/SKILL.md "${DIST}/.claude/skills/redin-dev/"
+# Skill — must live at skills/ in the bundle (matches release.yml):
+# redin-cli extracts the tarball into .redin/ and mirrors .redin/skills/
+# into the project's .claude/skills/. A .claude/ dir at bundle root would
+# land at .redin/.claude/ and never be picked up.
+cp .claude/skills/redin-dev/SKILL.md "${DIST}/skills/redin-dev/"
 
 # Create tarball
 cd dist
