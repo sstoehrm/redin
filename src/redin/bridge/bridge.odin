@@ -1661,6 +1661,7 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 			if len(layout) > 0 {
 				v.layout = parse_anchor(layout)
 			}
+			v.gap = f16(max(0, lua_get_number_field(L, attrs_idx, "gap")))
 			v.draggable = lua_read_draggable(L, attrs_idx)
 			v.dropable  = lua_read_dropable (L, attrs_idx)
 			v.drag_over = lua_read_drag_over(L, attrs_idx)
@@ -1681,6 +1682,7 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 			if len(layout) > 0 {
 				h.layout = parse_anchor(layout)
 			}
+			h.gap = max(0, lua_get_number_field(L, attrs_idx, "gap"))
 			h.draggable = lua_read_draggable(L, attrs_idx)
 			h.dropable  = lua_read_dropable (L, attrs_idx)
 			h.drag_over = lua_read_drag_over(L, attrs_idx)

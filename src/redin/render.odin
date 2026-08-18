@@ -231,9 +231,9 @@ layout_node :: proc(
 			layout_children_stack(idx, rect, nodes, children_list, theme, depth)
 		}
 	case types.NodeVbox:
-		layout_box(idx, rect, n.aspect, n.layout, true, n.overflow, nodes, children_list, theme, depth)
+		layout_box(idx, rect, n.aspect, n.layout, true, n.overflow, f32(n.gap), nodes, children_list, theme, depth)
 	case types.NodeHbox:
-		layout_box(idx, rect, n.aspect, n.layout, false, n.overflow, nodes, children_list, theme, depth)
+		layout_box(idx, rect, n.aspect, n.layout, false, n.overflow, n.gap, nodes, children_list, theme, depth)
 	case types.NodeCanvas:
 		// Apply padding to content_rect; draw pass uses this for canvas.process.
 		content_rect := rect
@@ -358,6 +358,7 @@ layout_box :: proc(
 	layout: types.Anchor,
 	vertical: bool,
 	overflow: string,
+	gap: f32,
 	nodes: []types.Node,
 	children_list: []types.Children,
 	theme: map[string]types.Theme,
@@ -404,6 +405,12 @@ layout_box :: proc(
 		}
 		if s > 0 do fixed_total += s
 		else     do fill_count += 1
+	}
+	// n-1 main-axis gaps sit between children regardless of whether they
+	// are fixed or fill sized, so they count as fixed space everywhere
+	// fixed_total is consumed: fill sizing, centering, and scroll extents.
+	if gap > 0 && ch.length > 1 {
+		fixed_total += gap * f32(int(ch.length) - 1)
 	}
 
 	available := vertical ? content_rect.height : content_rect.width
@@ -474,7 +481,7 @@ layout_box :: proc(
 				}
 			}
 			child_rect = rl.Rectangle{child_x, pos, child_w, h}
-			pos += h
+			pos += h + gap
 		} else {
 			w := node_preferred_width(child_idx, nodes)
 			if w <= 0 do w = fill_size
@@ -489,7 +496,7 @@ layout_box :: proc(
 				}
 			}
 			child_rect = rl.Rectangle{pos, child_y, w, child_h}
-			pos += w
+			pos += w + gap
 		}
 		layout_node(child_idx, child_rect, nodes, children_list, theme, depth + 1)
 	}
@@ -1162,6 +1169,9 @@ intrinsic_height_impl :: proc(
 		for i in 0 ..< int(ch.length) {
 			total += intrinsic_height(int(ch.value[i]), nodes, children_list, theme, inner_w, depth + 1)
 		}
+		if ch.length > 1 {
+			total += f32(n.gap) * f32(int(ch.length) - 1)
+		}
 		return total
 
 	case types.NodeHbox:
@@ -1173,7 +1183,7 @@ intrinsic_height_impl :: proc(
 		}
 		ch := children_list[idx]
 		if ch.length == 0 do return f32(pad[0]) + f32(pad[2])
-		inner_w := available_width - f32(pad[1]) - f32(pad[3])
+		inner_w := available_width - f32(pad[1]) - f32(pad[3]) - n.gap * f32(int(ch.length) - 1)
 		share := inner_w / f32(ch.length)
 		max_h: f32 = 0
 		for i in 0 ..< int(ch.length) {

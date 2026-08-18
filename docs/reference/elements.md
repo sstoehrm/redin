@@ -286,6 +286,7 @@ Lays out children in a horizontal row, left to right.
 | --------- | ---- | ------- | ----- |
 | `overflow` | `"scroll-x"` | -- | Clip + horizontal wheel scroll. Children must set `:width`. See Scrolling. |
 | `layout` | anchor keyword (see below) | `"top_left"` | Child alignment along both axes. |
+| `gap` | number (px) | `0` | Main-axis spacing inserted between consecutive children (n−1 gaps). Counts toward fill sizing, centering, scroll extents, and intrinsic height. Negative values clamp to 0. |
 | `drag-handle` | bool | `false` | Marks this hbox as a grab surface for the nearest `:draggable` ancestor. |
 | `:agent` | `:read \| :edit` | -- | Optional. Pairs with `:id` to expose the node to the agent channel (REDIN_AGENT only). |
 

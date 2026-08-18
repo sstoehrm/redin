@@ -183,6 +183,7 @@ The flattening is a single pass when the frame enters the pipeline. No fragment 
 | Attribute  | Type     | Applies to | Notes |
 | ---------- | -------- | ---------- | ----- |
 | `overflow` | string   | vbox, hbox, text | `"scroll-y"` (vbox/text) or `"scroll-x"` (hbox/text). Enables clipping + wheel scroll on the matching axis. See Scrolling below. |
+| `gap`      | px number | vbox, hbox | Main-axis spacing between consecutive children (n−1 gaps). Counts toward fill sizing, centering, scroll extents, and intrinsic height. Negative values clamp to 0. Default 0. |
 | `viewport` | `[[anchor x y w h] ...]` | stack | Window-relative rects with anchor point, one per child. Anchor: `"top_left"`, `"top_center"`, `"top_right"`, `"center_left"`, `"center"`, `"center_right"`, `"bottom_left"`, `"bottom_center"`, `"bottom_right"`. Values for x/y/w/h: px, `"full"`, or `"M_N"` fraction. The anchor determines the origin and growth direction. |
 
 **Element-specific:**

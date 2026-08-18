@@ -66,6 +66,7 @@ Layout uses the Anchor enum: `top_left`, `top_center`, `top_right`, `center_left
 
 - **Vbox**: vertical anchor = where children group is positioned vertically, horizontal anchor = how each child is aligned horizontally
 - **Hbox**: horizontal anchor = where children group is positioned horizontally, vertical anchor = how each child is aligned vertically
+- **`:gap N`** on vbox/hbox inserts N px between consecutive children (n−1 gaps); counts toward fill sizing, centering, scroll extents, and intrinsic height. Negative clamps to 0.
 - **Text**: both axes control text alignment within its rect
 - Main-axis centering only applies when all children have explicit sizes (no fill nodes)
 
