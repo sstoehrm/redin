@@ -220,6 +220,19 @@ layout_node :: proc(
 		warn_layout_depth()
 		return
 	}
+	// The rect a parent hands a margined leaf is the outer rect (margin
+	// included — box measuring reserves it via outer_preferred_*). Inset
+	// once here so every parent path (vbox/hbox, stack overlay, viewport)
+	// agrees, and hit testing excludes the margin.
+	rect := rect
+	if m := node_margin(idx, nodes); m != {} {
+		rect = rl.Rectangle{
+			rect.x + f32(m[3]),
+			rect.y + f32(m[0]),
+			max(0, rect.width - f32(m[1]) - f32(m[3])),
+			max(0, rect.height - f32(m[0]) - f32(m[2])),
+		}
+	}
 	node_rects[idx] = rect
 	node_content_rects[idx] = rect
 
@@ -396,9 +409,9 @@ layout_box :: proc(
 		if vertical {
 			s = scrollable_y \
 				? intrinsic_height(child_idx, nodes, children_list, theme, content_rect.width, depth) \
-				: node_preferred_height(child_idx, nodes, theme, content_rect.width)
+				: outer_preferred_height(child_idx, nodes, theme, content_rect.width)
 		} else {
-			s = node_preferred_width(child_idx, nodes)
+			s = outer_preferred_width(child_idx, nodes)
 			if scrollable_x && s <= 0 {
 				fmt.eprintfln("warning: scroll-x child at idx %d has no explicit :width; it will render at zero width", child_idx)
 			}
@@ -468,11 +481,11 @@ layout_box :: proc(
 		if vertical {
 			h := scrollable_y \
 				? intrinsic_height(child_idx, nodes, children_list, theme, content_rect.width, depth) \
-				: node_preferred_height(child_idx, nodes, theme, content_rect.width)
+				: outer_preferred_height(child_idx, nodes, theme, content_rect.width)
 			if h <= 0 do h = fill_size
 			child_x := content_rect.x; child_w := content_rect.width
 			if anchor_h > 0 {
-				w := node_preferred_width(child_idx, nodes)
+				w := outer_preferred_width(child_idx, nodes)
 				if w > 0 {
 					child_x = anchor_h == 1 \
 						? content_rect.x + (content_rect.width - w) / 2 \
@@ -483,11 +496,11 @@ layout_box :: proc(
 			child_rect = rl.Rectangle{child_x, pos, child_w, h}
 			pos += h + gap
 		} else {
-			w := node_preferred_width(child_idx, nodes)
+			w := outer_preferred_width(child_idx, nodes)
 			if w <= 0 do w = fill_size
 			child_y := content_rect.y; child_h := content_rect.height
 			if anchor_v > 0 {
-				h := node_preferred_height(child_idx, nodes, theme, w)
+				h := outer_preferred_height(child_idx, nodes, theme, w)
 				if h > 0 {
 					child_y = anchor_v == 1 \
 						? content_rect.y + (content_rect.height - h) / 2 \
@@ -997,6 +1010,49 @@ size_f16 :: proc(size: union {
 	return 0
 }
 
+// :margin is a leaf-node attribute ([t r b l], same shape as theme
+// padding): the parent reserves the margin around the element, and the
+// element's own rect (node_rects, hit testing) excludes it. Containers
+// return zero — they space children with :gap / padding instead.
+node_margin :: proc(idx: int, nodes: []types.Node) -> [4]u8 {
+	#partial switch n in nodes[idx] {
+	case types.NodeText:   return n.margin
+	case types.NodeImage:  return n.margin
+	case types.NodeInput:  return n.margin
+	case types.NodeButton: return n.margin
+	case types.NodeCanvas: return n.margin
+	}
+	return {}
+}
+
+// Preferred sizes including the node's own margin — what the parent's
+// main-axis math must reserve. A zero (fill) preferred size stays zero
+// so fill semantics are decided by the content size alone; the margin
+// then applies inside the allocated fill slot (see layout_node).
+outer_preferred_width :: proc(idx: int, nodes: []types.Node) -> f32 {
+	w := node_preferred_width(idx, nodes)
+	if w <= 0 do return w
+	m := node_margin(idx, nodes)
+	return w + f32(m[1]) + f32(m[3])
+}
+
+outer_preferred_height :: proc(
+	idx: int,
+	nodes: []types.Node,
+	theme: map[string]types.Theme,
+	available_width: f32 = 0,
+) -> f32 {
+	m := node_margin(idx, nodes)
+	avail := available_width
+	if avail > 0 {
+		// Horizontal margins narrow the wrap width text measures against.
+		avail = max(0, avail - f32(m[1]) - f32(m[3]))
+	}
+	h := node_preferred_height(idx, nodes, theme, avail)
+	if h <= 0 do return h
+	return h + f32(m[0]) + f32(m[2])
+}
+
 node_preferred_width :: proc(idx: int, nodes: []types.Node) -> f32 {
 	switch n in nodes[idx] {
 	case types.NodeInput:
@@ -1203,7 +1259,7 @@ intrinsic_height_impl :: proc(
 
 	case types.NodeText, types.NodeInput, types.NodeButton, types.NodeImage,
 	     types.NodeCanvas, types.NodePopout, types.NodeModal:
-		return node_preferred_height(idx, nodes, theme, available_width)
+		return outer_preferred_height(idx, nodes, theme, available_width)
 	}
 	return 0
 }
