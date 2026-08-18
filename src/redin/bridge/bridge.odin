@@ -1616,6 +1616,7 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 		if attrs_idx > 0 {
 			c.provider = lua_get_string_field(L, attrs_idx, "provider")
 			c.aspect = lua_get_string_field(L, attrs_idx, "aspect")
+			c.margin = lua_get_padding_field(L, attrs_idx, "margin")
 			lua_getfield(L, attrs_idx, "width")
 			if lua_isstring(L, -1) {
 				s := string(lua_tostring_raw(L, -1))
@@ -1661,6 +1662,7 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 			if len(layout) > 0 {
 				v.layout = parse_anchor(layout)
 			}
+			v.gap = f16(max(0, lua_get_number_field(L, attrs_idx, "gap")))
 			v.draggable = lua_read_draggable(L, attrs_idx)
 			v.dropable  = lua_read_dropable (L, attrs_idx)
 			v.drag_over = lua_read_drag_over(L, attrs_idx)
@@ -1681,6 +1683,7 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 			if len(layout) > 0 {
 				h.layout = parse_anchor(layout)
 			}
+			h.gap = max(0, lua_get_number_field(L, attrs_idx, "gap"))
 			h.draggable = lua_read_draggable(L, attrs_idx)
 			h.dropable  = lua_read_dropable (L, attrs_idx)
 			h.drag_over = lua_read_drag_over(L, attrs_idx)
@@ -1701,6 +1704,7 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 			inp.value = lua_get_string_field(L, attrs_idx, "value")
 			inp.placeholder = lua_get_string_field(L, attrs_idx, "placeholder")
 			inp.overflow = lua_get_string_field(L, attrs_idx, "overflow")
+			inp.margin = lua_get_padding_field(L, attrs_idx, "margin")
 		}
 		return inp
 
@@ -1712,6 +1716,7 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 			btn.click_ctx = lua_get_event_ctx(L, attrs_idx, "click")
 			btn.width = lua_get_size_f32(L, attrs_idx, "width")
 			btn.height = lua_get_size_f32(L, attrs_idx, "height")
+			btn.margin = lua_get_padding_field(L, attrs_idx, "margin")
 			if dh, exists := lua_get_bool_field_opt(L, attrs_idx, "drag-handle"); exists {
 				btn.drag_handle = dh
 			}
@@ -1739,6 +1744,7 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 				t.layout = parse_anchor(layout)
 			}
 			t.overflow = lua_get_string_field(L, attrs_idx, "overflow")
+			t.margin = lua_get_padding_field(L, attrs_idx, "margin")
 			// :selectable defaults true; only an explicit false opts out.
 			if sel, exists := lua_get_bool_field_opt(L, attrs_idx, "selectable"); exists {
 				t.not_selectable = !sel
@@ -1754,6 +1760,7 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 			img.aspect = lua_get_string_field(L, attrs_idx, "aspect")
 			img.width = lua_get_size_f32(L, attrs_idx, "width")
 			img.height = lua_get_size_f32(L, attrs_idx, "height")
+			img.margin = lua_get_padding_field(L, attrs_idx, "margin")
 		}
 		return img
 

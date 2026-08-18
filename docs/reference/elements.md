@@ -88,6 +88,7 @@ Renders a string of text. The text content is the last positional argument, not 
 | --------- | ---- | ------- | ----- |
 | `wrap` | `"word"` \| `"char"` \| `"none"` | `"word"` | Line-wrapping strategy. |
 | `selectable` | boolean | `true` | Set to `false` to opt the node out of mouse-selection. |
+| `margin` | `[t r b l]` px | `[0 0 0 0]` | Outer spacing reserved by the parent around this element. Counts toward fill sizing, centering, scroll extents, and intrinsic height; the element's own rect (and hit-test area) excludes it. |
 | `:agent` | `:read \| :edit` | -- | Optional. Pairs with `:id` to expose the node to the agent channel (REDIN_AGENT only). |
 
 Typography (`font-size`, `weight`, `color`) comes from `aspect`.
@@ -113,6 +114,7 @@ Reserved leaf-node tag. Texture loading from a file path is not implemented yet 
 | `aspect` | string | -- | Theme entry used to draw the placeholder rectangle. |
 | `width` | size | -- | Layout width. |
 | `height` | size | -- | Layout height. |
+| `margin` | `[t r b l]` px | `[0 0 0 0]` | Outer spacing reserved by the parent around this element. Counts toward fill sizing, centering, scroll extents, and intrinsic height; the element's own rect (and hit-test area) excludes it. |
 | `:agent` | `:read \| :edit` | -- | Optional. Pairs with `:id` to expose the node to the agent channel (REDIN_AGENT only). Writes set a `:src` attr, but the parser does not currently read it. |
 
 ```fennel
@@ -173,6 +175,7 @@ An editable text field. Drives its displayed value from the `value` attribute.
 | `change` | keyword | -- | Event dispatched when the value changes. |
 | `key` | keyword | -- | Event dispatched on key press (e.g. enter). |
 | `placeholder` | string | `""` | Hint text shown when value is empty. |
+| `margin` | `[t r b l]` px | `[0 0 0 0]` | Outer spacing reserved by the parent around this element. Counts toward fill sizing, centering, scroll extents, and intrinsic height; the element's own rect (and hit-test area) excludes it. |
 | `:agent` | `:read \| :edit` | -- | Optional. Pairs with `:id` to expose the node to the agent channel (REDIN_AGENT only). |
 
 Visual properties (`bg`, `color`, `border`, `radius`, `border-width`, `opacity`) come from `aspect`.
@@ -198,6 +201,7 @@ A clickable element with a text label. Dispatches an event on click.
 | --------- | ---- | ------- | ----- |
 | `click` | keyword | -- | Event dispatched on click. **Required.** |
 | `label` | string | -- | Button text. Can also be passed as a child string. |
+| `margin` | `[t r b l]` px | `[0 0 0 0]` | Outer spacing reserved by the parent around this element. Counts toward fill sizing, centering, scroll extents, and intrinsic height; the element's own rect (and hit-test area) excludes it. |
 | `drag-handle` | bool | `false` | Marks this button as a grab surface for the nearest `:draggable` ancestor. Mutually exclusive with `click` — if both set, parser warns and drops `click`. |
 | `:agent` | `:read \| :edit` | -- | Optional. Pairs with `:id` to expose the node to the agent channel (REDIN_AGENT only). |
 
@@ -222,6 +226,7 @@ An independent render region managed by a registered canvas provider. The provid
 | Attribute | Type | Default | Notes |
 | --------- | ---- | ------- | ----- |
 | `provider` | keyword | -- | Name of a registered canvas provider. **Required.** |
+| `margin` | `[t r b l]` px | `[0 0 0 0]` | Outer spacing reserved by the parent around this element. Counts toward fill sizing, centering, scroll extents, and intrinsic height; the element's own rect (and hit-test area) excludes it. |
 | `:agent` | (rejected) | -- | Not supported on `:canvas` — silently ignored at parse time. |
 
 The element's `width` and `height` define the render texture size. See the [canvas provider docs](canvas.md) for registration and lifecycle details.
@@ -286,6 +291,7 @@ Lays out children in a horizontal row, left to right.
 | --------- | ---- | ------- | ----- |
 | `overflow` | `"scroll-x"` | -- | Clip + horizontal wheel scroll. Children must set `:width`. See Scrolling. |
 | `layout` | anchor keyword (see below) | `"top_left"` | Child alignment along both axes. |
+| `gap` | number (px) | `0` | Main-axis spacing inserted between consecutive children (n−1 gaps). Counts toward fill sizing, centering, scroll extents, and intrinsic height. Negative values clamp to 0. |
 | `drag-handle` | bool | `false` | Marks this hbox as a grab surface for the nearest `:draggable` ancestor. |
 | `:agent` | `:read \| :edit` | -- | Optional. Pairs with `:id` to expose the node to the agent channel (REDIN_AGENT only). |
 

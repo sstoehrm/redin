@@ -110,6 +110,7 @@ NodeCanvas :: struct {
 		f16,
 	},
 	aspect:   string,
+	margin:   [4]u8,
 }
 
 NodeVbox :: struct {
@@ -124,6 +125,7 @@ NodeVbox :: struct {
 		SizeValue,
 		f16,
 	},
+	gap:        f16,
 	draggable:  Maybe(Draggable_Attrs),
 	dropable:   Maybe(Dropable_Attrs),
 	drag_over:  Maybe(Drag_Over_Attrs),
@@ -142,6 +144,7 @@ NodeHbox :: struct {
 		SizeValue,
 		f32,
 	},
+	gap:        f32,
 	draggable:  Maybe(Draggable_Attrs),
 	dropable:   Maybe(Dropable_Attrs),
 	drag_over:  Maybe(Drag_Over_Attrs),
@@ -163,6 +166,7 @@ NodeInput :: struct {
 	value:       string,
 	placeholder: string,
 	overflow:    string,
+	margin:      [4]u8,
 }
 
 NodeButton :: struct {
@@ -180,6 +184,7 @@ NodeButton :: struct {
 	aspect:    string,
 	drag_handle: bool,
 	copy_text: string,   // #112: non-empty => clicking copies this to the system clipboard
+	margin:    [4]u8,
 }
 
 NodeText :: struct {
@@ -197,6 +202,7 @@ NodeText :: struct {
 	overflow:       string,
 	not_selectable: bool,   // zero-value = selectable (default-on)
 	inline_spans:   []text.Span,   // nil = plain rendering, non-nil = mixed-font wrap
+	margin:         [4]u8,
 }
 
 PopoutMode :: enum {
@@ -235,6 +241,7 @@ NodeImage :: struct {
 		SizeValue,
 		f32,
 	},
+	margin: [4]u8,
 }
 
 NodeModal :: struct {
