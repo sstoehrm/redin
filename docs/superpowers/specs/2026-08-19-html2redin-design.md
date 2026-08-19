@@ -189,3 +189,5 @@ tool's tests):
 
 Follow-up (not v1): a UI round-trip test that runs the emitted view in
 the dev binary and asserts rects via `/frames`.
+
+<!-- TODO: integrate html2redin components into the project concept graph (blend:deduce) — skipped at spec approval, 2026-08-19 -->
