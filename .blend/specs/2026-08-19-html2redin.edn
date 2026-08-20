@@ -1,0 +1,28 @@
+{:nodes {:html-file {:name "input.html" :type "input"}
+         :css-file {:name "styles.css (optional)" :type "input"}
+         :html-parser {:name "HTML parser" :type "stage" :note "lenient tokenizer: tags, attrs, text, comments, void elements"}
+         :css-parser {:name "CSS parser" :type "stage" :note "rules from <style> blocks + external files; selector, declarations, source order"}
+         :cascade {:name "Cascade resolver" :type "stage" :note "selector matching, specificity, inheritance, shorthand expansion"}
+         :styled-tree {:name "styled tree" :type "ir" :note "element tree, each node annotated with resolved style map"}
+         :mapper {:name "Node mapper" :type "stage" :note "element+style -> redin node (:vbox/:hbox/:text/:button/:input/:image), :gap/:margin/:layout/:overflow"}
+         :theme-synth {:name "Theme synthesizer" :type "stage" :note "class -> aspect; :hover/:focus/:active -> #variants"}
+         :emitter {:name "Fennel emitter" :type "stage" :note "pretty-printed view fragment + theme map"}
+         :warnings {:name "Warnings collector" :type "support" :note "unsupported selectors/properties/elements, one line each, to stderr"}
+         :view-out {:name "view.fnl fragment" :type "output"}
+         :theme-out {:name "theme map fragment" :type "output"}}
+ :edges {[:html-file :html-parser] {:direction :->}
+         [:css-file :css-parser] {:direction :->}
+         [:html-parser :css-parser] {:direction :-> :name "<style> blocks"}
+         [:html-parser :cascade] {:direction :-> :name "element tree"}
+         [:css-parser :cascade] {:direction :-> :name "rule list"}
+         [:cascade :styled-tree] {:direction :->}
+         [:styled-tree :mapper] {:direction :->}
+         [:styled-tree :theme-synth] {:direction :->}
+         [:mapper :emitter] {:direction :-> :name "redin node tree"}
+         [:theme-synth :emitter] {:direction :-> :name "aspect map"}
+         [:emitter :view-out] {:direction :->}
+         [:emitter :theme-out] {:direction :->}
+         [:css-parser :warnings] {:direction :-> :name "unknown selectors/props"}
+         [:mapper :warnings] {:direction :-> :name "unmappable elements/styles"}}
+ :boxes {:tool {:name "html2redin (Babashka, tools/html2redin/)" :type "zone"
+                :components #{:html-parser :css-parser :cascade :styled-tree :mapper :theme-synth :emitter :warnings}}}}

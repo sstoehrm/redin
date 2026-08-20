@@ -1,0 +1,3 @@
+{:paths ["src" "test"]
+ :tasks {test {:doc "Run html2redin unit tests"
+               :task (eval '(do (require '[html2redin.runner :as r]) (r/-main)))}}}
