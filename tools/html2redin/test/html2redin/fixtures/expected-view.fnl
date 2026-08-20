@@ -5,4 +5,11 @@
   [:vbox {:aspect :content :gap 12 :overflow :scroll-y}
     [:text {:aspect :title} "Notes"]
     [:text {:aspect :p-1 :margin [4 0 4 0]} "Type & save."]
-    [:input {:placeholder "Search..."}]]]
+    [:input {:placeholder "Search..."}]
+    [:text {:aspect :span-1} "Unsaved changes"]
+    [:vbox {}
+      [:hbox {}
+        [:vbox {}
+          [:text {} "Name"]]
+        [:vbox {}
+          [:text {} "Ready"]]]]]]
