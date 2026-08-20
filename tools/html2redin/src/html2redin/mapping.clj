@@ -23,7 +23,7 @@
       (warn! el "inline markup flattened to plain text"))
     (str/trim (str/replace s #" *\n *" "\n"))))
 
-(defn- warn-str [el msg] (str "t.html:" (:line el) " warning: " msg))
+(defn- warn-str [source el msg] (str source ":" (:line el) " warning: " msg))
 
 (defn- size-attr
   "HTML width/height attribute as a number (px), nil if absent/unparseable.
@@ -166,13 +166,14 @@
 
 (defn map-tree
   "styled tree -> {:node hiccup :warnings [...]}"
-  [tree assignments]
-  (let [warnings (atom [])
-        warn! (fn [el msg] (swap! warnings conj (warn-str el msg)))
-        kids (vec (keep-indexed
-                   (fn [i c] (if (string? c) c (map-element c [i] assignments warn!)))
-                   (:children tree)))
-        node (if (and (= 1 (count kids)) (vector? (first kids)))
-               (first kids)
-               (into [:vbox {}] kids))]
-    {:node node :warnings @warnings}))
+  ([tree assignments] (map-tree tree assignments "t.html"))
+  ([tree assignments source]
+   (let [warnings (atom [])
+         warn! (fn [el msg] (swap! warnings conj (warn-str source el msg)))
+         kids (vec (keep-indexed
+                    (fn [i c] (if (string? c) c (map-element c [i] assignments warn!)))
+                    (:children tree)))
+         node (if (and (= 1 (count kids)) (vector? (first kids)))
+                (first kids)
+                (into [:vbox {}] kids))]
+     {:node node :warnings @warnings})))

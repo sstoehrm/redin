@@ -102,7 +102,8 @@
 
 (defn synthesize
   "styled tree -> {:theme {...} :assignments {path aspect} :warnings [...]}"
-  [tree]
+  ([tree] (synthesize tree "t.html"))
+  ([tree source]
   (let [theme (atom {}) assignments (atom {}) warnings (atom []) counters (atom {})
         register!
         (fn [base-name props variants ctx always-suffix?]
@@ -143,7 +144,7 @@
         walk
         (fn walk [mode el path]
           (when (map? el)
-            (let [ctx (str "t.html:" (:line el))
+            (let [ctx (str source ":" (:line el))
                   own-vis (visual-subset (:own-style el))
                   class-vis (visual-subset (:class-style el))
                   classes (vec (remove str/blank?
@@ -176,4 +177,4 @@
       (walk :faithful c [i]))
     (doseq [[i c] (map-indexed vector (:children tree))]
       (walk :rest c [i]))
-    {:theme @theme :assignments @assignments :warnings @warnings}))
+    {:theme @theme :assignments @assignments :warnings @warnings})))
