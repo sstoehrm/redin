@@ -1,0 +1,6 @@
+.app { display: flex; flex-direction: column; height: 100%; }
+.content { padding: 16px; gap: 12px; display: flex; flex-direction: column; overflow-y: auto; }
+.title { font-size: 24px; font-weight: 700; color: #eceff4; }
+.btn { background-color: #4c566a; color: #eceff4; border-radius: 6px; padding: 8px 16px; }
+.btn:hover { background-color: #5e81ac; }
+p { margin: 4px 0; color: #d8dee9; }
