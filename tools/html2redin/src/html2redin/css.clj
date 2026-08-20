@@ -80,7 +80,8 @@
         warnings (atom [])]
     (loop [i 0, order 0, rules []]
       (let [i (loop [j i] (if (and (< j (count text))
-                                   (Character/isWhitespace (nth text j)))
+                                   (or (Character/isWhitespace (nth text j))
+                                       (= (nth text j) \;)))
                             (recur (inc j)) j))]
         (if (>= i (count text))
           {:rules rules :warnings @warnings}

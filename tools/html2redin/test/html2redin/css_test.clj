@@ -37,3 +37,9 @@
 
 (deftest comments-stripped
   (is (= 1 (count (rules "/* c */ .a { /* x */ color: red }")))))
+
+(deftest stray-semicolon-between-rules
+  (let [rs (rules ".a { color: red; }; .b { color: blue }")]
+    (is (= 2 (count rs)))
+    (is (= #{"a"} (:classes (first (:compounds (first rs))))))
+    (is (= #{"b"} (:classes (first (:compounds (second rs))))))))
