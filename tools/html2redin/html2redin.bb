@@ -23,9 +23,15 @@
         (when-not html-path (fail "usage: html2redin.bb page.html [-c styles.css]... [-o prefix]"))
         (when-not (fs/exists? html-path) (fail (str html-path ": not found")))
         (let [html-text (slurp html-path)
-              ;; <link rel=stylesheet href=...> resolved relative to the html
-              links (for [[_ href] (re-seq #"(?i)<link[^>]*rel=[\"']?stylesheet[\"']?[^>]*href=[\"']?([^\s\"'>]+)[\"']?" html-text)]
-                      href)
+              ;; <link ...stylesheet.../> resolved relative to the html;
+              ;; rel= and href= may appear in either order, so match each
+              ;; whole <link> tag first, then extract rel/href independently.
+              link-tags (re-seq #"(?i)<link[^>]*>" html-text)
+              links (keep (fn [tag]
+                            (when (re-find #"(?i)rel=[\"']?stylesheet[\"']?" tag)
+                              (when-let [[_ href] (re-find #"(?i)href=[\"']?([^\s\"'>]+)[\"']?" tag)]
+                                href)))
+                          link-tags)
               link-sources (keep (fn [href]
                                    (let [p (str (fs/path (or (fs/parent html-path) ".") href))]
                                      (if (fs/exists? p)
