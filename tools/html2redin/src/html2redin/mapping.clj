@@ -25,17 +25,75 @@
 
 (defn- warn-str [el msg] (str "t.html:" (:line el) " warning: " msg))
 
-(defn- size-attr [el prop attr-name style-key]
-  ;; explicit width/height: CSS wins over HTML attribute
-  (let [css (get-in el [:style style-key])
-        att (get-in el [:attrs attr-name])]
-    (cond
-      css (let [p (v/parse-length css)]
-            (cond (number? p) p
-                  (= :full-percent p) :full
-                  :else nil))
-      att (try (Double/parseDouble att) (catch Exception _ nil))
-      :else nil)))
+(defn- size-attr
+  "HTML width/height attribute as a number (px), nil if absent/unparseable.
+   CSS handling lives in node-attrs; this is only the HTML-attribute fallback."
+  [el attr-name]
+  (when-let [att (get-in el [:attrs attr-name])]
+    (try (Double/parseDouble att) (catch Exception _ nil))))
+
+(def ^:private pos->idx {"flex-start" 0 "start" 0 "center" 1 "flex-end" 2 "end" 2})
+(def ^:private anchor-table
+  [[:top_left :top_center :top_right]
+   [:center_left :center :center_right]
+   [:bottom_left :bottom_center :bottom_right]])
+
+(defn- flex-anchor [style vertical?]
+  (let [justify (pos->idx (get style :justify-content))
+        align (pos->idx (get style :align-items))]
+    (when (or justify align)
+      (let [main (or justify 0) cross (or align 0)
+            [v h] (if vertical? [main cross] [cross main])]
+        (get-in anchor-table [v h])))))
+
+(defn- margin-of [el]
+  (let [sides (map #(get-in el [:style %])
+                   [:margin-top :margin-right :margin-bottom :margin-left])]
+    (when (some some? sides)
+      (mapv #(v/clamp-u8 (or (let [p (v/parse-length (or % "0"))]
+                               (when (number? p) p)) 0)) sides))))
+
+(defn- length-attr [el warn! prop style-key]
+  (when-let [raw (get-in el [:style style-key])]
+    (let [p (v/parse-length raw)]
+      (cond
+        (number? p) p
+        (= :full-percent p) :full
+        :else (do (warn! el (str (name style-key) ": " raw " unmappable — dropped"))
+                  nil)))))
+
+(defn- node-attrs
+  "Full redin attrs for an element. leaf? gates :margin; vertical? is the
+   box orientation (nil for leaves other than text)."
+  [el path assignments leaf? vertical? warn!]
+  (let [style (:style el)
+        own (:own-style el)
+        gap (when-let [g (get own :gap)]
+              (let [p (v/parse-length g)] (when (number? p) p)))
+        overflow (let [oy (get own :overflow-y) ox (get own :overflow-x)]
+                   (cond (#{"auto" "scroll"} oy) :scroll-y
+                         (#{"auto" "scroll"} ox) :scroll-x
+                         :else nil))
+        margin (margin-of el)
+        layout (if (= :text-leaf leaf?)
+                 (when-let [ta (pos->idx (get style :text-align))]
+                   (get-in anchor-table [0 ta]))
+                 (when (some? vertical?) (flex-anchor own vertical?)))
+        w (length-attr el warn! :width :width)
+        h (length-attr el warn! :height :height)]
+    (when (and margin (not leaf?))
+      (warn! el (str "margin on container ."
+                     (first (str/split (get-in el [:attrs "class"] "?") #"\s+"))
+                     " dropped (redin has :gap/:padding)")))
+    (cond-> {}
+      (get-in el [:attrs "id"]) (assoc :id (keyword (get-in el [:attrs "id"])))
+      (get assignments path) (assoc :aspect (get assignments path))
+      gap (assoc :gap gap)
+      overflow (assoc :overflow overflow)
+      (and margin leaf?) (assoc :margin margin)
+      layout (assoc :layout layout)
+      w (assoc :width w)
+      h (assoc :height h))))
 
 (declare map-element)
 
@@ -46,11 +104,6 @@
             child
             (map-element child (conj path i) assignments warn!)))
         (:children el))))
-
-(defn- base-attrs [el assignments path]
-  (cond-> {}
-    (get-in el [:attrs "id"]) (assoc :id (keyword (get-in el [:attrs "id"])))
-    (get assignments path) (assoc :aspect (get assignments path))))
 
 (defn map-element [el path assignments warn!]
   (let [style (:style el)
@@ -64,35 +117,38 @@
       (do (when (= :a tag)
             (warn! el (str "<a> mapped to :text — wire :click by hand (href="
                            (get-in el [:attrs "href"] "") ")")))
-          (into [:text (base-attrs el assignments path)]
+          (into [:text (node-attrs el path assignments :text-leaf nil warn!)]
                 [(flatten-text el warn!)]))
 
       (= :button tag)
-      (into [:button (base-attrs el assignments path)] [(flatten-text el warn!)])
+      (into [:button (node-attrs el path assignments true nil warn!)] [(flatten-text el warn!)])
 
       (= :input tag)
       (let [type (str/lower-case (get-in el [:attrs "type"] ""))]
         (if (#{"button" "submit"} type)
-          [:button (base-attrs el assignments path)
+          [:button (node-attrs el path assignments true nil warn!)
            (get-in el [:attrs "value"] "")]
           (do (when-not (text-input-types type)
                 (warn! el (str "input type=" type " treated as text input")))
-              [:input (cond-> (base-attrs el assignments path)
+              [:input (cond-> (node-attrs el path assignments true nil warn!)
                         (get-in el [:attrs "placeholder"]) (assoc :placeholder (get-in el [:attrs "placeholder"]))
                         (get-in el [:attrs "value"]) (assoc :value (get-in el [:attrs "value"])))])))
 
       (= :textarea tag)
       (do (warn! el "textarea mapped to single-line :input")
-          [:input (cond-> (base-attrs el assignments path)
+          [:input (cond-> (node-attrs el path assignments true nil warn!)
                     (seq (:children el)) (assoc :value (flatten-text el warn!)))])
 
       (= :img tag)
-      [:image (cond-> (base-attrs el assignments path)
-                (size-attr el :width "width" :width) (assoc :width (size-attr el :width "width" :width))
-                (size-attr el :height "height" :height) (assoc :height (size-attr el :height "height" :height)))]
+      (let [attrs (node-attrs el path assignments true nil warn!)
+            w (size-attr el "width")
+            h (size-attr el "height")]
+        [:image (cond-> attrs
+                  (and w (not (:width attrs))) (assoc :width w)
+                  (and h (not (:height attrs))) (assoc :height h))])
 
       (= :hr tag)
-      [:vbox (assoc (base-attrs el assignments path) :height 1.0 :aspect :hr-rule)]
+      [:vbox (assoc (node-attrs el path assignments true nil warn!) :height 1.0 :aspect :hr-rule)]
 
       ;; containers (incl. table best-effort: tr -> hbox)
       (container-tags tag)
@@ -100,12 +156,12 @@
             flex-row? (and (= "flex" (get style :display))
                            (str/starts-with? (get style :flex-direction "row") "row"))
             box (cond (= :tr tag) :hbox flex-row? :hbox :else :vbox)]
-        (into [box (base-attrs el assignments path)]
+        (into [box (node-attrs el path assignments false (not= box :hbox) warn!)]
               (map-children el path assignments warn!)))
 
       :else
       (do (warn! el (str "<" (name tag) "> unknown — treated as vbox"))
-          (into [:vbox (base-attrs el assignments path)]
+          (into [:vbox (node-attrs el path assignments false true warn!)]
                 (map-children el path assignments warn!))))))
 
 (defn map-tree
