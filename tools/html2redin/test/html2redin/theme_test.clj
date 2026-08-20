@@ -55,3 +55,24 @@
 (deftest unstyled-gets-no-aspect
   (let [{:keys [assignments]} (synth "<p>x</p>" "")]
     (is (empty? assignments))))
+
+(deftest distinct-classes-with-same-props-do-not-collide
+  ;; "car" must not reuse "card" merely because it's a string prefix
+  (let [{:keys [theme assignments]} (synth "<div class=card>x</div><div class=car>y</div>"
+                                           ".card { color: red } .car { color: red }")]
+    (is (= :card (get assignments [0])))
+    (is (= :car (get assignments [1])))
+    (is (= [255 0 0] (get-in theme [:card :color])))
+    (is (= [255 0 0] (get-in theme [:car :color])))))
+
+(deftest variant-mismatch-forces-disambiguation
+  ;; both elements share the same base .card props, but the id=x element's
+  ;; :hover resolves differently (id beats class) — it must NOT silently
+  ;; reuse :card and lose its own hover
+  (let [{:keys [theme assignments]}
+        (synth "<div class=card>a</div><div class=card id=x>b</div>"
+               ".card { background-color: #111 } .card:hover { color: blue } #x:hover { color: green }")]
+    (is (= :card (get assignments [0])))
+    (is (= :card-2 (get assignments [1])))
+    (is (= [0 0 255] (get-in theme [:card#hover :color])))
+    (is (= [0 128 0] (get-in theme [:card-2#hover :color])))))

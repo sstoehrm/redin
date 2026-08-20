@@ -74,19 +74,58 @@
 
 (defn- visual-subset [style] (select-keys style visual-longhands))
 
+(defn- base-key-match?
+  "Does theme key k belong to base-name's own family — k is exactly
+   base-name, or base-name followed by a numeric disambiguation suffix
+   (`base-2`, `base-17`, ...)? Never matches a variant key (`base#hover`)
+   and never matches an unrelated base name that merely shares a prefix
+   (`car` must not match `card`)."
+  [k base-name]
+  (let [nm (name k)]
+    (and (not (str/includes? nm "#"))
+         (or (= nm base-name)
+             (when-let [suffix (and (str/starts-with? nm (str base-name "-"))
+                                     (subs nm (inc (count base-name))))]
+               (re-matches #"\d+" suffix))))))
+
+(defn- variants-of
+  "{pseudo-name-string props} for the variant entries already registered
+   under theme key aspect-name (`hover` -> props, from `aspect-name#hover`)."
+  [theme-map aspect-name]
+  (let [prefix (str aspect-name "#")]
+    (into {}
+          (keep (fn [[k p]]
+                  (let [nm (name k)]
+                    (when (str/starts-with? nm prefix)
+                      [(subs nm (count prefix)) p]))))
+          theme-map)))
+
 (defn synthesize
   "styled tree -> {:theme {...} :assignments {path aspect} :warnings [...]}"
   [tree]
   (let [theme (atom {}) assignments (atom {}) warnings (atom []) counters (atom {})
         register!
         (fn [base-name props variants ctx always-suffix?]
-          ;; reuse an existing aspect with identical props, else disambiguate.
-          ;; class-derived base names keep the bare name on first claim;
-          ;; tag-derived (classless) base names are always numbered, so a
-          ;; synthetic aspect never collides with a literal class name.
-          (let [existing (some (fn [[k p]] (when (and (= p props)
-                                                      (str/starts-with? (name k) base-name))
-                                             k))
+          ;; Reuse an existing aspect only when BOTH its base props and its
+          ;; full set of converted variant props match exactly — an element
+          ;; with a differing pseudo-state style (e.g. an id-specific
+          ;; :hover override) is not the same aspect and must disambiguate,
+          ;; carrying its own variant(s). Class-derived base names keep the
+          ;; bare name on first claim; tag-derived (classless) base names
+          ;; are always numbered, so a synthetic aspect never collides with
+          ;; a literal class name.
+          (let [computed (mapv (fn [[ps vstyle]]
+                                  (let [[vprops vwarns] (visual-props (visual-subset vstyle) ctx)]
+                                    [ps vprops vwarns]))
+                                variants)
+                variant-props (into {} (keep (fn [[ps vprops _]]
+                                                (when (seq vprops) [(name ps) vprops]))
+                                              computed))
+                existing (some (fn [[k p]]
+                                 (when (and (base-key-match? k base-name)
+                                            (= p props)
+                                            (= (variants-of @theme (name k)) variant-props))
+                                   k))
                                @theme)
                 aspect (or existing
                            (let [n (get (swap! counters update base-name (fnil inc 0)) base-name)
@@ -96,11 +135,10 @@
                              (keyword nm)))]
             (when-not existing
               (swap! theme assoc aspect props)
-              (doseq [[ps vstyle] variants]
-                (let [[vprops vwarns] (visual-props (visual-subset vstyle) ctx)]
-                  (swap! warnings into vwarns)
-                  (when (seq vprops)
-                    (swap! theme assoc (keyword (str (name aspect) "#" (name ps))) vprops)))))
+              (doseq [[ps vprops vwarns] computed]
+                (swap! warnings into vwarns)
+                (when (seq vprops)
+                  (swap! theme assoc (keyword (str (name aspect) "#" (name ps))) vprops))))
             aspect))
         walk
         (fn walk [mode el path]
