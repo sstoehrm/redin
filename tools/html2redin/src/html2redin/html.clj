@@ -9,15 +9,31 @@
   (inc (count (filter #(= % \newline) (subs text 0 idx)))))
 
 (defn- decode-entities [s warn! src line]
-  (str/replace s #"&(#x?[0-9a-fA-F]+|\w+);"
-    (fn [[whole body]]
-      (cond
-        (= body "amp") "&" (= body "lt") "<" (= body "gt") ">"
-        (= body "quot") "\"" (= body "apos") "'"
-        (str/starts-with? body "#x") (str (char (Integer/parseInt (subs body 2) 16)))
-        (str/starts-with? body "#") (str (char (Integer/parseInt (subs body 1))))
-        :else (do (warn! (str src ":" line " warning: unknown entity " whole
-                               " passed through")) whole)))))
+  ;; Walk matches with a Matcher (rather than str/replace) so each entity's
+  ;; warning can be attributed to its own line -- the run's start line plus
+  ;; newlines preceding the entity's offset within s -- not the run's
+  ;; starting line, which is wrong for entities after a newline in the
+  ;; same text run.
+  (let [m (re-matcher #"&(#x?[0-9a-fA-F]+|\w+);" s)
+        out (StringBuilder.)]
+    (loop [pos 0]
+      (if (.find m)
+        (let [start (.start m)
+              whole (.group m 0)
+              body (.group m 1)
+              entity-line (+ line (count (filter #(= % \newline) (subs s 0 start))))]
+          (.append out (subs s pos start))
+          (.append out
+                   (cond
+                     (= body "amp") "&" (= body "lt") "<" (= body "gt") ">"
+                     (= body "quot") "\"" (= body "apos") "'"
+                     (str/starts-with? body "#x") (str (char (Integer/parseInt (subs body 2) 16)))
+                     (str/starts-with? body "#") (str (char (Integer/parseInt (subs body 1))))
+                     :else (do (warn! (str src ":" entity-line " warning: unknown entity " whole
+                                            " passed through")) whole)))
+          (recur (.end m)))
+        (.append out (subs s pos))))
+    (str out)))
 
 (def ^:private attr-re
   #"([a-zA-Z][\w:-]*)(?:\s*=\s*(\"[^\"]*\"|'[^']*'|[^\s>]+))?")

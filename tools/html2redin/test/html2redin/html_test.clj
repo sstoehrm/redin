@@ -32,3 +32,7 @@
   (let [{:keys [tree]} (parse "<p>a &amp; b &#65;</p>\n<p>two</p>")]
     (is (= ["a & b A"] (:children (first (:children tree)))))
     (is (= 2 (:line (second (:children tree)))))))
+
+(deftest unknown-entity-warning-line-within-multiline-run
+  (let [{:keys [warnings]} (parse "<p>ok\n&bogus;</p>")]
+    (is (some #(re-find #"^t\.html:2 warning: unknown entity &bogus; passed through$" %) warnings))))
