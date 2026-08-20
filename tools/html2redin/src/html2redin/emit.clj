@@ -28,14 +28,22 @@
   ([[tag attrs & children] depth]
    (let [pad (apply str (repeat (* 2 depth) " "))
          head (str "[" tag " " (fmt-attrs attrs))
-         elems (filter vector? children)
-         strs (filter string? children)]
-     (if (empty? elems)
-       (str pad head (when (seq strs) (str " " (str/join " " (map fmt-value strs)))) "]")
-       (str pad head
-            (when (seq strs) (str " " (str/join " " (map fmt-value strs)))) "\n"
-            (str/join "\n" (map #(view-fnl % (inc depth)) elems))
-            "]")))))
+         has-elements? (some vector? children)]
+     (if has-elements?
+       ;; Has element children: emit each child on its own line in order
+       (let [child-depth (inc depth)
+             child-pad (apply str (repeat (* 2 child-depth) " "))
+             formatted-children (map (fn [child]
+                                       (if (vector? child)
+                                         (view-fnl child child-depth)
+                                         (str child-pad (fmt-value child))))
+                                     children)]
+         (str pad head "\n"
+              (str/join "\n" formatted-children)
+              "]"))
+       ;; No element children: all strings on head line (or no children)
+       (let [strs (filter string? children)]
+         (str pad head (when (seq strs) (str " " (str/join " " (map fmt-value strs)))) "]"))))))
 
 (def theme-key-order [:bg :color :border :border-width :radius :padding
                       :font-size :weight :font :line-height :opacity :shadow])

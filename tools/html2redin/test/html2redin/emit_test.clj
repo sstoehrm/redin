@@ -17,6 +17,13 @@
                       [:text {} "a"]
                       [:hbox {:aspect [:a :b]} [:button {} "go"]]]))))
 
+(deftest interleaved-string-element-children
+  (is (= (str "[:vbox {}\n"
+              "  \"lead\"\n"
+              "  [:text {} \"a\"]\n"
+              "  \"trail\"]")
+         (e/view-fnl [:vbox {} "lead" [:text {} "a"] "trail"]))))
+
 (deftest theme-output
   (is (= (str "{:card {:bg [17 17 17] :padding [8 16 8 16]}\n"
               " :card#hover {:bg [34 34 34]}}")
