@@ -1,0 +1,57 @@
+(ns html2redin.theme-test
+  (:require [clojure.test :refer [deftest is]]
+            [html2redin.html :as html]
+            [html2redin.css :as css]
+            [html2redin.cascade :as cas]
+            [html2redin.theme :as th]))
+
+(defn- synth [htm css-text]
+  (let [{:keys [tree]} (html/parse "t.html" htm)
+        rules (:rules (css/parse "t.css" css-text))]
+    (th/synthesize (:tree (cas/resolve-tree tree rules)))))
+
+(deftest visual-prop-conversion
+  (let [[props _] (th/visual-props
+                   {:background-color "#2e3440" :color "white"
+                    :padding-top "8px" :padding-right "16px"
+                    :padding-bottom "8px" :padding-left "16px"
+                    :border-radius "6px" :border-color "#888" :border-width "1px"
+                    :font-size "14px" :font-weight "700" :line-height "1.5"
+                    :opacity "0.8" :box-shadow "2px 2px 8px rgba(0,0,0,0.5)"}
+                   "t.css:1")]
+    (is (= {:bg [46 52 64] :color [255 255 255] :padding [8 16 8 16]
+            :radius 6 :border [136 136 136] :border-width 1
+            :font-size 14 :weight 1 :line-height 1.5 :opacity 0.8
+            :shadow [2 2 8 [0 0 0 0.5]]}
+           props))))
+
+(deftest class-aspects-and-variants
+  (let [{:keys [theme assignments]} (synth "<div class=card><p>x</p></div>"
+                                           ".card { background-color: #111 } .card:hover { background-color: #222 }")]
+    (is (= [17 17 17] (get-in theme [:card :bg])))
+    (is (= [34 34 34] (get-in theme [:card#hover :bg])))
+    (is (= :card (get assignments [0])))))
+
+(deftest multi-class-composes
+  (let [{:keys [theme assignments]} (synth "<div class=\"a b\">x</div>"
+                                           ".a { color: red } .b { background-color: #000 }")]
+    (is (= [:a :b] (get assignments [0])))
+    (is (contains? theme :a))
+    (is (contains? theme :b))))
+
+(deftest disambiguation-when-resolved-differs
+  ;; #id override makes the element's own style differ from its class
+  (let [{:keys [theme assignments]} (synth "<div class=card id=x>a</div><div class=card>b</div>"
+                                           ".card { color: red } #x { color: blue }")]
+    (is (= :card-2 (get assignments [0])))
+    (is (= [0 0 255] (get-in theme [:card-2 :color])))
+    (is (= :card (get assignments [1])))))
+
+(deftest classless-styled-element
+  (let [{:keys [theme assignments]} (synth "<h1>t</h1>" "h1 { font-size: 24px }")]
+    (is (= :h1-1 (get assignments [0])))
+    (is (= 24 (get-in theme [:h1-1 :font-size])))))
+
+(deftest unstyled-gets-no-aspect
+  (let [{:keys [assignments]} (synth "<p>x</p>" "")]
+    (is (empty? assignments))))
