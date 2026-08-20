@@ -7,9 +7,10 @@
     html2redin.emit-test html2redin.cli-test html2redin.e2e-test])
 
 (defn -main [& _]
+  ;; Plain require -- a namespace that fails to compile must fail the run
+  ;; loudly (an uncaught exception here), not be silently skipped.
   (doseq [ns test-namespaces]
-    (try (require ns) (catch Exception _)))  ; later namespaces don't exist yet
-  (let [loaded (filter find-ns test-namespaces)
-        result (apply t/run-tests loaded)]
+    (require ns))
+  (let [result (apply t/run-tests test-namespaces)]
     (when (pos? (+ (:fail result) (:error result)))
       (System/exit 1))))

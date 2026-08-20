@@ -21,3 +21,26 @@
                   :html-path "p.html"
                   :css-sources [{:name "x.css" :text ".a{color:#f00}"}]})]
     (is (re-find #":color \[0 0 255\]" theme))))
+
+(deftest inline-style-warning-line-is-document-relative
+  ;; the <style> block opens on line 2; the unsupported selector is on
+  ;; document line 3 -- the warning must carry 3, not 1 (block-relative)
+  (let [html (str "<div></div>\n"
+                  "<style>\n"
+                  "a ~ b { color: red }\n"
+                  "</style>\n")
+        {:keys [warnings]} (cli/run {:html html :html-path "page.html" :css-sources []})]
+    (is (some #(re-find #"^page\.html#style1:3 warning: selector" %) warnings))))
+
+(deftest hr-rule-default-theme-entry-and-composition
+  (let [{:keys [theme]}
+        (cli/run {:html "<hr>" :html-path "page.html" :css-sources []})]
+    (is (re-find #":hr-rule \{:bg \[128 128 128\]\}" theme)))
+  ;; a class-styled hr keeps its own aspect's styling as well as :hr-rule
+  (let [{:keys [view theme]}
+        (cli/run {:html "<hr class=sep>"
+                  :html-path "page.html"
+                  :css-sources [{:name "s.css" :text ".sep{background-color:#f00}"}]})]
+    (is (re-find #"\[:sep :hr-rule\]" view))
+    (is (re-find #":hr-rule \{:bg \[128 128 128\]\}" theme))
+    (is (re-find #":sep \{:bg \[255 0 0\]\}" theme))))

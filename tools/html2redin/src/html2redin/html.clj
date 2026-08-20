@@ -27,8 +27,17 @@
                    (cond
                      (= body "amp") "&" (= body "lt") "<" (= body "gt") ">"
                      (= body "quot") "\"" (= body "apos") "'"
-                     (str/starts-with? body "#x") (str (char (Integer/parseInt (subs body 2) 16)))
-                     (str/starts-with? body "#") (str (char (Integer/parseInt (subs body 1))))
+                     (str/starts-with? body "#")
+                     (let [hex? (str/starts-with? body "#x")
+                           digits (subs body (if hex? 2 1))
+                           cp (try (Integer/parseInt digits (if hex? 16 10))
+                                   (catch Exception _ nil))
+                           ch (when cp (try (String. (Character/toChars cp))
+                                             (catch Exception _ nil)))]
+                       (or ch
+                           (do (warn! (str src ":" entity-line " warning: unknown entity " whole
+                                           " passed through"))
+                               whole)))
                      :else (do (warn! (str src ":" entity-line " warning: unknown entity " whole
                                             " passed through")) whole)))
           (recur (.end m)))
@@ -77,7 +86,13 @@
                           (if (= :body (:tag el)) el
                               (some find-body (filter map? (:children el)))))
               body (find-body tree)]
-          {:tree (if body (assoc body :tag :root) tree)
+          ;; When a <body> exists, use it (keeping :tag :body, not renamed)
+          ;; as the tree root -- this lets `body { ... }` rules match and
+          ;; inherit normally during cascade resolution. map-tree only ever
+          ;; consumes the root's :children, never its own tag/attrs, so the
+          ;; root-shape contract (root's children become the top-level view)
+          ;; is unaffected either way.
+          {:tree (or body tree)
            :styles @styles
            :warnings @warnings})
         (let [c (nth text i)]

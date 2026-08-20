@@ -60,13 +60,22 @@
     (if-let [c (some #(when (v/parse-color %) %) (str/split (str/trim raw) #"\s+"))]
       [[:background-color c imp]] [])
     :font
-    (let [tokens (str/split (str/trim raw) #"[\s,]+")
+    ;; family = the raw substring after the size token (not `(last tokens)`)
+    ;; so a comma-separated family list like `"Helvetica Neue", sans-serif`
+    ;; survives intact -- theme.clj's font-family conversion then takes the
+    ;; first (quote-stripped) component, per spec.
+    (let [trimmed (str/trim raw)
+          tokens (str/split trimmed #"\s+")
           size (some #(when (v/parse-length %) %) tokens)
           weight (some #(when (re-matches #"bold|[1-9]00" %) %) tokens)
-          family (last tokens)]
+          family (if size
+                   (let [idx (str/index-of trimmed size)]
+                     (when idx
+                       (str/trim (subs trimmed (+ idx (count size))))))
+                   (last tokens))]
       (vec (concat (when size [[:font-size size imp]])
                    (when weight [[:font-weight weight imp]])
-                   (when (and family (not (v/parse-length family))) [[:font-family family imp]]))))
+                   (when-not (str/blank? family) [[:font-family family imp]]))))
     :gap [[:gap (first (str/split (str/trim raw) #"\s+")) imp]]
     :overflow [[:overflow-y raw imp] [:overflow-x raw imp]]
     ;; default: already a longhand

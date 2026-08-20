@@ -24,3 +24,16 @@
   (is (= 255 (v/clamp-u8 300.4)))
   (is (= 0 (v/clamp-u8 -3)))
   (is (= 8 (v/clamp-u8 8.4))))
+
+(deftest rgb-space-and-percent-syntax-never-throws
+  (is (= [255 0 0] (v/parse-color "rgb(255 0 0)")))
+  (is (= [255 0 0] (v/parse-color "rgb(100%, 0%, 0%)")))
+  (is (= [0 0 0 0.5] (v/parse-color "rgba(0 0 0 / 0.5)"))))
+
+(deftest malformed-color-never-throws
+  (is (nil? (v/parse-color "rgb(a b c)")))
+  (is (nil? (v/parse-color "rgb(1 2)")))
+  (is (nil? (v/parse-color "rgb()"))))
+
+(deftest parse-length-multi-dot-never-throws
+  (is (nil? (v/parse-length "1.2.3px"))))

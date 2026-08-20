@@ -10,6 +10,17 @@
         rules (:rules (css/parse "t.css" css-text))]
     (th/synthesize (:tree (cas/resolve-tree tree rules)))))
 
+(deftest font-shorthand-family-is-first-family-name
+  (let [[props _] (th/visual-props {:font-family "\"Helvetica Neue\", sans-serif"} "t.css:1")]
+    (is (= "Helvetica Neue" (:font props))))
+  ;; end-to-end through the `font:` shorthand (expand-decl -> cascade ->
+  ;; theme synthesis): family must be "Helvetica Neue", not the shorthand's
+  ;; last raw token ("sans-serif")
+  (let [{:keys [theme assignments]}
+        (synth "<h1>t</h1>"
+               "h1 { font: bold 14px \"Helvetica Neue\", sans-serif }")]
+    (is (= "Helvetica Neue" (get-in theme [(get assignments [0]) :font])))))
+
 (deftest visual-prop-conversion
   (let [[props _] (th/visual-props
                    {:background-color "#2e3440" :color "white"
@@ -51,6 +62,14 @@
   (let [{:keys [theme assignments]} (synth "<h1>t</h1>" "h1 { font-size: 24px }")]
     (is (= :h1-1 (get assignments [0])))
     (is (= 24 (get-in theme [:h1-1 :font-size])))))
+
+(deftest body-color-inherits-into-child-text-aspect
+  ;; a classless child with no own color rule gets a generated aspect
+  ;; carrying the color it inherits from `body { color: ... }`
+  (let [{:keys [theme assignments]}
+        (synth "<body><span>hi</span></body>" "body { color: #88c0d0 }")]
+    (is (= :span-1 (get assignments [0])))
+    (is (= [136 192 208] (get-in theme [:span-1 :color])))))
 
 (deftest unstyled-gets-no-aspect
   (let [{:keys [assignments]} (synth "<p>x</p>" "")]

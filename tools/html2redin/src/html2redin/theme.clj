@@ -8,6 +8,12 @@
     :padding-top :padding-right :padding-bottom :padding-left
     :font-size :font-weight :font-family :line-height :opacity :box-shadow})
 
+;; Mirrors mapping.clj's text-tags (text/button-ish leaves that flatten to
+;; :text). Kept as a small local duplicate rather than a cross-require --
+;; the pipeline stages are deliberately decoupled from one another.
+(def ^:private leaf-text-tags
+  #{:h1 :h2 :h3 :h4 :h5 :h6 :p :span :a :label :strong :em :b :i :small})
+
 (defn- rgb3 [c] (when c (vec (take 3 c))))
 
 (defn visual-props
@@ -149,10 +155,24 @@
                   class-vis (visual-subset (:class-style el))
                   classes (vec (remove str/blank?
                                        (str/split (get-in el [:attrs "class"] "") #"\s+")))
-                  faithful? (and (seq classes) (= own-vis class-vis))]
-              (when (and (seq own-vis)
+                  faithful? (and (seq classes) (= own-vis class-vis))
+                  ;; A classless leaf with no own declarations at all can
+                  ;; still visually differ from "unstyled" via inheritance
+                  ;; alone (e.g. text color from a `body { color: ... }`
+                  ;; rule). :style already merges inherited-props from
+                  ;; ancestors under own, so its visual subset carries
+                  ;; exactly the inherited value here (own-vis is empty).
+                  ;; Scoped to classless leaf-text tags only, so this never
+                  ;; fires for containers/tables and can't change any
+                  ;; existing faithful/disambiguation outcome (those all
+                  ;; require non-empty own-vis or a class).
+                  inherited-vis (when (and (empty? own-vis) (empty? classes)
+                                            (leaf-text-tags (:tag el)))
+                                  (visual-subset (:style el)))
+                  eff-vis (if (seq inherited-vis) inherited-vis own-vis)]
+              (when (and (seq eff-vis)
                          (if (= mode :faithful) faithful? (not faithful?)))
-                (let [[props pwarns] (visual-props own-vis ctx)]
+                (let [[props pwarns] (visual-props eff-vis ctx)]
                   (swap! warnings into pwarns)
                   (when (seq props)
                     (if faithful?

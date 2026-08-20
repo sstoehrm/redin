@@ -3,13 +3,24 @@
             [html2redin.html :as html]
             [html2redin.css :as css]
             [html2redin.cascade :as cas]
-            [html2redin.mapping :as m]))
+            [html2redin.mapping :as m]
+            [html2redin.theme :as theme]))
 
 (defn- convert [htm css-text]
   (let [{:keys [tree]} (html/parse "t.html" htm)
         rules (:rules (css/parse "t.css" css-text))
         styled (:tree (cas/resolve-tree tree rules))]
     (m/map-tree styled {})))
+
+(defn- convert-with-theme
+  "Like `convert` but runs real theme synthesis first, so class-derived
+   :aspect assignments are populated (needed to test aspect composition)."
+  [htm css-text]
+  (let [{:keys [tree]} (html/parse "t.html" htm)
+        rules (:rules (css/parse "t.css" css-text))
+        styled (:tree (cas/resolve-tree tree rules))
+        {:keys [assignments]} (theme/synthesize styled)]
+    (m/map-tree styled assignments)))
 
 (deftest structural-mapping
   (let [{:keys [node]} (convert "<div><p>Hi</p><button>Go</button></div>" "")]
@@ -77,6 +88,37 @@
 (deftest text-align-on-text
   (let [{:keys [node]} (convert "<p class=t>x</p>" ".t { text-align: center }")]
     (is (= :top_center (:layout (second node))))))
+
+(deftest text-align-right-and-left
+  (let [{:keys [node]} (convert "<p class=t>x</p>" ".t { text-align: right }")]
+    (is (= :top_right (:layout (second node)))))
+  (let [{:keys [node]} (convert "<p class=t>x</p>" ".t { text-align: left }")]
+    (is (= :top_left (:layout (second node))))))
+
+(deftest loose-text-in-container-is-wrapped-not-bare
+  (let [{:keys [node]} (convert "<div>text<span>x</span></div>" "")]
+    (is (= :vbox (first node)))
+    (is (every? vector? (drop 2 node)))
+    (is (= [:text {} "text"] (nth node 2)))
+    (is (= [:text {} "x"] (nth node 3))))
+  ;; table cell with loose text
+  (let [{:keys [node]} (convert "<table><tr><td>A1</td></tr></table>" "")
+        tr (nth node 2)
+        td (nth tr 2)]
+    (is (= :vbox (first node)))
+    (is (= :hbox (first tr)))
+    (is (= :vbox (first td)))
+    (is (= [:text {} "A1"] (nth td 2)))
+    (is (every? vector? (drop 2 td)))))
+
+(deftest hr-default-aspect-and-class-composition
+  (let [{:keys [node uses-hr-rule?]} (convert "<hr>" "")]
+    (is (= [:vbox {:height 1.0 :aspect :hr-rule}] node))
+    (is (true? uses-hr-rule?)))
+  ;; hr with a class-derived aspect keeps its own styling composed
+  ;; alongside :hr-rule instead of losing it
+  (let [{:keys [node]} (convert-with-theme "<hr class=sep>" ".sep { background-color: #f00 }")]
+    (is (= [:sep :hr-rule] (:aspect (second node))))))
 
 (deftest img-width-html-fallback-on-unmappable-css
   (let [{:keys [node warnings]} (convert "<img class=i width=200 height=100 src=x>"

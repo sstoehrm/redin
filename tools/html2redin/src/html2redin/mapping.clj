@@ -32,7 +32,8 @@
   (when-let [att (get-in el [:attrs attr-name])]
     (try (Double/parseDouble att) (catch Exception _ nil))))
 
-(def ^:private pos->idx {"flex-start" 0 "start" 0 "center" 1 "flex-end" 2 "end" 2})
+(def ^:private pos->idx {"flex-start" 0 "start" 0 "left" 0 "center" 1
+                         "flex-end" 2 "end" 2 "right" 2})
 (def ^:private anchor-table
   [[:top_left :top_center :top_right]
    [:center_left :center :center_right]
@@ -97,11 +98,17 @@
 
 (declare map-element)
 
+;; redin's frame format allows bare string content only on :text/:button
+;; nodes -- a string directly under a container (:vbox/:hbox) is dropped by
+;; the runtime. Wrap loose text runs (e.g. mixed text in a <div>, table
+;; cell content) in a plain [:text {} s] node instead.
+(defn- wrap-loose-text [s] [:text {} s])
+
 (defn- map-children [el path assignments warn!]
   (vec (keep-indexed
         (fn [i child]
           (if (string? child)
-            child
+            (wrap-loose-text child)
             (map-element child (conj path i) assignments warn!)))
         (:children el))))
 
@@ -148,7 +155,16 @@
                   (and h (not (:height attrs))) (assoc :height h))])
 
       (= :hr tag)
-      [:vbox (assoc (node-attrs el path assignments true nil warn!) :height 1.0 :aspect :hr-rule)]
+      (let [attrs (node-attrs el path assignments true nil warn!)
+            assigned (:aspect attrs)
+            ;; Compose rather than clobber: an hr that also carries a
+            ;; class-derived aspect (e.g. <hr class=sep>) keeps that
+            ;; styling alongside the default hr border aspect.
+            composed (cond
+                       (nil? assigned) :hr-rule
+                       (vector? assigned) (conj assigned :hr-rule)
+                       :else [assigned :hr-rule])]
+        [:vbox (assoc attrs :height 1.0 :aspect composed)])
 
       ;; containers (incl. table best-effort: tr -> hbox)
       (container-tags tag)
@@ -164,16 +180,30 @@
           (into [:vbox (node-attrs el path assignments false true warn!)]
                 (map-children el path assignments warn!))))))
 
+(defn- uses-hr-rule?
+  "Does this mapped hiccup node (or any descendant) carry :hr-rule in its
+   :aspect (bare or composed)? Used by the caller to decide whether a
+   default :hr-rule theme entry needs to be merged in."
+  [node]
+  (and (vector? node)
+       (let [[_ attrs & children] node
+             a (:aspect attrs)]
+         (boolean
+          (or (= a :hr-rule)
+              (and (vector? a) (some #{:hr-rule} a))
+              (some #(and (vector? %) (uses-hr-rule? %)) children))))))
+
 (defn map-tree
-  "styled tree -> {:node hiccup :warnings [...]}"
+  "styled tree -> {:node hiccup :warnings [...] :uses-hr-rule? bool}"
   ([tree assignments] (map-tree tree assignments "t.html"))
   ([tree assignments source]
    (let [warnings (atom [])
          warn! (fn [el msg] (swap! warnings conj (warn-str source el msg)))
          kids (vec (keep-indexed
-                    (fn [i c] (if (string? c) c (map-element c [i] assignments warn!)))
+                    (fn [i c] (if (string? c) (wrap-loose-text c)
+                                  (map-element c [i] assignments warn!)))
                     (:children tree)))
          node (if (and (= 1 (count kids)) (vector? (first kids)))
                 (first kids)
                 (into [:vbox {}] kids))]
-     {:node node :warnings @warnings})))
+     {:node node :warnings @warnings :uses-hr-rule? (uses-hr-rule? node)})))

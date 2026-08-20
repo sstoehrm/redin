@@ -1,7 +1,8 @@
 (ns html2redin.cascade-test
   (:require [clojure.test :refer [deftest is]]
             [html2redin.css :as css]
-            [html2redin.cascade :as cas]))
+            [html2redin.cascade :as cas]
+            [html2redin.html :as html]))
 
 (defn- rule [sel] (first (:rules (css/parse "t" (str sel " { color: red }")))))
 (defn- el [tag & [attrs]] {:tag tag :attrs (or attrs {}) :children [] :line 1})
@@ -29,7 +30,10 @@
   (is (= #{[:border-width "1px" false] [:border-color "#fff" false]}
          (set (cas/expand-decl [:border "1px solid #fff" false]))))
   (is (= [[:background-color "#2e3440" false]]
-         (cas/expand-decl [:background "#2e3440 url(x.png)" false]))))
+         (cas/expand-decl [:background "#2e3440 url(x.png)" false])))
+  (is (= [[:font-size "14px" false] [:font-weight "bold" false]
+          [:font-family "\"Helvetica Neue\", sans-serif" false]]
+         (cas/expand-decl [:font "bold 14px \"Helvetica Neue\", sans-serif" false]))))
 
 (deftest cascade-resolution
   (let [css "div { color: red } .a { color: blue } #x { color: green } .a:hover { color: black }"
@@ -46,6 +50,15 @@
     (is (nil? (get-in (first (:children d1)) [:own-style :color]))) ; not own
     (is (= "black" (get-in d1 [:variants :hover :color])))
     (is (= "blue" (get-in d1 [:class-style :color])))))
+
+(deftest body-rule-matches-and-inherits-to-children
+  (let [{:keys [tree]} (html/parse "t.html" "<html><body><p>hi</p></body></html>")
+        rules (:rules (css/parse "t.css" "body { color: red }"))
+        styled (:tree (cas/resolve-tree tree rules))]
+    (is (= :body (:tag styled)))
+    (is (= "red" (get-in styled [:own-style :color])))
+    (is (= "red" (get-in (first (:children styled)) [:style :color])))
+    (is (nil? (get-in (first (:children styled)) [:own-style :color])))))
 
 (deftest important-wins
   (let [css ".a { color: red !important } #x { color: green }"
