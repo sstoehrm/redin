@@ -4,7 +4,8 @@
 (def test-namespaces
   '[html2redin.values-test html2redin.html-test html2redin.css-test
     html2redin.cascade-test html2redin.mapping-test html2redin.theme-test
-    html2redin.emit-test html2redin.cli-test html2redin.e2e-test])
+    html2redin.emit-test html2redin.cli-test html2redin.e2e-test
+    html2redin.script-test])
 
 (defn -main [& _]
   ;; Plain require -- a namespace that fails to compile must fail the run
