@@ -1067,12 +1067,14 @@ deliver_http_response :: proc(b: ^Bridge, resp: ^Http_Response) {
 	if len(resp.headers) > 0 {
 		lua_createtable(L, 0, i32(len(resp.headers)))
 		for k, v in resp.headers {
-			ck := strings.clone_to_cstring(k)
-			cv := strings.clone_to_cstring(v)
-			lua_pushstring(L, cv)
-			lua_setfield(L, -2, ck)
-			delete(ck)
-			delete(cv)
+			// #225 L4 / #277 L1: keys and values must carry their explicit
+			// length like id / body / error above — clone_to_cstring +
+			// lua_pushstring truncates at the first NUL, so a NUL-bearing
+			// header silently loses its tail (Content-Type, signatures,
+			// Location) and NUL-bearing keys collide onto one table slot.
+			lua_pushlstring(L, cstring(raw_data(transmute([]u8)k)), uint(len(k)))
+			lua_pushlstring(L, cstring(raw_data(transmute([]u8)v)), uint(len(v)))
+			lua_settable(L, -3)
 		}
 		lua_setfield(L, -2, "headers")
 	}
