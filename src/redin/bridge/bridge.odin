@@ -1953,7 +1953,7 @@ lua_to_theme :: proc(L: ^Lua_State, index: i32) -> map[string]types.Theme {
 
 			lua_getfield(L, props_idx, "weight")
 			if lua_isnumber(L, -1) {
-				t.weight = u8(lua_tonumber(L, -1))
+				t.weight = clamp_byte(lua_tonumber(L, -1)) // #277 L3
 			} else if lua_isstring(L, -1) {
 				w := string(lua_tostring_raw(L, -1))
 				if w == "bold" do t.weight = 1
@@ -1988,7 +1988,10 @@ lua_get_rgba_field :: proc(L: ^Lua_State, index: i32, field: cstring) -> [4]u8 {
 	out: [4]u8
 	for i in 0 ..< 4 {
 		lua_rawgeti(L, abs, i32(i + 1))
-		out[i] = u8(lua_tonumber(L, -1))
+		// #277 L3: saturate like every other theme numeric — a bare u8()
+		// cast of NaN/±Inf/1e300 from `PUT /aspects` is implementation-
+		// defined at the LLVM level.
+		out[i] = clamp_byte(lua_tonumber(L, -1))
 		lua_pop(L, 1)
 	}
 	return out
@@ -2000,13 +2003,13 @@ lua_get_rgb_field :: proc(L: ^Lua_State, index: i32, field: cstring) -> [3]u8 {
 	if !lua_istable(L, -1) do return {}
 	abs := lua_gettop(L)
 	lua_rawgeti(L, abs, 1)
-	r := u8(lua_tonumber(L, -1))
+	r := clamp_byte(lua_tonumber(L, -1)) // #277 L3, see lua_get_rgba_field
 	lua_pop(L, 1)
 	lua_rawgeti(L, abs, 2)
-	g := u8(lua_tonumber(L, -1))
+	g := clamp_byte(lua_tonumber(L, -1))
 	lua_pop(L, 1)
 	lua_rawgeti(L, abs, 3)
-	b := u8(lua_tonumber(L, -1))
+	b := clamp_byte(lua_tonumber(L, -1))
 	lua_pop(L, 1)
 	return {r, g, b}
 }
@@ -2034,16 +2037,16 @@ lua_get_shadow_field :: proc(L: ^Lua_State, index: i32, field: cstring) -> types
 	if lua_istable(L, -1) {
 		col_idx := lua_gettop(L)
 		lua_rawgeti(L, col_idx, 1)
-		s.color[0] = u8(lua_tonumber(L, -1))
+		s.color[0] = clamp_byte(lua_tonumber(L, -1)) // #277 L3
 		lua_pop(L, 1)
 		lua_rawgeti(L, col_idx, 2)
-		s.color[1] = u8(lua_tonumber(L, -1))
+		s.color[1] = clamp_byte(lua_tonumber(L, -1))
 		lua_pop(L, 1)
 		lua_rawgeti(L, col_idx, 3)
-		s.color[2] = u8(lua_tonumber(L, -1))
+		s.color[2] = clamp_byte(lua_tonumber(L, -1))
 		lua_pop(L, 1)
 		lua_rawgeti(L, col_idx, 4)
-		s.color[3] = u8(lua_tonumber(L, -1))
+		s.color[3] = clamp_byte(lua_tonumber(L, -1))
 		lua_pop(L, 1)
 	}
 	lua_pop(L, 1)

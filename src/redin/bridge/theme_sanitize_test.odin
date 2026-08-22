@@ -68,3 +68,49 @@ test_lua_to_theme_clamps_hostile_numerics :: proc(t: ^testing.T) {
 	testing.expect(t, blur == blur, "shadow blur must be finite (not NaN)")
 	testing.expect(t, blur <= 256, "shadow blur must be clamped to <= 256")
 }
+
+// #277 L3: color components skipped the clamp every other theme numeric
+// gets — a bare u8() cast of NaN/±Inf/1e300 (reachable via PUT /aspects)
+// is implementation-defined at the LLVM level. clamp_byte must saturate.
+@(test)
+test_lua_to_theme_clamps_hostile_colors :: proc(t: ^testing.T) {
+	sync.lock(&g_test_bridge_global_mutex)
+	defer sync.unlock(&g_test_bridge_global_mutex)
+
+	L := luaL_newstate()
+	luaL_openlibs(L)
+	defer lua_close(L)
+
+	code: cstring = `return {
+		text = {color = {1e300, -5, 0/0}, weight = 1e300,
+		        selection = {1e300, -5, 0/0, math.huge}},
+		button = {shadow = {0, 0, 1, {math.huge, -math.huge, 0/0, 300}}},
+	}`
+	rc := luaL_dostring(L, code)
+	testing.expectf(t, rc == 0, "failed to build theme table (rc=%d)", rc)
+
+	theme := lua_to_theme(L, lua_gettop(L))
+	defer {
+		for k, v in theme {
+			delete(k)
+			if len(v.font) > 0 do delete(v.font)
+		}
+		delete(theme)
+	}
+
+	txt := theme["text"]
+	testing.expect_value(t, txt.color[0], 255) // 1e300 saturates hi
+	testing.expect_value(t, txt.color[1], 0)   // negative -> 0
+	testing.expect_value(t, txt.color[2], 0)   // NaN -> 0
+	testing.expect_value(t, txt.selection[0], 255)
+	testing.expect_value(t, txt.selection[1], 0)
+	testing.expect_value(t, txt.selection[2], 0)
+	testing.expect_value(t, txt.selection[3], 255) // +Inf saturates hi
+	testing.expect_value(t, txt.weight, 255)
+
+	btn := theme["button"]
+	testing.expect_value(t, btn.shadow.color[0], 255)
+	testing.expect_value(t, btn.shadow.color[1], 0)
+	testing.expect_value(t, btn.shadow.color[2], 0)
+	testing.expect_value(t, btn.shadow.color[3], 255) // 300 saturates hi
+}
