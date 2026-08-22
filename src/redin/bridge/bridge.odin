@@ -1867,7 +1867,12 @@ load_font_faces :: proc(L: ^Lua_State, index: i32) {
 	lua_pushnil(L)
 	for lua_next(L, index) != 0 {
 		if lua_isstring(L, -2) && lua_istable(L, -1) {
-			font_name := string(lua_tostring_raw(L, -2))
+			// #277 L2: NUL-preserving reads (see lua_tostring_str). The raw
+			// strlen-based read truncated at the first NUL, collapsing a
+			// "name\0extra" face key onto "name" and letting a NUL-bearing
+			// path reach validate_font_path pre-truncated (which would then
+			// pass on the prefix instead of rejecting the real bytes).
+			font_name := lua_tostring_str(L, -2)
 			variants_idx := lua_gettop(L)
 
 			style_keys := [?]struct{key: cstring, style: font.Font_Style}{
@@ -1879,7 +1884,7 @@ load_font_faces :: proc(L: ^Lua_State, index: i32) {
 			for sk in style_keys {
 				lua_getfield(L, variants_idx, sk.key)
 				if lua_isstring(L, -1) {
-					path := string(lua_tostring_raw(L, -1))
+					path := lua_tostring_str(L, -1)
 					if !validate_font_path(path) {
 						fmt.eprintfln("Rejected font path (must be relative, no ..): %s", path)
 						lua_pop(L, 1)
