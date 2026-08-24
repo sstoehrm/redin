@@ -1,5 +1,6 @@
 (ns html2redin.css
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str]
+            [html2redin.lines :as lines]))
 
 (def supported-pseudo {"hover" :hover "focus" :focus "active" :active})
 
@@ -77,6 +78,7 @@
   "Parse one stylesheet. Returns {:rules [...] :warnings [...]}."
   [src text]
   (let [text (strip-comments text)
+        nls (lines/index text)
         warnings (atom [])]
     (loop [i 0, order 0, rules []]
       (let [i (loop [j i] (if (and (< j (count text))
@@ -85,11 +87,16 @@
                             (recur (inc j)) j))]
         (if (>= i (count text))
           {:rules rules :warnings @warnings}
-          (let [line (inc (count (filter #(= % \newline) (subs text 0 i))))]
+          (let [line (lines/line-of nls i)]
             (if (= (nth text i) \@)
+              ;; Name the at-rule from a bounded window — `(str/split (subs
+              ;; text i) ...)` copied and scanned the whole remainder per
+              ;; @-rule, going quadratic on rule-dense input (#277 M2).
               (do (swap! warnings conj
                          (str src ":" line " warning: "
-                              (first (str/split (subs text i) #"[\s{]")) " block skipped"))
+                              (re-find #"^[^\s{]*"
+                                       (subs text i (min (count text) (+ i 64))))
+                              " block skipped"))
                   (recur (skip-block text i) order rules))
               (let [open (str/index-of text "{" i)]
                 (if (nil? open)

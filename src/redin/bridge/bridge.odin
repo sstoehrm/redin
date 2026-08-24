@@ -1067,12 +1067,14 @@ deliver_http_response :: proc(b: ^Bridge, resp: ^Http_Response) {
 	if len(resp.headers) > 0 {
 		lua_createtable(L, 0, i32(len(resp.headers)))
 		for k, v in resp.headers {
-			ck := strings.clone_to_cstring(k)
-			cv := strings.clone_to_cstring(v)
-			lua_pushstring(L, cv)
-			lua_setfield(L, -2, ck)
-			delete(ck)
-			delete(cv)
+			// #225 L4 / #277 L1: keys and values must carry their explicit
+			// length like id / body / error above — clone_to_cstring +
+			// lua_pushstring truncates at the first NUL, so a NUL-bearing
+			// header silently loses its tail (Content-Type, signatures,
+			// Location) and NUL-bearing keys collide onto one table slot.
+			lua_pushlstring(L, cstring(raw_data(transmute([]u8)k)), uint(len(k)))
+			lua_pushlstring(L, cstring(raw_data(transmute([]u8)v)), uint(len(v)))
+			lua_settable(L, -3)
 		}
 		lua_setfield(L, -2, "headers")
 	}
@@ -1865,7 +1867,12 @@ load_font_faces :: proc(L: ^Lua_State, index: i32) {
 	lua_pushnil(L)
 	for lua_next(L, index) != 0 {
 		if lua_isstring(L, -2) && lua_istable(L, -1) {
-			font_name := string(lua_tostring_raw(L, -2))
+			// #277 L2: NUL-preserving reads (see lua_tostring_str). The raw
+			// strlen-based read truncated at the first NUL, collapsing a
+			// "name\0extra" face key onto "name" and letting a NUL-bearing
+			// path reach validate_font_path pre-truncated (which would then
+			// pass on the prefix instead of rejecting the real bytes).
+			font_name := lua_tostring_str(L, -2)
 			variants_idx := lua_gettop(L)
 
 			style_keys := [?]struct{key: cstring, style: font.Font_Style}{
@@ -1877,7 +1884,7 @@ load_font_faces :: proc(L: ^Lua_State, index: i32) {
 			for sk in style_keys {
 				lua_getfield(L, variants_idx, sk.key)
 				if lua_isstring(L, -1) {
-					path := string(lua_tostring_raw(L, -1))
+					path := lua_tostring_str(L, -1)
 					if !validate_font_path(path) {
 						fmt.eprintfln("Rejected font path (must be relative, no ..): %s", path)
 						lua_pop(L, 1)
@@ -1946,7 +1953,7 @@ lua_to_theme :: proc(L: ^Lua_State, index: i32) -> map[string]types.Theme {
 
 			lua_getfield(L, props_idx, "weight")
 			if lua_isnumber(L, -1) {
-				t.weight = u8(lua_tonumber(L, -1))
+				t.weight = clamp_byte(lua_tonumber(L, -1)) // #277 L3
 			} else if lua_isstring(L, -1) {
 				w := string(lua_tostring_raw(L, -1))
 				if w == "bold" do t.weight = 1
@@ -1981,7 +1988,10 @@ lua_get_rgba_field :: proc(L: ^Lua_State, index: i32, field: cstring) -> [4]u8 {
 	out: [4]u8
 	for i in 0 ..< 4 {
 		lua_rawgeti(L, abs, i32(i + 1))
-		out[i] = u8(lua_tonumber(L, -1))
+		// #277 L3: saturate like every other theme numeric — a bare u8()
+		// cast of NaN/±Inf/1e300 from `PUT /aspects` is implementation-
+		// defined at the LLVM level.
+		out[i] = clamp_byte(lua_tonumber(L, -1))
 		lua_pop(L, 1)
 	}
 	return out
@@ -1993,13 +2003,13 @@ lua_get_rgb_field :: proc(L: ^Lua_State, index: i32, field: cstring) -> [3]u8 {
 	if !lua_istable(L, -1) do return {}
 	abs := lua_gettop(L)
 	lua_rawgeti(L, abs, 1)
-	r := u8(lua_tonumber(L, -1))
+	r := clamp_byte(lua_tonumber(L, -1)) // #277 L3, see lua_get_rgba_field
 	lua_pop(L, 1)
 	lua_rawgeti(L, abs, 2)
-	g := u8(lua_tonumber(L, -1))
+	g := clamp_byte(lua_tonumber(L, -1))
 	lua_pop(L, 1)
 	lua_rawgeti(L, abs, 3)
-	b := u8(lua_tonumber(L, -1))
+	b := clamp_byte(lua_tonumber(L, -1))
 	lua_pop(L, 1)
 	return {r, g, b}
 }
@@ -2027,16 +2037,16 @@ lua_get_shadow_field :: proc(L: ^Lua_State, index: i32, field: cstring) -> types
 	if lua_istable(L, -1) {
 		col_idx := lua_gettop(L)
 		lua_rawgeti(L, col_idx, 1)
-		s.color[0] = u8(lua_tonumber(L, -1))
+		s.color[0] = clamp_byte(lua_tonumber(L, -1)) // #277 L3
 		lua_pop(L, 1)
 		lua_rawgeti(L, col_idx, 2)
-		s.color[1] = u8(lua_tonumber(L, -1))
+		s.color[1] = clamp_byte(lua_tonumber(L, -1))
 		lua_pop(L, 1)
 		lua_rawgeti(L, col_idx, 3)
-		s.color[2] = u8(lua_tonumber(L, -1))
+		s.color[2] = clamp_byte(lua_tonumber(L, -1))
 		lua_pop(L, 1)
 		lua_rawgeti(L, col_idx, 4)
-		s.color[3] = u8(lua_tonumber(L, -1))
+		s.color[3] = clamp_byte(lua_tonumber(L, -1))
 		lua_pop(L, 1)
 	}
 	lua_pop(L, 1)

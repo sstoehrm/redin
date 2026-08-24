@@ -44,6 +44,10 @@ When `REDIN_AGENT` is set, the dev-server listener starts in any run
 (even without `REDIN_DEV`) and exposes the `/agent/*` endpoints.
 Default release builds carry zero agent code, zero dev-server code,
 zero profile instrumentation, and zero tracking-allocator overhead.
+Note that "release build" here means the bare `odin build` invocation
+above — the binary in the published GitHub-release tarball is built by
+`release.sh` via `./build-dev.sh` and IS the dev variant (local control
+server and all), as documented in the release notes.
 
 ## Running
 

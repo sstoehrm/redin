@@ -32,10 +32,24 @@
                               (when-let [[_ href] (re-find #"(?i)href=[\"']?([^\s\"'>]+)[\"']?" tag)]
                                 href)))
                           link-tags)
+              ;; href comes from the HTML *data*, so confine it to the page's
+              ;; directory: no absolute paths, no .. segments. Otherwise a
+              ;; hostile page can make the tool slurp any file the invoking
+              ;; uid can read (/etc/shadow, ~/.ssh/...) into the warning
+              ;; stream and the emitted .fnl output. Audit #277 M1.
               link-sources (keep (fn [href]
-                                   (let [p (str (fs/path (or (fs/parent html-path) ".") href))]
-                                     (if (fs/exists? p)
+                                   (let [hp (fs/path href)
+                                         p (str (fs/path (or (fs/parent html-path) ".") href))]
+                                     (cond
+                                       (or (fs/absolute? hp)
+                                           (some #(= ".." (str %)) hp))
+                                       (do (binding [*out* *err*]
+                                             (println (str html-path " warning: linked stylesheet "
+                                                           href " escapes the page directory — skipped")))
+                                           nil)
+                                       (fs/exists? p)
                                        {:name href :text (slurp p)}
+                                       :else
                                        (do (binding [*out* *err*]
                                              (println (str html-path " warning: linked stylesheet "
                                                            href " not found — skipped")))

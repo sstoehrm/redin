@@ -1,12 +1,16 @@
 (ns html2redin.html
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str]
+            [html2redin.lines :as lines]))
 
 (def void-tags #{:img :br :hr :input :meta :link :area :base :col :embed
                  :source :track :wbr})
-(def skip-tags #{:script :svg :iframe :video :audio :canvas :title :meta :noscript})
 
-(defn- line-of [text idx]
-  (inc (count (filter #(= % \newline) (subs text 0 idx)))))
+;; Cap element nesting like src/redin/parser/ does (MAX_NESTING = 256):
+;; an unbounded stack builds an arbitrarily deep tree, and every recursive
+;; consumer (find-body here, mapping, emit) then dies on StackOverflow for
+;; a hostile page of nested unclosed tags (#277 M2).
+(def ^:private max-nesting 256)
+(def skip-tags #{:script :svg :iframe :video :audio :canvas :title :meta :noscript})
 
 (defn- decode-entities [s warn! src line]
   ;; Walk matches with a Matcher (rather than str/replace) so each entity's
@@ -15,13 +19,14 @@
   ;; starting line, which is wrong for entities after a newline in the
   ;; same text run.
   (let [m (re-matcher #"&(#x?[0-9a-fA-F]+|\w+);" s)
+        nls (lines/index s)
         out (StringBuilder.)]
     (loop [pos 0]
       (if (.find m)
         (let [start (.start m)
               whole (.group m 0)
               body (.group m 1)
-              entity-line (+ line (count (filter #(= % \newline) (subs s 0 start))))]
+              entity-line (+ line (dec (lines/line-of nls start)))]
           (.append out (subs s pos start))
           (.append out
                    (cond
@@ -75,6 +80,8 @@
   [src text]
   (let [warnings (atom [])
         styles (atom [])
+        nls (lines/index text)
+        depth-warned (atom false)
         warn! #(swap! warnings conj %)
         root {:tag :root :attrs {} :children [] :line 1}
         push-child (fn [stack child]
@@ -100,18 +107,21 @@
             ;; text run
             (let [end (or (str/index-of text "<" i) (count text))
                   raw (subs text i end)
-                  txt (decode-entities raw warn! src (line-of text i))]
+                  txt (decode-entities raw warn! src (lines/line-of nls i))]
               (recur end (if (str/blank? txt) stack
                              (push-child stack (str/trim txt)))))
+            ;; Offset-based .startsWith, not (str/starts-with? (subs text i)
+            ;; ...) — the subs copies the whole remainder per `<`, going
+            ;; quadratic on tag-dense input (#277 M2).
             (cond
               ;; comment
-              (str/starts-with? (subs text i) "<!--")
+              (.startsWith ^String text "<!--" i)
               (recur (+ 3 (or (str/index-of text "-->" i) (count text))) stack)
               ;; doctype / other <! declarations
-              (str/starts-with? (subs text i) "<!")
+              (.startsWith ^String text "<!" i)
               (recur (inc (or (str/index-of text ">" i) (count text))) stack)
               ;; closing tag
-              (str/starts-with? (subs text i) "</")
+              (.startsWith ^String text "</" i)
               (let [end (or (str/index-of text ">" i) (count text))
                     tag (keyword (str/lower-case (str/trim (subs text (+ i 2) end))))
                     ;; index (from top, 0-based) of nearest open element with this tag
@@ -130,7 +140,7 @@
                     inside (if self-closing (subs inside 0 (dec (count inside))) inside)
                     [_ tagname rest-attrs] (re-matches #"(?s)([a-zA-Z][\w-]*)\s*(.*)" inside)
                     tag (keyword (str/lower-case (or tagname "")))
-                    ln (line-of text i)
+                    ln (lines/line-of nls i)
                     el {:tag tag :attrs (parse-attrs rest-attrs) :children [] :line ln}]
                 (cond
                   (nil? tagname) (recur (inc end) stack)
@@ -152,5 +162,13 @@
                     (recur after stack))
                   (or self-closing (void-tags tag))
                   (recur (inc end) (push-child stack el))
+                  ;; At the cap, keep the element as a leaf instead of
+                  ;; nesting deeper — bounds tree depth for all consumers.
+                  (>= (count stack) max-nesting)
+                  (do (when-not @depth-warned
+                        (reset! depth-warned true)
+                        (warn! (str src ":" ln " warning: nesting deeper than "
+                                    max-nesting " — flattened")))
+                      (recur (inc end) (push-child stack el)))
                   :else
                   (recur (inc end) (conj stack el)))))))))))

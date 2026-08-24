@@ -56,3 +56,16 @@
   (let [{:keys [tree warnings]} (parse "<p>&#xFFFFFFFFF;</p>")]
     (is (= ["&#xFFFFFFFFF;"] (:children (first (:children tree)))))
     (is (some #(re-find #"unknown entity &#xFFFFFFFFF; passed through" %) warnings))))
+
+(deftest nesting-capped-so-consumers-never-overflow
+  ;; #277 M2: unbounded nesting built a tree every recursive consumer
+  ;; (find-body, mapping, emit) died on. Depth is capped; deeper opening
+  ;; tags become leaves, with a single warning.
+  (let [n 5000
+        {:keys [tree warnings]} (parse (apply str (repeat n "<b>")))
+        depth (loop [el tree, d 0]
+                (if-let [child (first (filter map? (:children el)))]
+                  (recur child (inc d))
+                  d))]
+    (is (<= depth 256))
+    (is (= 1 (count (filter #(re-find #"nesting deeper than 256" %) warnings))))))
