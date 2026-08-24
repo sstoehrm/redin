@@ -9,7 +9,7 @@ A re-frame inspired desktop UI framework built on Odin, Raylib, and LuaJIT.
 
 Write reactive desktop apps in Fennel (or Lua) with the same dataflow model that makes re-frame a joy: single state atom, event-driven updates, path-tracked subscriptions, declarative effects. No browser, no Electron, no JS bundler.
 
-> **Experimental.** This project is under active reboot. APIs will change.
+> **Note.** This project is mostly AI-written code, developed and reviewed with Claude Code.
 
 ## Stack
 
