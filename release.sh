@@ -57,9 +57,12 @@ cp docs/reference/*.md "${DIST}/docs/reference/"
 # land at .redin/.claude/ and never be picked up.
 cp .claude/skills/redin-dev/SKILL.md "${DIST}/skills/redin-dev/"
 
-# Create tarball
+# Create tarball — FLAT, matching release.yml's `tar czf ... -C dist .`.
+# redin-cli extracts with plain `tar xzf ... -C .redin` (no
+# --strip-components), so a `${NAME}/` directory prefix breaks
+# `redin-cli update` (v0.7.0 regression: .redin/redin went missing).
 cd dist
-tar czf "${NAME}.tar.gz" "${NAME}"
+tar czf "${NAME}.tar.gz" -C "${NAME}" .
 # SHA-256 sidecar, matching release.yml (#136 L4 / #225 L9). Downstream
 # tooling and manual `sha256sum -c` use it to detect a corrupt or swapped
 # tarball. Written next to the tarball inside dist/.
