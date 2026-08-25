@@ -233,6 +233,8 @@ ImageHandlingType :: enum {
 
 NodeImage :: struct {
 	aspect: string,
+	src:    string,
+	fit:    ImageHandlingType,
 	width:  union {
 		SizeValue,
 		f32,

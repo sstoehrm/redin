@@ -125,6 +125,19 @@ test_parse_image :: proc(t: ^testing.T) {
 }
 
 @(test)
+test_parse_image_src_fit :: proc(t: ^testing.T) {
+	input := `[:image {:aspect :logo :width 100 :height 50 :src "logo.png" :fit "stretch-x"}]`
+	p := _Parser{text = input, pos = 0}
+	tree, ok := _parse_element(&p)
+	defer _tree_node_destroy(&tree)
+	testing.expect(t, ok, "parse should succeed")
+	img, is_img := tree.data.(types.NodeImage)
+	testing.expect(t, is_img, "should be NodeImage")
+	testing.expect_value(t, img.src, "logo.png")
+	testing.expect_value(t, img.fit, types.ImageHandlingType.stretchX)
+}
+
+@(test)
 test_parse_modal :: proc(t: ^testing.T) {
 	input := `[:modal {:aspect :overlay}]`
 	p := _Parser{text = input, pos = 0}

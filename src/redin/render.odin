@@ -8,6 +8,7 @@ import "core:strings"
 import "font"
 import "input"
 import text_pkg "text"
+import "texture"
 import "types"
 import rl "vendor:raylib"
 
@@ -558,6 +559,26 @@ render_drag_preview :: proc(
 	}
 }
 
+// Map a texture (tw x th) into the element rect per :fit.
+fit_dest_rect :: proc(fit: types.ImageHandlingType, rect: rl.Rectangle, tw, th: f32) -> rl.Rectangle {
+	if tw <= 0 || th <= 0 do return rect
+	switch fit {
+	case .stretch:
+		return rect
+	case .stretchX:
+		s := rect.width / tw
+		h := th * s
+		return {rect.x, rect.y + (rect.height - h) / 2, rect.width, h}
+	case .stretchY:
+		s := rect.height / th
+		w := tw * s
+		return {rect.x + (rect.width - w) / 2, rect.y, w, rect.height}
+	case .keep:
+		return {rect.x + (rect.width - tw) / 2, rect.y + (rect.height - th) / 2, tw, th}
+	}
+	return rect
+}
+
 draw_node :: proc(
 	idx: int,
 	nodes: []types.Node,
@@ -647,8 +668,22 @@ draw_node :: proc(
 		draw_text(idx, rect, n, theme)
 	case types.NodeImage:
 		draw_themed_rect(idx, rect, n.aspect, theme)
-		rl.DrawRectangleLinesEx(rect, 1, rl.GRAY)
-		rl.DrawText("image", i32(rect.x) + 4, i32(rect.y) + 4, 14, rl.GRAY)
+		drew := false
+		if len(n.src) > 0 {
+			if tex, ok := texture.get_file(n.src); ok {
+				dest := fit_dest_rect(n.fit, rect, f32(tex.width), f32(tex.height))
+				// stretch fills exactly; the other modes may exceed the rect
+				// on one axis (or 1:1 overflow for keep) — clip via scissor.
+				bridge.push_scissor(rect)
+				rl.DrawTexturePro(tex, {0, 0, f32(tex.width), f32(tex.height)}, dest, {0, 0}, 0, rl.WHITE)
+				bridge.pop_scissor()
+				drew = true
+			}
+		}
+		if !drew {
+			rl.DrawRectangleLinesEx(rect, 1, rl.GRAY)
+			rl.DrawText("image", i32(rect.x) + 4, i32(rect.y) + 4, 14, rl.GRAY)
+		}
 	case types.NodePopout:
 		draw_children(idx, nodes, children_list, theme)
 	case types.NodeModal:

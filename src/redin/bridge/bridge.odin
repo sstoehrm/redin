@@ -375,6 +375,7 @@ clear_node_strings :: proc(n: types.Node) {
 		}
 	case types.NodeImage:
 		if len(v.aspect) > 0 do delete(v.aspect)
+		if len(v.src) > 0 do delete(v.src)
 	case types.NodePopout:
 		if len(v.aspect) > 0 do delete(v.aspect)
 	case types.NodeModal:
@@ -1831,6 +1832,20 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 			img.width = lua_get_size_f32(L, attrs_idx, "width")
 			img.height = lua_get_size_f32(L, attrs_idx, "height")
 			img.margin = lua_get_padding_field(L, attrs_idx, "margin")
+			img.src = lua_get_string_field(L, attrs_idx, "src")
+			fit := lua_get_string_field_raw(L, attrs_idx, "fit")
+			switch fit {
+			case "stretch":
+				img.fit = .stretch
+			case "stretch-x":
+				img.fit = .stretchX
+			case "stretch-y":
+				img.fit = .stretchY
+			case "keep", "":
+				img.fit = .keep
+			case:
+				img.fit = .keep
+			}
 		}
 		return img
 

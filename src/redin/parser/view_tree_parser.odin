@@ -42,6 +42,7 @@ _clear_node_strings :: proc(n: types.Node) {
 		if len(v.aspect) > 0 do delete(v.aspect)
 	case types.NodeImage:
 		if len(v.aspect) > 0 do delete(v.aspect)
+		if len(v.src) > 0 do delete(v.src)
 	case types.NodePopout:
 		if len(v.aspect) > 0 do delete(v.aspect)
 	case types.NodeModal:
@@ -420,6 +421,19 @@ _parse_element :: proc(p: ^_Parser) -> (_Tree_Node, bool) {
 		if a, ok := props["aspect"]; ok do img.aspect = strings.clone(a.str_val)
 		if w, ok := props["width"]; ok do img.width = _parse_size_f32(w)
 		if h, ok := props["height"]; ok do img.height = _parse_size_f32(h)
+		if s, ok := props["src"]; ok do img.src = strings.clone(s.str_val)
+		if f, ok := props["fit"]; ok {
+			switch f.str_val {
+			case "stretch":
+				img.fit = .stretch
+			case "stretch-x":
+				img.fit = .stretchX
+			case "stretch-y":
+				img.fit = .stretchY
+			case:
+				img.fit = .keep
+			}
+		}
 		result.data = img
 	case "popout":
 		pop: types.NodePopout
