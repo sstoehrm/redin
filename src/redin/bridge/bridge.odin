@@ -1827,6 +1827,7 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 
 	case "image":
 		img: types.NodeImage
+		img.fit = .keep
 		if attrs_idx > 0 {
 			img.aspect = lua_get_string_field(L, attrs_idx, "aspect")
 			img.width = lua_get_size_f32(L, attrs_idx, "width")

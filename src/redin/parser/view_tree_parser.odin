@@ -418,6 +418,7 @@ _parse_element :: proc(p: ^_Parser) -> (_Tree_Node, bool) {
 		result.data = t
 	case "image":
 		img: types.NodeImage
+		img.fit = .keep
 		if a, ok := props["aspect"]; ok do img.aspect = strings.clone(a.str_val)
 		if w, ok := props["width"]; ok do img.width = _parse_size_f32(w)
 		if h, ok := props["height"]; ok do img.height = _parse_size_f32(h)
