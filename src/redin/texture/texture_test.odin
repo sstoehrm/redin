@@ -54,11 +54,9 @@ test_setup :: proc() -> ^[dynamic]u32 {
 	total_bytes = 0
 	max_bytes_override = 0
 
-	if g_unloaded == nil {
-		g_unloaded = make([dynamic]u32)
-	} else {
-		clear(&g_unloaded)
-	}
+	// Fresh every test and freed in test_teardown (not clear()'d and
+	// reused) -- see the note on test_teardown for why.
+	g_unloaded = make([dynamic]u32)
 	g_pixels_counter = 0
 	g_file_counter = 1000
 
@@ -79,7 +77,17 @@ test_setup :: proc() -> ^[dynamic]u32 {
 
 @(private = "file")
 test_teardown :: proc() {
-	destroy() // frees only what this test allocated -- caches are this test's own
+	destroy() // frees Entry values/keys this test allocated; clear()s the maps to length 0
+
+	// destroy()'s clear(&pixels_cache)/clear(&file_cache) only resets
+	// length -- it does NOT free the map's backing hash-table storage
+	// (that's what delete() on a map does). In production that's the
+	// right call: the package var keeps the backing store for reuse.
+	// Here we're about to overwrite pixels_cache/file_cache with the
+	// saved values, which would drop the only reference to that
+	// still-allocated (but now empty) backing store. Free it first.
+	delete(pixels_cache)
+	delete(file_cache)
 	max_bytes_override = 0
 
 	pixels_cache = saved_pixels_cache
@@ -89,6 +97,11 @@ test_teardown :: proc() {
 	upload_pixels_proc = saved_upload_pixels_proc
 	load_file_proc = saved_load_file_proc
 	unload_proc = saved_unload_proc
+
+	// g_unloaded is made fresh in test_setup each time (not reused via
+	// clear()); free its backing storage here rather than leaking it.
+	delete(g_unloaded)
+	g_unloaded = nil
 }
 
 @(test)
