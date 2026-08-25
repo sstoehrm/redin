@@ -7,6 +7,7 @@ import "font"
 import "input"
 import "profile"
 import text "text"
+import "texture"
 import "types"
 import rl "vendor:raylib"
 
@@ -171,6 +172,7 @@ run :: proc(cfg: Config) {
 	bridge.init(&b)
 	defer bridge.destroy(&b)
 	defer canvas.destroy()
+	defer texture.destroy()
 	// Release package-level dynamic state so REDIN_TRACK_MEM reports
 	// a clean shutdown (these caches are alive for the program's
 	// lifetime, but still tracked allocations).
@@ -342,6 +344,7 @@ run :: proc(cfg: Config) {
 
 		profile.draw_overlay()
 
+		texture.end_frame()
 		canvas.end_frame()
 		rl.EndDrawing()
 
