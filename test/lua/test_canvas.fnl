@@ -90,6 +90,32 @@
       (assert (= (. cmd 1) :image) "tag is image")
       (assert (= (. cmd 6) "icon") "asset name"))))
 
+(fn t.test-ctx-pixels-appends-to-buffer []
+  (setup)
+  (canvas.register :test-pixels
+    (fn [ctx]
+      (ctx.pixels 4 8 2 2 "0123456789abcdef" {:scale 3})))
+  (let [buf (canvas._draw :test-pixels 400 300 {})]
+    (assert buf "buffer returned")
+    (assert (= (length buf) 1) "one command")
+    (let [cmd (. buf 1)]
+      (assert (= (. cmd 1) :pixels) "tag is pixels")
+      (assert (= (. cmd 2) 4) "x")
+      (assert (= (. cmd 3) 8) "y")
+      (assert (= (. cmd 4) 2) "w")
+      (assert (= (. cmd 5) 2) "h")
+      (assert (= (. cmd 6) "0123456789abcdef") "data passed through verbatim")
+      (assert (= (. (. cmd 7) :scale) 3) "scale opt"))))
+
+(fn t.test-ctx-pixels-default-opts []
+  (setup)
+  (canvas.register :test-pixels-noopts
+    (fn [ctx]
+      (ctx.pixels 0 0 1 1 "rgba")))
+  (let [buf (canvas._draw :test-pixels-noopts 100 100 {})]
+    (let [cmd (. buf 1)]
+      (assert (= (type (. cmd 7)) "table") "opts defaults to empty table"))))
+
 (fn t.test-ctx-multiple-commands []
   (setup)
   (canvas.register :test-multi
