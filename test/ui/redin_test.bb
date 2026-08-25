@@ -160,6 +160,19 @@
   []
   (get-json "/aspects"))
 
+(defn get-profile
+  "Fetch the frame-timing ring buffer via GET /profile (REDIN_PROFILE
+   build only). Returns the parsed JSON body, or nil if the endpoint
+   isn't enabled (non-200 response)."
+  []
+  (let [resp (http/get (str (base-url) "/profile")
+                       {:headers (merge {"Accept" "application/json"}
+                                        (auth-headers))
+                        :throw false
+                        :timeout http-timeout-ms})]
+    (when (= 200 (:status resp))
+      (json/parse-string (:body resp) true))))
+
 ;; ---------------------------------------------------------------------------
 ;; Frame tree walking
 ;; ---------------------------------------------------------------------------
