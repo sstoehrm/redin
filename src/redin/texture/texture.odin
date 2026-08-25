@@ -200,12 +200,23 @@ enforce_byte_cap :: proc() {
 	limit := MAX_BYTES if max_bytes_override == 0 else max_bytes_override
 	for total_bytes > limit {
 		// Find the globally least-recently-used entry across both caches.
+		// Entries stamped with the *current* frame are skipped even if they
+		// are the only (and over-cap) entry present: a texture uploaded this
+		// frame may still be sitting in the un-flushed rlgl batch, and the
+		// caller that just inserted it is about to receive (and draw) its
+		// handle. Evicting it here would delete a GL texture out from under
+		// that draw and force a reload every subsequent frame (a single
+		// >MAX_BYTES texture would otherwise never survive its own insert).
+		// The result is transient overage for one frame, not unbounded
+		// growth -- the entry becomes evictable again as soon as a later
+		// frame's cap check runs and its last_used is stale.
 		oldest_frame := max(u64)
 		oldest_pixels_key: u64
 		oldest_file_key: string
 		in_pixels := false
 		found := false
 		for key, e in pixels_cache {
+			if e.last_used == frame_counter do continue
 			if e.last_used < oldest_frame {
 				oldest_frame = e.last_used
 				oldest_pixels_key = key
@@ -215,6 +226,7 @@ enforce_byte_cap :: proc() {
 		}
 		for key, e in file_cache {
 			if e.bytes == 0 do continue // negative entries hold no bytes
+			if e.last_used == frame_counter do continue
 			if e.last_used < oldest_frame {
 				oldest_frame = e.last_used
 				oldest_file_key = key

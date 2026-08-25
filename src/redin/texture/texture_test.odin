@@ -210,6 +210,43 @@ test_byte_cap_evicts_lru_first :: proc(t: ^testing.T) {
 	testing.expect(t, !contains_id(unloaded[:], t2.id), "newer entry kept")
 }
 
+@(test)
+test_byte_cap_spares_same_frame_insert :: proc(t: ^testing.T) {
+	unloaded := test_setup()
+	defer test_teardown()
+	// Cap smaller than a single entry: the just-inserted entry is, by
+	// itself, over the cap.
+	max_bytes_override = (2 * 2 * 4) - 1
+	d1 := make([]u8, 2 * 2 * 4)
+	defer delete(d1)
+	d1[0] = 1
+
+	t1, ok1 := get_pixels(2, 2, d1)
+	testing.expect(t, ok1, "over-cap insert must still report ok")
+	testing.expect(
+		t,
+		!contains_id(unloaded[:], t1.id),
+		"just-inserted over-cap entry must not be unloaded in its own insertion frame",
+	)
+	// Cache-hit on the same frame must still resolve to the live entry.
+	t1_again, ok1_again := get_pixels(2, 2, d1)
+	testing.expect(t, ok1_again)
+	testing.expect_value(t, t1.id, t1_again.id)
+
+	// A later frame's cap check, once the entry is no longer the
+	// current-frame entry, must be able to evict it.
+	end_frame()
+	d2 := make([]u8, 2 * 2 * 4)
+	defer delete(d2)
+	d2[0] = 2
+	get_pixels(2, 2, d2) // different content -> new entry, triggers another cap check
+	testing.expect(
+		t,
+		contains_id(unloaded[:], t1.id),
+		"stale over-cap entry must become evictable once a later frame's cap check runs",
+	)
+}
+
 @(private = "file")
 contains_id :: proc(ids: []u32, id: u32) -> bool {
 	for x in ids do if x == id do return true
