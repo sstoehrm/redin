@@ -77,17 +77,13 @@ test_setup :: proc() -> ^[dynamic]u32 {
 
 @(private = "file")
 test_teardown :: proc() {
-	destroy() // frees Entry values/keys this test allocated; clear()s the maps to length 0
-
-	// destroy()'s clear(&pixels_cache)/clear(&file_cache) only resets
-	// length -- it does NOT free the map's backing hash-table storage
-	// (that's what delete() on a map does). In production that's the
-	// right call: the package var keeps the backing store for reuse.
-	// Here we're about to overwrite pixels_cache/file_cache with the
-	// saved values, which would drop the only reference to that
-	// still-allocated (but now empty) backing store. Free it first.
-	delete(pixels_cache)
-	delete(file_cache)
+	// destroy() unloads every entry this test allocated, frees the owned
+	// file-cache keys, AND (as of the destroy()-is-terminal-teardown fix)
+	// delete()s both maps' backing storage and resets them to reusable
+	// zero-value maps -- so there's nothing left for this proc to free.
+	// Deleting pixels_cache/file_cache again here would be a stale-header
+	// double-free against the {} destroy() already left behind.
+	destroy()
 	max_bytes_override = 0
 
 	pixels_cache = saved_pixels_cache

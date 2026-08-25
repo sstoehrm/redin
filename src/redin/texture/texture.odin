@@ -134,12 +134,26 @@ end_frame :: proc() {
 	sweep()
 }
 
+// destroy is terminal shutdown teardown: unlike clear_files (a mid-run
+// reset where the map is about to be reused, so clear() -- which only
+// resets length and keeps the backing hash-table storage -- is the right
+// call), destroy must leave nothing allocated. It does its own file-cache
+// unload/free loop rather than calling clear_files, then delete()s both
+// maps' backing storage and resets them to reusable zero-value maps.
 destroy :: proc() {
 	for _, e in pixels_cache {
 		unload_proc(e.tex)
 	}
-	clear(&pixels_cache)
-	clear_files()
+	delete(pixels_cache)
+	pixels_cache = {}
+
+	for key, e in file_cache {
+		if !e.failed do unload_proc(e.tex)
+		delete(key)
+	}
+	delete(file_cache)
+	file_cache = {}
+
 	total_bytes = 0
 	frame_counter = 0
 }
