@@ -133,7 +133,10 @@ Textures are cached by content hash — build each sprite's `data` string
 once, keep it in app state, and re-issue `ctx.pixels` every frame; the
 steady-state cost is one draw call per sprite. Rebuilding an identical
 string is still a cache hit; rebuilding a different string uploads a new
-texture (old ones age out after ~2s unused).
+texture (old ones age out after ~2s unused). The texture cache (shared
+with `ctx.image` and `[:image]` file textures) also holds at most 64 MB
+total, evicting least-recently-used entries first once that cap is
+exceeded.
 
 #### `ctx.image`
 

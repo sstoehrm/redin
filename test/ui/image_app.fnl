@@ -36,6 +36,25 @@
                 :fit :stretch :width 64 :height 64}]
        [:image {:id :sprite-keep :src "test/ui/fixtures/sprite.png"
                 :fit :keep :width 64 :height 64}]
+       ;; :stretch-x / :stretch-y coverage (#3): the fixture is a square
+       ;; (4x4) texture, so fitting it into a rect *taller* than it is wide
+       ;; makes :stretch-x letterbox top/bottom (the scaled dest is
+       ;; width x width, centered in the taller rect); the mirror rect
+       ;; (wider than tall) makes :stretch-y letterbox left/right. Chosen
+       ;; deliberately so both fit modes exercise real letterboxing rather
+       ;; than scissor-clipped overflow. Wrapped in an hbox with an
+       ;; explicit :height: a vbox's default (no :layout) cross-axis
+       ;; behaviour stretches children to the container width regardless
+       ;; of a declared :width (:width is honored only as an hbox's main
+       ;; axis), and an hbox's own :height must be given explicitly or it
+       ;; falls back to fill-remaining-space -- which would then stretch
+       ;; the image's cross-axis (height) right back out.
+       [:hbox {:id :sprite-stretch-x-row :height 64}
+        [:image {:id :sprite-stretch-x :src "test/ui/fixtures/sprite.png"
+                 :fit :stretch-x :width 32 :height 64}]]
+       [:hbox {:id :sprite-stretch-y-row :height 32}
+        [:image {:id :sprite-stretch-y :src "test/ui/fixtures/sprite.png"
+                 :fit :stretch-y :width 64 :height 32}]]
        [:image {:id :broken :src "test/ui/fixtures/does-not-exist.png"
                 :width 64 :height 64}]
        [:button {:id :toggle-btn :aspect :body :width 100 :height 30
