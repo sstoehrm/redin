@@ -32,5 +32,11 @@
          [:image {:id :logo :aspect :logo :width 120 :height 40}])
        [:image {:id :banner :aspect :banner :width 300 :height 80}]
        [:image {:id :plain :width 60 :height 60}]
+       [:image {:id :sprite :src "test/ui/fixtures/sprite.png"
+                :fit :stretch :width 64 :height 64}]
+       [:image {:id :sprite-keep :src "test/ui/fixtures/sprite.png"
+                :fit :keep :width 64 :height 64}]
+       [:image {:id :broken :src "test/ui/fixtures/does-not-exist.png"
+                :width 64 :height 64}]
        [:button {:id :toggle-btn :aspect :body :width 100 :height 30
                  :click [:event/toggle]} "Toggle"]])))

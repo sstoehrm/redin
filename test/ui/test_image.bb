@@ -70,3 +70,25 @@
   (dispatch ["event/reset"])
   (wait-ms 200)
   (assert-element {:tag :image :id :logo} "Reset should restore logo"))
+
+;; -- :src / :fit attributes (texture foundation spec) --
+
+(deftest src-images-exist-and-app-stays-alive
+  (dispatch ["event/reset"])
+  (wait-ms 300)
+  (assert-element {:tag :image :id :sprite} "src image should exist")
+  (assert-element {:tag :image :id :sprite-keep} "keep-fit image should exist")
+  (assert-element {:tag :image :id :broken} "broken-src image should exist")
+  ;; several frames of texture rendering must not crash the app
+  (wait-ms 500)
+  (assert-element {:tag :image :id :sprite} "app alive after sustained texture draws"))
+
+(deftest src-attr-roundtrips
+  (let [el (find-element {:tag :image :id :sprite})
+        attrs (second el)]
+    (assert (= "test/ui/fixtures/sprite.png" (:src attrs)) "src attr should round-trip")))
+
+(deftest screenshot-valid-with-textures
+  (let [[w h] (screenshot-dims (screenshot))]
+    (assert (pos? w) "screenshot decodes with textures on screen")
+    (assert (pos? h))))
