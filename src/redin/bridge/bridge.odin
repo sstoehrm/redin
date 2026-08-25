@@ -1042,8 +1042,18 @@ execute_canvas_command :: proc(L: ^Lua_State, idx: i32, tag: string, ox: f32, oy
 		w, w_ok := sanitize_dim(f32(lua_rawgeti_number(L, idx, 4)))
 		h, h_ok := sanitize_dim(f32(lua_rawgeti_number(L, idx, 5)))
 		if !x_ok || !y_ok || !w_ok || !h_ok do return
-		rl.DrawRectangleLinesEx({x, y, w, h}, 1, rl.GRAY)
-		rl.DrawText("img", i32(x) + 2, i32(y) + 2, 12, rl.GRAY)
+		lua_rawgeti(L, idx, 6)
+		defer lua_pop(L, 1)
+		if !lua_isstring(L, -1) do return
+		path := lua_tostring_str(L, -1)
+		if tex, ok := texture.get_file(path); ok {
+			src := rl.Rectangle{0, 0, f32(tex.width), f32(tex.height)}
+			rl.DrawTexturePro(tex, src, {x, y, w, h}, {0, 0}, 0, rl.WHITE)
+		} else {
+			// Missing/failed file keeps the placeholder box.
+			rl.DrawRectangleLinesEx({x, y, w, h}, 1, rl.GRAY)
+			rl.DrawText("img", i32(x) + 2, i32(y) + 2, 12, rl.GRAY)
+		}
 	}
 }
 
