@@ -104,6 +104,13 @@ jobs:
       - name: Run Odin canvas tests
         run: odin test src/redin/canvas -collection:lib=lib -collection:luajit=vendor/luajit
 
+      # ODIN_TEST_THREADS=1: the texture store is a package-global cache
+      # (pixels_cache/file_cache/frame_counter/GPU seams); tests save,
+      # isolate, and restore that state around each proc, which doesn't
+      # hold up under concurrent test execution.
+      - name: Odin tests (texture)
+        run: odin test src/redin/texture -collection:lib=lib -collection:luajit=vendor/luajit -define:ODIN_TEST_THREADS=1
+
       # ODIN_TEST_THREADS=1: the layout-cache tests mutate the package-global
       # intrinsic_cache, so they must not run in parallel with each other.
       - name: Run Odin text tests
