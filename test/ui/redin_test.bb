@@ -160,7 +160,7 @@
   []
   (get-json "/aspects"))
 
-(defn get-profile
+(defn get-profile-json
   "Fetch the frame-timing ring buffer via GET /profile (REDIN_PROFILE
    build only). Returns the parsed JSON body, or nil if the endpoint
    isn't enabled (non-200 response)."

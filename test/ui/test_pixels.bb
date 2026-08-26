@@ -53,7 +53,7 @@
 
 (deftest render-time-under-threshold
   (wait-ms 1000) ;; warm the texture cache; steady state is what we measure
-  (let [prof (get-profile)]
+  (let [prof (get-profile-json)]
     (assert prof "profile endpoint should respond (REDIN_PROFILE build)")
     (let [render-ms (profile-avg-render-ms prof)]
       (assert (< render-ms 8.0)
