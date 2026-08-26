@@ -123,10 +123,34 @@
 ;; The fixture (test/ui/fixtures/sprite.png) is 4x4 RGBA, top half solid
 ;; red, bottom half solid blue. Sample dominance rather than exact values
 ;; to stay robust to point-filter edge effects.
+;;
+;; The PNG decode (inflate + unfilter every row up to the sampled y,
+;; across the full window width) is pure-bb and cost ~8us/byte in local
+;; measurement -- at the default 1280x800 window a single sample near
+;; the bottom of the screen took over 30s to decode. That's slow enough
+;; on its own to blow run-all.sh's 30s per-suite timeout (#132), and
+;; multiplies with every extra sample. Two mitigations, both needed:
+;;  1. Shrink the window before these tests -- decode cost scales with
+;;     (window width) * (rows up to the deepest sampled y), and this
+;;     app's vbox of images doesn't need 1280x800 for that. 140x480 was
+;;     checked against a live /frames dump: it's wide enough that every
+;;     sampled element keeps its expected rect (:fit :stretch/:stretch-x/
+;;     :stretch-y all render correctly at this width) and tall enough to
+;;     keep every sample on-screen (deepest is :sprite-stretch-y's rect,
+;;     bottom edge at y=446); measured single-decode cost there is ~2.2s
+;;     vs. ~6.4s at 420x480 and >30s at 1280x800.
+;;  2. Batch all of a test's samples into a single `screenshot-pixels`
+;;     call so each test does exactly one screenshot and one decode.
 
 (defn- red-dominant? [[r _g b]] (and (> r 150) (> (- r b) 60)))
 (defn- blue-dominant? [[r _g b]] (and (> b 150) (> (- b r) 60)))
 (defn- letterbox? [px] (and (not (red-dominant? px)) (not (blue-dominant? px))))
+
+;; This file's earlier tests rely on the default 1280x800 window (e.g. the
+;; vbox stretching cross-axis to fill its width); nothing after this point
+;; does, and these are the last tests in the file, so there's no need to
+;; resize back.
+(resize! 140 480)
 
 (deftest sprite-stretch-shows-texture-content
   ;; :sprite is :fit :stretch (64x64): the whole rect is the texture, no
@@ -140,8 +164,7 @@
         mx  (int (+ (:x r) (/ (:w r) 2)))
         top-y (int (+ (:y r) (* 0.25 (:h r))))
         bot-y (int (+ (:y r) (* 0.75 (:h r))))
-        top-px (screenshot-pixel png mx top-y)
-        bot-px (screenshot-pixel png mx bot-y)]
+        [top-px bot-px] (screenshot-pixels png [[mx top-y] [mx bot-y]])]
     (assert (red-dominant? top-px)
             (str "top-center of :stretch sprite should be red-dominant; got " top-px))
     (assert (blue-dominant? bot-px)
@@ -158,14 +181,16 @@
         pad-top-y (int (+ (:y r) 8))
         red-y     (int (+ (:y r) 24))
         blue-y    (int (+ (:y r) 40))
-        pad-bot-y (int (+ (:y r) 56))]
-    (assert (letterbox? (screenshot-pixel png mx pad-top-y))
+        pad-bot-y (int (+ (:y r) 56))
+        [pad-top-px red-px blue-px pad-bot-px]
+        (screenshot-pixels png [[mx pad-top-y] [mx red-y] [mx blue-y] [mx pad-bot-y]])]
+    (assert (letterbox? pad-top-px)
             "top letterbox band should not be texture-colored")
-    (assert (red-dominant? (screenshot-pixel png mx red-y))
+    (assert (red-dominant? red-px)
             "stretch-x texture band (upper) should be red-dominant")
-    (assert (blue-dominant? (screenshot-pixel png mx blue-y))
+    (assert (blue-dominant? blue-px)
             "stretch-x texture band (lower) should be blue-dominant")
-    (assert (letterbox? (screenshot-pixel png mx pad-bot-y))
+    (assert (letterbox? pad-bot-px)
             "bottom letterbox band should not be texture-colored")))
 
 (deftest sprite-stretch-y-letterboxes-left-and-right
@@ -180,12 +205,14 @@
         red-x       (int (+ (:x r) 32))
         pad-right-x (int (+ (:x r) 56))
         red-y  (int (+ (:y r) 8))
-        blue-y (int (+ (:y r) 24))]
-    (assert (letterbox? (screenshot-pixel png pad-left-x my))
+        blue-y (int (+ (:y r) 24))
+        [pad-left-px red-px blue-px pad-right-px]
+        (screenshot-pixels png [[pad-left-x my] [red-x red-y] [red-x blue-y] [pad-right-x my]])]
+    (assert (letterbox? pad-left-px)
             "left letterbox band should not be texture-colored")
-    (assert (red-dominant? (screenshot-pixel png red-x red-y))
+    (assert (red-dominant? red-px)
             "stretch-y texture band (top) should be red-dominant")
-    (assert (blue-dominant? (screenshot-pixel png red-x blue-y))
+    (assert (blue-dominant? blue-px)
             "stretch-y texture band (bottom) should be blue-dominant")
-    (assert (letterbox? (screenshot-pixel png pad-right-x my))
+    (assert (letterbox? pad-right-px)
             "right letterbox band should not be texture-colored")))
