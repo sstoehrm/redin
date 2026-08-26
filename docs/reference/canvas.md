@@ -117,6 +117,35 @@ Use in a frame:
 [:canvas {:provider :my-viewport :aspect :viewport-chrome :width 800 :height 600}]
 ```
 
+### Command-buffer primitives
+
+#### `ctx.pixels`
+
+    (ctx.pixels x y w h data ?opts)
+
+Draws an RGBA pixel buffer as one texture blit. `data` is a byte string of
+length exactly `w*h*4` (row-major RGBA); `w`/`h` are positive integers,
+each <= 2048, `w*h` <= 4,194,304. `?opts`: `{:scale z}` with `z` in
+`(0, 64]` (default 1), nearest-neighbor upscale. Malformed commands are
+skipped.
+
+Textures are cached by content hash — build each sprite's `data` string
+once, keep it in app state, and re-issue `ctx.pixels` every frame; the
+steady-state cost is one draw call per sprite. Rebuilding an identical
+string is still a cache hit; rebuilding a different string uploads a new
+texture (old ones age out after ~2s unused). The texture cache (shared
+with `ctx.image` and `[:image]` file textures) also holds at most 64 MB
+total, evicting least-recently-used entries first once that cap is
+exceeded.
+
+#### `ctx.image`
+
+    (ctx.image x y w h path ?opts)
+
+Draws the image file at `path` (resolved against the process working
+directory) stretched to `w`×`h`. Load failures draw a gray placeholder and
+warn once; the file cache is cleared on hot reload.
+
 ---
 
 ## Theme properties

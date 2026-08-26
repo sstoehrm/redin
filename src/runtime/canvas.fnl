@@ -23,6 +23,8 @@
                 (table.insert buf [:polygon points (or ?opts {})]))
      :image (fn [x y w h name ?opts]
               (table.insert buf [:image x y w h name (or ?opts {})]))
+     :pixels (fn [x y w h data ?opts]
+               (table.insert buf [:pixels x y w h data (or ?opts {})]))
      ;; Input queries
      :mouse-x (fn [] (or (. input :mouse-x) 0))
      :mouse-y (fn [] (or (. input :mouse-y) 0))

@@ -160,6 +160,19 @@
   []
   (get-json "/aspects"))
 
+(defn get-profile-json
+  "Fetch the frame-timing ring buffer via GET /profile (REDIN_PROFILE
+   build only). Returns the parsed JSON body, or nil if the endpoint
+   isn't enabled (non-200 response)."
+  []
+  (let [resp (http/get (str (base-url) "/profile")
+                       {:headers (merge {"Accept" "application/json"}
+                                        (auth-headers))
+                        :throw false
+                        :timeout http-timeout-ms})]
+    (when (= 200 (:status resp))
+      (json/parse-string (:body resp) true))))
+
 ;; ---------------------------------------------------------------------------
 ;; Frame tree walking
 ;; ---------------------------------------------------------------------------
@@ -469,22 +482,31 @@
           (<= pb pc)          b
           :else               c)))
 
-(defn screenshot-pixel
-  "Read RGB at (x,y) from a PNG byte array. Returns [r g b].
+(defn screenshot-pixels
+  "Read RGB at each [x y] in `coords` from a single PNG byte array.
+   Returns a vector of [r g b], one per input coordinate, in the same
+   order as `coords`.
    Lightweight, partial decoder (Babashka doesn't ship javax.imageio):
    concatenates IDAT chunks, then short-circuits the inflate + unfilter
-   loop after row y. Supports PNG colour types 2 (RGB) and 6 (RGBA),
-   8-bit. Throws on out-of-bounds coordinates."
-  [^bytes png-bytes x y]
+   loop after the row of the *maximum* requested y, decoding it once and
+   sharing that work across every coordinate. Supports PNG colour types
+   2 (RGB) and 6 (RGBA), 8-bit. Throws on out-of-bounds coordinates.
+   Prefer this over calling `screenshot-pixel` in a loop -- each
+   `screenshot-pixel` call re-decodes the image from scratch, which is
+   O(samples * width * max-y) and can blow past CI's per-suite timeout
+   (#132) once a test takes more than a couple of samples."
+  [^bytes png-bytes coords]
   (let [width  (read-be-int png-bytes 16)
         height (read-be-int png-bytes 20)
-        _      (when (or (< x 0) (< y 0) (>= x width) (>= y height))
-                 (throw (ex-info "screenshot-pixel: coordinate out of bounds"
-                                 {:x x :y y :width width :height height})))
+        _      (doseq [[x y] coords]
+                 (when (or (< x 0) (< y 0) (>= x width) (>= y height))
+                   (throw (ex-info "screenshot-pixels: coordinate out of bounds"
+                                   {:x x :y y :width width :height height}))))
         bpp    4   ; Raylib screenshot PNGs are RGBA
         stride (+ 1 (* width bpp))
         idat   (png-collect-idat png-bytes)
-        n-rows (inc (int y))
+        max-y  (apply max (map second coords))
+        n-rows (inc (int max-y))
         need   (* n-rows stride)
         bais   (java.io.ByteArrayInputStream. idat)
         iis    (java.util.zip.InflaterInputStream. bais)
@@ -512,10 +534,21 @@
                           4 (mod (+ xv (png-paeth a b c)) 256)
                           xv)]
             (aset out out-idx (unchecked-byte val))))))
-    (let [idx (* (+ (* (int y) width) (int x)) bpp)]
-      [(ub (aget out idx))
-       (ub (aget out (+ idx 1)))
-       (ub (aget out (+ idx 2)))])))
+    (mapv (fn [[x y]]
+            (let [idx (* (+ (* (int y) width) (int x)) bpp)]
+              [(ub (aget out idx))
+               (ub (aget out (+ idx 1)))
+               (ub (aget out (+ idx 2)))]))
+          coords)))
+
+(defn screenshot-pixel
+  "Read RGB at (x,y) from a PNG byte array. Returns [r g b].
+   Convenience single-sample wrapper around `screenshot-pixels`. Prefer
+   calling `screenshot-pixels` directly when sampling more than one
+   coordinate from the same screenshot -- each call here re-decodes the
+   image from scratch."
+  [^bytes png-bytes x y]
+  (first (screenshot-pixels png-bytes [[x y]])))
 
 (defn wait-ms
   "Sleep for n milliseconds. Prefer wait-for."

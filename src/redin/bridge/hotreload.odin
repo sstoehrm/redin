@@ -3,6 +3,7 @@ package bridge
 import "core:fmt"
 import "core:os"
 import "core:time"
+import "../texture"
 
 // F5 (#204): how long after a failed reload to make one more attempt.
 // An editor that saves non-atomically (write-in-place rather than
@@ -166,6 +167,9 @@ hotreload_execute :: proc(b: ^Bridge) -> (ok: bool) {
 		return false
 	}
 	fmt.println("Hot reload: runtime reloaded")
+	// Spec 2026-08-25: an edited image file on disk must show up after a
+	// reload. Pixels-cache entries are content-addressed and stay valid.
+	texture.clear_files()
 	return true
 }
 

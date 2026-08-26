@@ -26,6 +26,7 @@ import "../types"
 import rl "vendor:raylib"
 import "../canvas"
 import "../markdown"
+import "../texture"
 
 Bridge :: struct {
 	L:               ^Lua_State,
@@ -374,6 +375,7 @@ clear_node_strings :: proc(n: types.Node) {
 		}
 	case types.NodeImage:
 		if len(v.aspect) > 0 do delete(v.aspect)
+		if len(v.src) > 0 do delete(v.src)
 	case types.NodePopout:
 		if len(v.aspect) > 0 do delete(v.aspect)
 	case types.NodeModal:
@@ -674,6 +676,34 @@ canvas_coord :: proc(L: ^Lua_State, idx: i32, n: i32, offset: f32) -> (f32, bool
 // than truncate to a nonsense shape. Issue #233 finding H2.
 @(private = "file")
 MAX_POLYGON_POINTS :: 4096
+
+// Caps for the "pixels" canvas command (spec 2026-08-25). A 2048-wide
+// square RGBA texture is 16MB — the per-command ceiling; anything larger
+// is skipped, matching the sanitize posture of the other canvas ops.
+@(private = "file")
+PIXELS_DIM_MAX :: 2048
+@(private = "file")
+PIXELS_MAX_PIXELS :: 4 * 1024 * 1024
+
+// Validate the pixels command header: dims must be positive integers
+// within caps and data_len must equal w*h*4 exactly.
+validate_pixels_cmd :: proc(w, h: f64, data_len: int) -> (iw, ih: i32, ok: bool) {
+	if math.is_nan(w) || math.is_nan(h) || math.is_inf(w) || math.is_inf(h) do return 0, 0, false
+	if w != math.floor(w) || h != math.floor(h) do return 0, 0, false
+	if w < 1 || h < 1 || w > PIXELS_DIM_MAX || h > PIXELS_DIM_MAX do return 0, 0, false
+	iw = i32(w)
+	ih = i32(h)
+	if int(iw) * int(ih) > PIXELS_MAX_PIXELS do return 0, 0, false
+	if data_len != int(iw) * int(ih) * 4 do return 0, 0, false
+	return iw, ih, true
+}
+
+// Scale for the pixels command: (0, 64], anything else falls back to 1.
+// NaN compares false on both bounds and lands on the fallback.
+sanitize_pixels_scale :: proc(v: f32) -> f32 {
+	if v > 0 && v <= 64 do return v
+	return 1
+}
 
 // Read a color [r,g,b] or [r,g,b,a] from a table field. Returns ok=false if field missing.
 read_color_field :: proc(L: ^Lua_State, idx: i32, field: cstring) -> (rl.Color, bool) {
@@ -978,14 +1008,53 @@ execute_canvas_command :: proc(L: ^Lua_State, idx: i32, tag: string, ox: f32, oy
 		}
 		lua_pop(L, 2)
 
+	case "pixels":
+		x, x_ok := canvas_coord(L, idx, 2, ox)
+		y, y_ok := canvas_coord(L, idx, 3, oy)
+		if !x_ok || !y_ok do return
+		wf := lua_rawgeti_number(L, idx, 4)
+		hf := lua_rawgeti_number(L, idx, 5)
+		lua_rawgeti(L, idx, 6)
+		// Strict string check (not lua_isstring's real-Lua-C-API coercing
+		// semantics — this package's lua_isstring is already a strict
+		// LUA_TSTRING check, see lua_api.odin) and a NUL-safe length read,
+		// the #277 posture. A number cell must not pass as pixel data.
+		if !lua_isstring(L, -1) {
+			lua_pop(L, 1)
+			return
+		}
+		data := lua_tostring_str(L, -1) // borrows Lua's buffer for this call
+		iw, ih, ok := validate_pixels_cmd(wf, hf, len(data))
+		if !ok {
+			lua_pop(L, 1)
+			return
+		}
+		lua_rawgeti(L, idx, 7)
+		opts := lua_gettop(L)
+		scale := sanitize_pixels_scale(read_number_field(L, opts, "scale"))
+		if tex, tok := texture.get_pixels(iw, ih, transmute([]u8)data); tok {
+			rl.DrawTextureEx(tex, {x, y}, 0, scale, rl.WHITE)
+		}
+		lua_pop(L, 2)
+
 	case "image":
 		x, x_ok := canvas_coord(L, idx, 2, ox)
 		y, y_ok := canvas_coord(L, idx, 3, oy)
 		w, w_ok := sanitize_dim(f32(lua_rawgeti_number(L, idx, 4)))
 		h, h_ok := sanitize_dim(f32(lua_rawgeti_number(L, idx, 5)))
 		if !x_ok || !y_ok || !w_ok || !h_ok do return
-		rl.DrawRectangleLinesEx({x, y, w, h}, 1, rl.GRAY)
-		rl.DrawText("img", i32(x) + 2, i32(y) + 2, 12, rl.GRAY)
+		lua_rawgeti(L, idx, 6)
+		defer lua_pop(L, 1)
+		if !lua_isstring(L, -1) do return
+		path := lua_tostring_str(L, -1)
+		if tex, ok := texture.get_file(path); ok {
+			src := rl.Rectangle{0, 0, f32(tex.width), f32(tex.height)}
+			rl.DrawTexturePro(tex, src, {x, y, w, h}, {0, 0}, 0, rl.WHITE)
+		} else {
+			// Missing/failed file keeps the placeholder box.
+			rl.DrawRectangleLinesEx({x, y, w, h}, 1, rl.GRAY)
+			rl.DrawText("img", i32(x) + 2, i32(y) + 2, 12, rl.GRAY)
+		}
 	}
 }
 
@@ -1758,11 +1827,26 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 
 	case "image":
 		img: types.NodeImage
+		img.fit = .keep
 		if attrs_idx > 0 {
 			img.aspect = lua_get_string_field(L, attrs_idx, "aspect")
 			img.width = lua_get_size_f32(L, attrs_idx, "width")
 			img.height = lua_get_size_f32(L, attrs_idx, "height")
 			img.margin = lua_get_padding_field(L, attrs_idx, "margin")
+			img.src = lua_get_string_field(L, attrs_idx, "src")
+			fit := lua_get_string_field_raw(L, attrs_idx, "fit")
+			switch fit {
+			case "stretch":
+				img.fit = .stretch
+			case "stretch-x":
+				img.fit = .stretchX
+			case "stretch-y":
+				img.fit = .stretchY
+			case "keep", "":
+				img.fit = .keep
+			case:
+				img.fit = .keep
+			}
 		}
 		return img
 

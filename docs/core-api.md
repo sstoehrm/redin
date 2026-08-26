@@ -150,7 +150,7 @@ The flattening is a single pass when the frame enters the pipeline. No fragment 
 | Tag       | Purpose                                                | Status        | Required attrs |
 | --------- | ------------------------------------------------------ | ------------- | -------------- |
 | `text`    | Text content. Last positional arg is the string.       | implemented   | --             |
-| `image`   | Placeholder slot — themed rect; texture loading TBD.   | placeholder   | --             |
+| `image`   | Bitmap display. Draws `:src` per `:fit`; themed chrome behind. | implemented | --             |
 | `input`   | Editable text field.                                   | implemented   | --             |
 | `button`  | Clickable button. Last positional arg is the label.    | implemented   | --             |
 | `canvas`  | Independent render region. Runs a registered provider. | implemented   | `provider`     |
@@ -198,6 +198,8 @@ The flattening is a single pass when the frame enters the pipeline. No fragment 
 | `mode`     | `"mouse"` `"fixed"`     | popout (positioning mode) |
 | `x`        | number                  | popout (fixed position x) |
 | `y`        | number                  | popout (fixed position y) |
+| `src`      | string                  | image (file path, resolved against the working directory) |
+| `fit`      | keyword                 | image (`stretch`, `stretch-x`, `stretch-y`, `keep`; default `keep`) |
 
 **Rule:** Visual properties (`bg`, `color`, `border`, `font-size`, `font`, `weight`, `radius`, `border-width`, `opacity`, `shadow`, `line-height`, `padding`) belong in the theme only, never on elements.
 
@@ -723,7 +725,7 @@ Per-node-type semantics:
 | `:text` | text string | string → replaces text |
 | `:input` | current value (live) | string → sets value |
 | `:button` | label string | string → sets label |
-| `:image` | (none — no source attr is read by the parser yet) | string → stored on the node but currently a no-op (texture loading TBD) |
+| `:image` | src string (file path) | string → sets :src |
 | `:vbox` `:hbox` `:stack` `:popout` `:modal` | children list as JSON array | JSON array → replaces children |
 
 #### Endpoints

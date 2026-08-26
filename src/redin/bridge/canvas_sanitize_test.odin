@@ -125,3 +125,49 @@ test_sanitize_coord_clamps_huge_finite :: proc(t: ^testing.T) {
 	testing.expect(t, ok2)
 	testing.expect_value(t, v2, f32(-COORD_MAX))
 }
+
+// --- pixels command validation (spec 2026-08-25-texture-foundation) ---
+// data length must equal w*h*4 exactly; dims positive integers, each
+// <= PIXELS_DIM_MAX, product <= PIXELS_MAX_PIXELS. Scale in (0, 64], else 1.
+
+@(test)
+test_validate_pixels_accepts_exact :: proc(t: ^testing.T) {
+	iw, ih, ok := validate_pixels_cmd(2, 3, 2 * 3 * 4)
+	testing.expect(t, ok)
+	testing.expect_value(t, iw, i32(2))
+	testing.expect_value(t, ih, i32(3))
+}
+
+@(test)
+test_validate_pixels_rejects_length_mismatch :: proc(t: ^testing.T) {
+	_, _, ok := validate_pixels_cmd(2, 3, 2 * 3 * 4 - 1)
+	testing.expect(t, !ok, "short data must be rejected")
+	_, _, ok2 := validate_pixels_cmd(2, 3, 2 * 3 * 4 + 1)
+	testing.expect(t, !ok2, "long data must be rejected")
+}
+
+@(test)
+test_validate_pixels_rejects_bad_dims :: proc(t: ^testing.T) {
+	_, _, a := validate_pixels_cmd(0, 3, 0)
+	testing.expect(t, !a, "zero width rejected")
+	_, _, b := validate_pixels_cmd(-2, 3, 24)
+	testing.expect(t, !b, "negative width rejected")
+	_, _, c := validate_pixels_cmd(2.5, 3, 30)
+	testing.expect(t, !c, "non-integer width rejected")
+	_, _, d := validate_pixels_cmd(math.nan_f64(), 3, 12)
+	testing.expect(t, !d, "NaN width rejected")
+	_, _, e := validate_pixels_cmd(2049, 1, 2049 * 4)
+	testing.expect(t, !e, "width above PIXELS_DIM_MAX rejected")
+	_, _, f := validate_pixels_cmd(2048, 2048, 2048 * 2048 * 4)
+	testing.expect(t, f, "2048x2048 exactly at product cap accepted")
+}
+
+@(test)
+test_sanitize_pixels_scale :: proc(t: ^testing.T) {
+	testing.expect_value(t, sanitize_pixels_scale(3), f32(3))
+	testing.expect_value(t, sanitize_pixels_scale(0.5), f32(0.5))
+	testing.expect_value(t, sanitize_pixels_scale(0), f32(1))
+	testing.expect_value(t, sanitize_pixels_scale(-2), f32(1))
+	testing.expect_value(t, sanitize_pixels_scale(65), f32(1))
+	testing.expect_value(t, sanitize_pixels_scale(math.nan_f32()), f32(1))
+}

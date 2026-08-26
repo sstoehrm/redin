@@ -1,0 +1,29 @@
+{:nodes {:provider {:name "app draw fn" :type "app" :note "e.g. drapi vidref filmstrip"}
+         :ctx-pixels {:name "ctx.pixels" :type "runtime" :file "src/runtime/canvas.fnl"
+                      :sig "(ctx.pixels x y w h data ?opts)" :data "RGBA byte string, len = w*h*4"}
+         :cmd-buffer {:name "command buffer" :type "runtime" :note "one [:pixels ...] entry per sprite"}
+         :pixels-decode {:name "pixels op decode" :type "bridge" :file "src/redin/bridge/bridge.odin"
+                         :validates "data length, dim caps, scale"}
+         :image-op {:name "image op decode" :type "bridge" :note "un-stubs reserved :image canvas op (path)"}
+         :node-image {:name "NodeImage :src" :type "bridge" :note "attr read in node conversion + .fnl parser"}
+         :draw-image {:name "NodeImage draw" :type "render" :file "src/redin/render.odin"
+                      :modes ":fit stretch|stretch-x|stretch-y|keep"}
+         :tex-store {:name "texture store" :type "texture" :file "src/redin/texture/ (new package)"
+                     :pixels-cache "content-hash (FNV-1a 64 + dims) -> Texture2D"
+                     :file-cache "path -> Texture2D"
+                     :eviction "frame-stamped LRU sweep: unused 120 frames -> unload; 64MB byte cap backstop"}
+         :raylib {:name "Raylib GPU" :type "external" :calls "LoadTextureFromImage / DrawTextureEx / DrawTexturePro"}}
+ :edges {[:provider :ctx-pixels] {:direction :-> :name "per sprite, cached RGBA string"}
+         [:ctx-pixels :cmd-buffer] {:direction :->}
+         [:cmd-buffer :pixels-decode] {:direction :-> :name "per frame walk"}
+         [:pixels-decode :tex-store] {:direction :-> :name "get by content hash"}
+         [:image-op :tex-store] {:direction :-> :name "get by path"}
+         [:node-image :draw-image] {:direction :-> :name "flat node array"}
+         [:draw-image :tex-store] {:direction :-> :name "get by path"}
+         [:tex-store :raylib] {:direction :-> :name "upload on miss, blit on hit"}}
+ :boxes {:lua-side {:name "Fennel/Lua runtime" :type "lua"
+                    :components #{:provider :ctx-pixels :cmd-buffer}}
+         :canvas-path {:name "canvas path (#279 fix)" :type "path"
+                       :components #{:pixels-decode :image-op}}
+         :element-path {:name "frame-tree path ([:image] un-stub)" :type "path"
+                        :components #{:node-image :draw-image}}}}
