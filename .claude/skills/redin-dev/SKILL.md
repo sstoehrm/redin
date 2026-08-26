@@ -44,6 +44,7 @@ src/runtime/        Fennel runtime (loaded by bridge at startup)
 `NodeStack`, `NodeCanvas`, `NodeVbox`, `NodeHbox`, `NodeInput`, `NodeButton`, `NodeText`, `NodeImage`, `NodePopout`, `NodeModal`
 
 NodeText accepts `:selectable` (boolean, default `true`); set to `false` to opt the node out of mouse-selection.
+The `[:image ...]` element displays a bitmap: `:src` (file path, resolved against the process working directory) plus `:fit` (`:stretch`, `:stretch-x`, `:stretch-y`, `:keep`; default `:keep` — 1:1 centered, clipped). Themed chrome (`bg`/`border`/`radius`) draws behind the texture. No `:src`, or a load failure (warned once), falls back to the gray placeholder. File textures are cached per path; the cache is cleared on hot reload, so an edited PNG shows after reload.
 The `[:markdown ...]` element renders a string of markdown source as a lowered subtree of vbox/hbox/text nodes themed with the `md/*` aspect family (`:md/h1` … `:md/h6`, `:md/body`, `:md/list`, `:md/list-item`, `:md/list-marker`, `:md/code`). Defaults ship with the framework; override via `(theme.set-theme {…})`. See `docs/core-api.md` for syntax + attribute table. Add `:copyable true` to render a top-right Copy button that copies the raw markdown source to the clipboard (aspects `md/copy-bar`, `md/copy-button`); rendered markdown text itself is non-selectable.
 
 ## Frame format (Fennel)
@@ -159,7 +160,8 @@ When a draggable container has interactive children (text that should be selecta
     (ctx.text 10 180 "hello" {:size 16 :color [0 0 0]})
     (ctx.ellipse 100 100 40 20 {:fill [0 0 255]})
     (ctx.polygon [[0 0] [100 0] [50 80]] {:fill [255 255 0]})
-    (ctx.image 10 10 64 64 "asset-name")
+    (ctx.image 10 10 64 64 "assets/logo.png")           ;; file path, drawn stretched to w×h
+    (ctx.pixels 80 10 16 16 rgba-str {:scale 4})        ;; rgba-str: 16*16*4-byte RGBA string
 
     ;; Input queries (canvas-relative coordinates)
     (when (ctx.mouse-pressed?)
@@ -170,11 +172,13 @@ When a draggable container has interactive children (text that should be selecta
       (ctx.text 10 10 (tostring count) {:size 24 :color [255 255 255]}))))
 ```
 
-Primitives: `rect`, `circle`, `ellipse`, `line`, `text`, `polygon`, `image`.
+Primitives: `rect`, `circle`, `ellipse`, `line`, `text`, `polygon`, `image` (file path, cached per path), `pixels` (raw RGBA byte string of exactly `w*h*4` bytes, one texture blit per call; `:scale` for nearest-neighbor upscale).
+
+For sprite-heavy scenes (the #279 pattern): build each sprite's RGBA string **once**, cache it in app state, and re-issue `ctx.pixels` every frame — textures are content-hash cached host-side, so steady state is one draw call per sprite. Unused textures age out after ~2s (120 frames); the cache holds at most 64 MB, LRU-evicted.
 Input: `mouse-x`, `mouse-y`, `mouse-in?`, `mouse-down?`, `mouse-pressed?`, `mouse-released?`, `key-down?`, `key-pressed?`.
 Style: `fill` = [r g b] or [r g b a], `stroke` = outline color, `stroke-width`, `radius` (rect corners).
 
-Input sanitization (host-side safety valves, not usually relevant to app code): a command whose coordinate is `NaN`/`±Inf` is skipped; huge finite coordinates are clamped to ±1,048,576 px; widths/heights/radii outside `[0, 16384]` are rejected; `polygon` is capped at 4096 vertices.
+Input sanitization (host-side safety valves, not usually relevant to app code): a command whose coordinate is `NaN`/`±Inf` is skipped; huge finite coordinates are clamped to ±1,048,576 px; widths/heights/radii outside `[0, 16384]` are rejected; `polygon` is capped at 4096 vertices. `pixels` additionally requires the data string length to equal `w*h*4` exactly, dims to be positive integers ≤ 2048 each (≤ 4,194,304 px total), and clamps `:scale` outside `(0, 64]` back to 1 — any violation skips the command whole.
 
 ### Native canvas (Odin, requires binary rebuild)
 

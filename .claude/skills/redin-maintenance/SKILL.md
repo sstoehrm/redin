@@ -35,11 +35,13 @@ odin test src/redin/markdown -collection:lib=lib -collection:luajit=vendor/luaji
 odin test src/redin/profile  -collection:lib=lib -collection:luajit=vendor/luajit
 odin test src/redin/input    -collection:lib=lib -collection:luajit=vendor/luajit -define:ODIN_TEST_THREADS=1
 odin test src/redin/bridge   -collection:lib=lib -collection:luajit=vendor/luajit
+odin test src/redin          -collection:lib=lib -collection:luajit=vendor/luajit
 odin test src/redin/canvas   -collection:lib=lib -collection:luajit=vendor/luajit
+odin test src/redin/texture  -collection:lib=lib -collection:luajit=vendor/luajit -define:ODIN_TEST_THREADS=1
 odin test src/redin/text     -collection:lib=lib -collection:luajit=vendor/luajit -define:ODIN_TEST_THREADS=1
 ```
 
-When you add a new `src/redin/<pkg>/*_test.odin`, add a matching step to `.github/workflows/test.yml` so the suite stays visible in CI. The `input` package needs `-define:ODIN_TEST_THREADS=1` until #118 lands; once it does, drop the flag here and in the workflow.
+When you add a new `src/redin/<pkg>/*_test.odin`, add a matching step to `.github/workflows/test.yml` so the suite stays visible in CI. The `input` package needs `-define:ODIN_TEST_THREADS=1` until #118 lands; once it does, drop the flag here and in the workflow. The `texture` package needs the same flag permanently — its tests save/restore package-global caches, which races under the parallel runner.
 
 ## UI integration tests
 
@@ -73,7 +75,7 @@ Every non-OPTIONS request to the dev server needs `Authorization: Bearer <token>
 
 ### Available test suites
 
-`agent`, `animate`, `button`, `canvas`, `canvas_override_press`, `devserver_pool`, `drag`, `hover_active`, `image`, `input`, `input_parsing`, `json_limits`, `line_height`, `markdown`, `modal`, `multiline`, `nested_click`, `popout`, `profile`, `resize`, `scroll`, `scroll_clip`, `scroll_x`, `scrollbar_drag`, `scrollbar_padded`, `shadow`, `shell`, `smoke`, `text_select`, `viewport`
+`agent`, `animate`, `button`, `canvas`, `canvas_override_press`, `devserver_pool`, `drag`, `gap`, `hover_active`, `image`, `input`, `input_parsing`, `json_limits`, `line_height`, `margin`, `markdown`, `modal`, `multiline`, `nested_click`, `pixels`, `popout`, `profile`, `resize`, `scroll`, `scroll_clip`, `scroll_x`, `scrollbar_drag`, `scrollbar_padded`, `shadow`, `shell`, `smoke`, `text_select`, `viewport`
 
 ### Drag tests and the mouse-takeover pipeline
 
