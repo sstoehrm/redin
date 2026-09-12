@@ -114,3 +114,37 @@ test_lua_to_theme_clamps_hostile_colors :: proc(t: ^testing.T) {
 	testing.expect_value(t, btn.shadow.color[2], 0)
 	testing.expect_value(t, btn.shadow.color[3], 255) // 300 saturates hi
 }
+
+// #282 L1: the padding reader is structurally identical to the color
+// readers fixed under #277 L3 but was overlooked — a bare u8() cast of
+// NaN/±Inf/1e300 (reachable via PUT /aspects) must saturate instead.
+@(test)
+test_lua_to_theme_clamps_hostile_padding :: proc(t: ^testing.T) {
+	sync.lock(&g_test_bridge_global_mutex)
+	defer sync.unlock(&g_test_bridge_global_mutex)
+
+	L := luaL_newstate()
+	luaL_openlibs(L)
+	defer lua_close(L)
+
+	code: cstring = `return {
+		button = {padding = {1e300, 0/0, -1, math.huge}},
+	}`
+	rc := luaL_dostring(L, code)
+	testing.expectf(t, rc == 0, "failed to build theme table (rc=%d)", rc)
+
+	theme := lua_to_theme(L, lua_gettop(L))
+	defer {
+		for k, v in theme {
+			delete(k)
+			if len(v.font) > 0 do delete(v.font)
+		}
+		delete(theme)
+	}
+
+	btn := theme["button"]
+	testing.expect_value(t, btn.padding[0], 255) // 1e300 saturates hi
+	testing.expect_value(t, btn.padding[1], 0)   // NaN -> 0
+	testing.expect_value(t, btn.padding[2], 0)   // negative -> 0
+	testing.expect_value(t, btn.padding[3], 255) // +Inf saturates hi
+}

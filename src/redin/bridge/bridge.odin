@@ -2145,7 +2145,7 @@ lua_get_padding_field :: proc(L: ^Lua_State, index: i32, field: cstring) -> [4]u
 	vals: [4]u8
 	for i: i32 = 0; i < 4; i += 1 {
 		lua_rawgeti(L, abs, i + 1)
-		vals[i] = u8(lua_tonumber(L, -1))
+		vals[i] = clamp_byte(lua_tonumber(L, -1)) // #282 L1, see lua_get_rgba_field
 		lua_pop(L, 1)
 	}
 	return vals
