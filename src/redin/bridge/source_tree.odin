@@ -17,6 +17,11 @@ is_redin_source_tree :: proc() -> bool {
 
 @(private = "package")
 is_redin_source_tree_at :: proc(marker_path: string) -> bool {
-	_, err := os.stat(marker_path, context.temp_allocator)
-	return err == os.ERROR_NONE
+	// #284 I2: lstat, not stat — same no-symlink policy as the hot-reload
+	// watcher (#162 L1, #233 M2). A symlink named like the marker in a
+	// foreign CWD must not flip on cwd-relative lookups and hot reload.
+	// lstat alone is not enough (the link itself "exists"), so the
+	// marker must also be a regular file.
+	fi, err := os.lstat(marker_path, context.temp_allocator)
+	return err == os.ERROR_NONE && fi.type == .Regular
 }

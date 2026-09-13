@@ -215,10 +215,20 @@ record_cleanup_identity :: proc(port_str: string, token: string) {
 // allocation, no Odin context. O_NOFOLLOW so a swapped-in symlink can't
 // redirect the read. A short read or any length/byte difference fails safe
 // (leaves the file) rather than risk deleting another instance's.
+// #284 L1: O_NOFOLLOW does not stop a FIFO, and a blocking open on a
+// writer-less FIFO swapped into CWD would hang shutdown (and the
+// re-raise in cleanup_on_signal). O_NONBLOCK keeps the open from
+// blocking, and the fstat guard bails on anything that is not a regular
+// file (FIFO, directory, device, socket) before we read or unlink it.
 unlink_if_matches :: proc "contextless" (path: cstring, expect: []u8) {
 	if len(expect) == 0 do return
-	fd, oerr := linux.open(path, {.NOFOLLOW, .CLOEXEC})
+	fd, oerr := linux.open(path, {.NOFOLLOW, .CLOEXEC, .NONBLOCK})
 	if oerr != .NONE do return
+	st: linux.Stat
+	if linux.fstat(fd, &st) != .NONE || !linux.S_ISREG(st.mode) {
+		linux.close(fd)
+		return
+	}
 	buf: [256]u8
 	n, rerr := linux.read(fd, buf[:])
 	linux.close(fd)

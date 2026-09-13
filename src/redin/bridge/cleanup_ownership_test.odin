@@ -9,6 +9,7 @@ package bridge
 
 import "core:os"
 import "core:strings"
+import "core:sys/linux"
 import "core:testing"
 
 @(test)
@@ -51,4 +52,36 @@ test_unlink_if_matches_keeps_on_prefix :: proc(t: ^testing.T) {
 	unlink_if_matches(cpath, transmute([]u8)string("abc"))
 
 	testing.expect(t, os.exists(path), "prefix-only match must not unlink")
+}
+
+// #284 L1: O_NOFOLLOW stops symlinks but not FIFOs. A blocking open on a
+// writer-less FIFO substituted into CWD would hang shutdown (and the
+// re-raise in cleanup_on_signal). The helper must return promptly and
+// leave anything that is not a regular file alone.
+@(test)
+test_unlink_if_matches_ignores_fifo :: proc(t: ^testing.T) {
+	path := "test_redin_284_fifo.tmp"
+	os.remove(path)
+	cpath := strings.clone_to_cstring(path, context.temp_allocator)
+	merr := linux.mknod(cpath, {.IFIFO, .IRUSR, .IWUSR}, 0)
+	testing.expectf(t, merr == .NONE, "setup: mknod FIFO failed (%v)", merr)
+	defer os.remove(path)
+
+	// Would block forever without O_NONBLOCK (no writer on the FIFO).
+	unlink_if_matches(cpath, transmute([]u8)string("our-token"))
+
+	testing.expect(t, os.exists(path), "a FIFO must never be unlinked")
+}
+
+@(test)
+test_unlink_if_matches_ignores_directory :: proc(t: ^testing.T) {
+	path := "test_redin_284_dir.tmp"
+	os.remove(path)
+	testing.expect(t, os.make_directory(path) == nil, "setup: mkdir")
+	defer os.remove(path)
+	cpath := strings.clone_to_cstring(path, context.temp_allocator)
+
+	unlink_if_matches(cpath, transmute([]u8)string("our-token"))
+
+	testing.expect(t, os.exists(path), "a directory must never be unlinked")
 }
