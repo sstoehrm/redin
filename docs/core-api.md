@@ -227,12 +227,22 @@ A paragraph with **bold** and _italic_ and `code` text.
 | `:width`, `:height` | size | Sizing of the wrapper. |
 | `:overflow` | keyword | Forwarded to the wrapper. `:scroll-y` for tall blocks. |
 
-V1 syntax: paragraphs (blank line), soft breaks (two-space EOL),
-inline `**bold**` / `_italic_` / `*italic*` / `` `code` ``,
-ATX headings `#`–`######` at column 0, flat unordered lists (`-`,
-`*` at column 0) and flat ordered lists (`<digit>+. ` at column 0).
+V1 syntax: paragraphs (separated by a blank or whitespace-only line),
+soft breaks (two-space EOL), inline `**bold**` / `_italic_` / `*italic*` /
+`` `code` ``, ATX headings `#`–`######` at column 0, flat unordered lists
+(`-`, `*` at column 0) and flat ordered lists (`<digit>+. ` at column 0).
 Nested lists, code blocks, links, images, tables, and nested inline
 emphasis are not supported in v1.
+
+Block rules: CRLF / CR line endings are treated as LF. A heading is
+always exactly one line. A list may start directly after a paragraph line
+(no blank line needed); an indented line (leading space or tab) inside a
+list continues the current item, while any other non-marker line ends the
+list and starts a new paragraph. Switching between ordered and unordered
+markers starts a new list. `_` emphasis follows the CommonMark intraword
+rule — it only opens at the start of a word and closes at the end of one,
+so `snake_case_name` and `__init__` stay literal; `*` emphasis is not
+restricted.
 
 The styling of `:md/h1` … `:md/h6`, `:md/body`, `:md/list`,
 `:md/list-item`, `:md/list-marker`, and `:md/code` aspects ships

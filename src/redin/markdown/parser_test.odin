@@ -214,3 +214,148 @@ test_indented_dash_is_paragraph :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(blocks), 1)
 	testing.expect_value(t, blocks[0].kind, Block_Kind.Paragraph)
 }
+
+// ---------------------------------------------------------------------------
+// Review C10: content must never be dropped or merged across block kinds.
+// ---------------------------------------------------------------------------
+
+@(test)
+test_non_list_line_ends_list :: proc(t: ^testing.T) {
+	blocks := parse("- one\n- two\nClosing remark", context.temp_allocator)
+	testing.expect_value(t, len(blocks), 2)
+	testing.expect_value(t, blocks[0].kind, Block_Kind.List_Group)
+	testing.expect_value(t, len(blocks[0].items), 2)
+	testing.expect_value(t, blocks[0].items[1].spans[0].text, "two")
+	testing.expect_value(t, blocks[1].kind, Block_Kind.Paragraph)
+	testing.expect_value(t, blocks[1].spans[0].text, "Closing remark")
+}
+
+@(test)
+test_indented_continuation_joins_list_item :: proc(t: ^testing.T) {
+	blocks := parse("- item\n  continuation\n- next", context.temp_allocator)
+	testing.expect_value(t, len(blocks), 1)
+	testing.expect_value(t, blocks[0].kind, Block_Kind.List_Group)
+	testing.expect_value(t, len(blocks[0].items), 2)
+	testing.expect_value(t, len(blocks[0].items[0].spans), 1)
+	testing.expect_value(t, blocks[0].items[0].spans[0].text, "item continuation")
+	testing.expect_value(t, blocks[0].items[1].spans[0].text, "next")
+}
+
+@(test)
+test_heading_ends_at_end_of_line :: proc(t: ^testing.T) {
+	blocks := parse("# Title\nBody", context.temp_allocator)
+	testing.expect_value(t, len(blocks), 2)
+	testing.expect_value(t, blocks[0].kind, Block_Kind.Heading_1)
+	testing.expect_value(t, blocks[0].spans[0].text, "Title")
+	testing.expect_value(t, blocks[1].kind, Block_Kind.Paragraph)
+	testing.expect_value(t, blocks[1].spans[0].text, "Body")
+}
+
+@(test)
+test_heading_interrupts_paragraph :: proc(t: ^testing.T) {
+	blocks := parse("Body\n## Next", context.temp_allocator)
+	testing.expect_value(t, len(blocks), 2)
+	testing.expect_value(t, blocks[0].kind, Block_Kind.Paragraph)
+	testing.expect_value(t, blocks[0].spans[0].text, "Body")
+	testing.expect_value(t, blocks[1].kind, Block_Kind.Heading_2)
+	testing.expect_value(t, blocks[1].spans[0].text, "Next")
+}
+
+@(test)
+test_list_without_preceding_blank_line :: proc(t: ^testing.T) {
+	blocks := parse("Intro:\n- a\n- b", context.temp_allocator)
+	testing.expect_value(t, len(blocks), 2)
+	testing.expect_value(t, blocks[0].kind, Block_Kind.Paragraph)
+	testing.expect_value(t, blocks[0].spans[0].text, "Intro:")
+	testing.expect_value(t, blocks[1].kind, Block_Kind.List_Group)
+	testing.expect_value(t, len(blocks[1].items), 2)
+	testing.expect_value(t, blocks[1].items[0].spans[0].text, "a")
+	testing.expect_value(t, blocks[1].items[1].spans[0].text, "b")
+}
+
+@(test)
+test_list_marker_kind_change_starts_new_list :: proc(t: ^testing.T) {
+	blocks := parse("- a\n1. b", context.temp_allocator)
+	testing.expect_value(t, len(blocks), 2)
+	testing.expect_value(t, blocks[0].kind, Block_Kind.List_Group)
+	testing.expect_value(t, blocks[0].ordered, false)
+	testing.expect_value(t, blocks[1].kind, Block_Kind.List_Group)
+	testing.expect_value(t, blocks[1].ordered, true)
+	testing.expect_value(t, blocks[1].items[0].marker, "1.")
+}
+
+@(test)
+test_whitespace_only_line_separates_paragraphs :: proc(t: ^testing.T) {
+	blocks := parse("first\n   \nsecond", context.temp_allocator)
+	testing.expect_value(t, len(blocks), 2)
+	testing.expect_value(t, blocks[0].spans[0].text, "first")
+	testing.expect_value(t, blocks[1].spans[0].text, "second")
+}
+
+@(test)
+test_underscore_intraword_is_literal :: proc(t: ^testing.T) {
+	blocks := parse("call snake_case_name now", context.temp_allocator)
+	testing.expect_value(t, len(blocks), 1)
+	testing.expect_value(t, len(blocks[0].spans), 1)
+	testing.expect_value(t, blocks[0].spans[0].style, Span_Style.Regular)
+	testing.expect_value(t, blocks[0].spans[0].text, "call snake_case_name now")
+}
+
+@(test)
+test_underscore_dunder_is_literal :: proc(t: ^testing.T) {
+	blocks := parse("see __init__ here", context.temp_allocator)
+	testing.expect_value(t, len(blocks[0].spans), 1)
+	testing.expect_value(t, blocks[0].spans[0].text, "see __init__ here")
+}
+
+@(test)
+test_underscore_italic_between_words :: proc(t: ^testing.T) {
+	blocks := parse("foo _bar_ baz", context.temp_allocator)
+	testing.expect_value(t, len(blocks[0].spans), 3)
+	testing.expect_value(t, blocks[0].spans[0].text, "foo ")
+	testing.expect_value(t, blocks[0].spans[1].style, Span_Style.Italic)
+	testing.expect_value(t, blocks[0].spans[1].text, "bar")
+	testing.expect_value(t, blocks[0].spans[2].text, " baz")
+}
+
+@(test)
+test_underscore_italic_may_contain_intraword_underscore :: proc(t: ^testing.T) {
+	blocks := parse("(_foo_bar_)", context.temp_allocator)
+	testing.expect_value(t, len(blocks[0].spans), 3)
+	testing.expect_value(t, blocks[0].spans[1].style, Span_Style.Italic)
+	testing.expect_value(t, blocks[0].spans[1].text, "foo_bar")
+}
+
+@(test)
+test_star_intraword_italic_unchanged :: proc(t: ^testing.T) {
+	blocks := parse("a*b*c", context.temp_allocator)
+	testing.expect_value(t, len(blocks[0].spans), 3)
+	testing.expect_value(t, blocks[0].spans[1].style, Span_Style.Italic)
+	testing.expect_value(t, blocks[0].spans[1].text, "b")
+}
+
+@(test)
+test_crlf_normalised :: proc(t: ^testing.T) {
+	blocks := parse("# T\r\nline one\r\nline two\r\n\r\n- a\r\n- b\r\n", context.temp_allocator)
+	testing.expect_value(t, len(blocks), 3)
+	testing.expect_value(t, blocks[0].spans[0].text, "T")
+	testing.expect_value(t, blocks[1].spans[0].text, "line one line two")
+	testing.expect_value(t, blocks[2].kind, Block_Kind.List_Group)
+	testing.expect_value(t, blocks[2].items[0].spans[0].text, "a")
+	testing.expect_value(t, blocks[2].items[1].spans[0].text, "b")
+}
+
+@(test)
+test_lone_cr_normalised :: proc(t: ^testing.T) {
+	blocks := parse("a\r\rb", context.temp_allocator)
+	testing.expect_value(t, len(blocks), 2)
+	testing.expect_value(t, blocks[0].spans[0].text, "a")
+	testing.expect_value(t, blocks[1].spans[0].text, "b")
+}
+
+@(test)
+test_crlf_soft_break :: proc(t: ^testing.T) {
+	blocks := parse("a  \r\nb", context.temp_allocator)
+	testing.expect_value(t, len(blocks), 1)
+	testing.expect_value(t, blocks[0].spans[0].text, "a\nb")
+}

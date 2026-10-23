@@ -151,13 +151,23 @@ A paragraph with **bold** text.
 - second"]
 ```
 
-V1 supports: paragraphs (blank line), soft breaks (two-space EOL),
-inline `**bold**` / `_italic_` / `*italic*` / `` `inline code` ``,
-ATX headings `#`–`######` at column 0, flat unordered (`-`, `*`) and
-ordered (`<digit>+. `) lists at column 0. Nested lists, code blocks,
-links, images, tables, and nested inline emphasis are not supported
+V1 supports: paragraphs (separated by a blank or whitespace-only line),
+soft breaks (two-space EOL), inline `**bold**` / `_italic_` / `*italic*` /
+`` `inline code` ``, ATX headings `#`–`######` at column 0, flat unordered
+(`-`, `*`) and ordered (`<digit>+. `) lists at column 0. Nested lists, code
+blocks, links, images, tables, and nested inline emphasis are not supported
 in v1. Defaults for `:md/*` aspects ship with the framework; override
 via `(theme.set-theme {…})`.
+
+Block rules: CRLF / CR line endings are treated as LF. A heading is
+always exactly one line. A list may start directly after a paragraph line
+(no blank line needed); an indented line (leading space or tab) inside a
+list continues the current item, while any other non-marker line ends the
+list and starts a new paragraph. Switching between ordered and unordered
+markers starts a new list. `_` emphasis follows the CommonMark intraword
+rule — it only opens at the start of a word and closes at the end of one,
+so `snake_case_name` and `__init__` stay literal; `*` emphasis is not
+restricted.
 
 ---
 
