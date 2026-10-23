@@ -2185,11 +2185,26 @@ deliver_events :: proc(b: ^Bridge, events: []types.InputEvent) {
 	}
 }
 
+// Count of deliver_dispatch_events calls that left the Lua stack
+// unbalanced (and were restored). Stays 0 in a healthy build; asserted by
+// dispatch_delivery_test.odin.
+g_dispatch_stack_imbalances: int
+
 // Deliver input dispatch events to Fennel.
 // Each event is wrapped as [:dispatch [:event-name {context}]].
 deliver_dispatch_events :: proc(b: ^Bridge, events: []types.Dispatch_Event) {
 	if len(events) == 0 do return
 	L := b.L
+	// Review C1: every branch below must leave the stack exactly as it
+	// found it (redin_events + one events table, consumed by the pcall).
+	// A miscounted rawseti once left redin_events behind on every
+	// keypress; restore the baseline and complain loudly if that recurs.
+	base_top := lua_gettop(L)
+	defer if top := lua_gettop(L); top != base_top {
+		g_dispatch_stack_imbalances += 1
+		fmt.eprintfln("deliver_dispatch_events: Lua stack unbalanced (%d -> %d), restoring", base_top, top)
+		lua_settop(L, base_top)
+	}
 
 	for event in events {
 		lua_getglobal(L, "redin_events")
@@ -2275,6 +2290,7 @@ deliver_dispatch_events :: proc(b: ^Bridge, events: []types.Dispatch_Event) {
 			lua_pushboolean(L, e.mods.super ? 1 : 0)
 			lua_setfield(L, -2, "super")
 			lua_setfield(L, -2, "mods")
+			lua_rawseti(L, -2, 2) // ctx -> inner[2]
 
 			lua_rawseti(L, -2, 2) // set dispatch wrapper as event[2]
 			lua_rawseti(L, -2, 1) // set as events[1]

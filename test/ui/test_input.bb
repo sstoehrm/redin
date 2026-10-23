@@ -164,3 +164,39 @@
   (assert-state "multiline-value" #(= % "") "Reset should clear multi-line input")
   (assert-state "submitted" #(= (count %) 0) "Reset should clear submitted list")
   (assert-state "last-key" nil? "Reset should clear last-key"))
+
+;; -- Real key path (POST /input/key) --
+;;
+;; Everything above posts handler events straight to /events, which
+;; bypasses the host's Key_Event_Dispatch → Lua wrapper. These tests
+;; focus the input with a real click and drive keys through
+;; /input/key, so the bridge's dispatch marshalling is exercised
+;; end-to-end (review C1: that path was one rawseti short and every
+;; `:key` handler on an `:input` silently failed).
+
+(defn- focus-by-click! [id]
+  (let [el (find-element {:tag :input :id id})
+        {:keys [x y w h]} (rect-of el)]
+    (assert (some? x) (str "no rect for " id))
+    (click (+ x (/ w 2)) (+ y (/ h 2)))
+    (wait-ms 200)))
+
+(deftest real-key-reaches-key-handler
+  (dispatch ["event/reset"])
+  (wait-ms 200)
+  (focus-by-click! :test-input)
+  (input-key :escape)
+  (wait-for (state= "last-key" "escape") {:timeout 2000}))
+
+(deftest real-key-repeated-presses-all-delivered
+  ;; Each delivery used to leak a Lua stack slot; several presses in a
+  ;; row must all reach the handler.
+  (dispatch ["event/reset"])
+  (wait-ms 200)
+  (focus-by-click! :test-input)
+  (input-key :left)
+  (wait-for (state= "last-key" "left") {:timeout 2000})
+  (input-key :right)
+  (wait-for (state= "last-key" "right") {:timeout 2000})
+  (input-key :escape)
+  (wait-for (state= "last-key" "escape") {:timeout 2000}))
