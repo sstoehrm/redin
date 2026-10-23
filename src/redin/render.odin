@@ -112,7 +112,9 @@ node_content_rects: [dynamic]rl.Rectangle
 // render can match the selection path against this tree's paths.
 g_paths: []types.Path
 
-// Per-node scroll offsets for overflow containers.
+// Per-node scroll offsets for overflow containers. Keyed by node idx;
+// remap_frame_state moves them with their node when a re-flatten
+// shifts indices (review C4).
 scroll_offsets: map[int]f32
 scroll_offsets_x: map[int]f32
 
@@ -127,6 +129,51 @@ node_scroll_info: map[int]types.Scroll_Info
 // tree is unchanged. Bridge invalidates on re-flatten and theme swap.
 
 SCROLL_SPEED :: 30.0 // pixels per wheel tick
+
+// Review C4: call whenever the bridge may have re-flattened the view
+// (the runtime's `frame_changed` blocks), before any input phase reads
+// per-index state. input.remap_on_frame_change aligns the previous tree
+// with the new one and moves the input package's per-index state
+// (focus, #active, scrollbar, drag); this moves render's: scroll
+// offsets and the last layout's rects / scroll info, which input
+// hit-tests against until this frame's layout runs. State whose node
+// has no counterpart in the new tree is dropped.
+remap_frame_state :: proc(nodes: []types.Node, children_list: []types.Children) {
+	m, ok := input.remap_on_frame_change(nodes, children_list)
+	if !ok do return
+	n := len(nodes)
+
+	// Re-key an idx-keyed map through m; entries whose node is gone drop.
+	remap_keys :: proc(mp: ^map[int]$V, m: []int, n: int) {
+		if len(mp) == 0 do return
+		Moved :: struct { k: int, v: V }
+		moved := make([dynamic]Moved, 0, len(mp), context.temp_allocator)
+		for k, v in mp {
+			if k < 0 || k >= len(m) do continue
+			nk := m[k]
+			if nk < 0 || nk >= n do continue
+			append(&moved, Moved{nk, v})
+		}
+		clear(mp)
+		for e in moved do mp[e.k] = e.v
+	}
+	remap_keys(&scroll_offsets, m, n)
+	remap_keys(&scroll_offsets_x, m, n)
+	remap_keys(&node_scroll_info, m, n)
+
+	remap_rects :: proc(rects: ^[dynamic]rl.Rectangle, m: []int, n: int) {
+		old := make([]rl.Rectangle, len(rects), context.temp_allocator)
+		copy(old, rects[:])
+		resize(rects, n)
+		for i in 0 ..< n do rects[i] = {}
+		for nk, k in m {
+			if k >= len(old) || nk < 0 || nk >= n do continue
+			rects[nk] = old[k]
+		}
+	}
+	remap_rects(&node_rects, m, n)
+	remap_rects(&node_content_rects, m, n)
+}
 
 apply_scroll_events :: proc(events: []types.InputEvent, nodes: []types.Node) {
 	for event in events {

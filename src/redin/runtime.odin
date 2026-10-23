@@ -217,6 +217,7 @@ run :: proc(cfg: Config) {
 			delete(listeners)
 			bridge.validate_drag_handles(b.nodes[:], b.children_list[:])
 			listeners = input.extract_listeners(b.paths, b.nodes, b.children_list, b.theme)
+			remap_frame_state(b.nodes[:], b.children_list[:])
 		}
 
 		// --- Input (1/4): raw poll + user filter ---
@@ -252,10 +253,17 @@ run :: proc(cfg: Config) {
 		// those strings, so reusing them across the input phases below would
 		// dereference freed memory. Re-extract before any input phase reads
 		// listeners.
+		//
+		// The re-flatten also shifts DFS indices whenever a node was
+		// inserted or removed before another (review C4): move focus,
+		// #active, scrollbar/drag state, scroll offsets and the last
+		// layout's rects to their node's new index before anything reads
+		// them.
 		if b.frame_changed {
 			delete(listeners)
 			bridge.validate_drag_handles(b.nodes[:], b.children_list[:])
 			listeners = input.extract_listeners(b.paths, b.nodes, b.children_list, b.theme)
+			remap_frame_state(b.nodes[:], b.children_list[:])
 		}
 
 		// --- Input (2/4): listener / focus / drag computation ---

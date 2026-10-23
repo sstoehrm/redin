@@ -49,6 +49,7 @@ state_destroy :: proc() {
 	scrollbar = nil
 	scrollbar_consumed_press = false
 	current_cursor = .DEFAULT
+	remap_reset()
 }
 
 // Called when an input gains focus. Copies the node's value into the editing buffer.

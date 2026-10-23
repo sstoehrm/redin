@@ -378,6 +378,10 @@ Each frame, after `redin.push(frame)` delivers a new tree, the host:
 
 A single global `focused_idx` tracks which node has keyboard focus. Clicking a `FocusListener` node sets focus; clicking elsewhere clears it. The renderer uses focus state to look up `aspect#focus` theme variants (e.g. changed border color on a focused input).
 
+### Node identity across re-renders
+
+Focus, the `#active` press state, scroll offsets, an in-progress scrollbar drag and an in-progress app drag are attached to a node, not to its position in the flattened tree. When a re-render inserts or removes nodes (e.g. `(when show [:text "banner"])` toggling before an input), the host aligns the previous tree with the new one and moves that state to the same node's new position. Siblings are matched by element type plus their behavioural attributes — event names (`:change`, `:key`, `:click`, `:draggable`/`:dropable`/`:drag-over` events), `:overflow`, canvas `:provider` — not by `:aspect`, `:value` or text content, so an input that switches to an error aspect while being typed into keeps its focus. If a node has no counterpart in the new tree, its state is dropped: the input loses focus (keystrokes go nowhere rather than to another input), a drag from it is cancelled, its scroll offset is forgotten. Siblings that are indistinguishable by those attributes (e.g. rows of a list sharing the same events) are matched by order.
+
 ---
 
 ## Theme (aspects)
