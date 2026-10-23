@@ -3,12 +3,14 @@ package bridge
 import "core:container/queue"
 import "core:fmt"
 import "core:math"
+import "core:net"
 import "core:os"
 import "core:strings"
 import "core:sync"
 import "core:sys/linux"
 import "core:testing"
 import "core:thread"
+import "base:runtime"
 import rl "vendor:raylib"
 
 // Regression tests for issue #78 finding L1: find_header_value used
@@ -655,4 +657,100 @@ test_write_private_no_follow_replaces_stale_regular_file :: proc(t: ^testing.T) 
 	defer if ok do delete(got)
 	testing.expect(t, ok)
 	testing.expect_value(t, got, fresh)
+}
+
+// Review S2: handler-pool threads are started with init_context = context,
+// so each gets its own thread-local default temp arena — which nothing ever
+// freed. handle_one_connection's header scans (header_count x4,
+// find_content_length, check_host_header, check_bearer_token) each
+// ascii_lower the whole header block into context.temp_allocator before the
+// Host / token checks, so every request — even an unauthenticated one from
+// another local user — leaked ~7x its header size, permanently.
+//
+// Mirror devserver_init's thread setup (init_context = context) and drive
+// handle_one_connection over real loopback sockets with rejected requests
+// (wrong Host -> 403, missing token -> 401; neither touches the main-thread
+// queue). The handler thread's temp arena must not grow per request.
+@(private = "file")
+Temp_Growth_Ctx :: struct {
+	ds:         ^Dev_Server,
+	used_first: uint,
+	used_last:  uint,
+	iterations: int,
+	setup_err:  string,
+}
+
+@(private = "file")
+temp_growth_handler_thread :: proc(c: ^Temp_Growth_Ctx) {
+	if context.temp_allocator.procedure != runtime.default_temp_allocator_proc {
+		c.setup_err = "thread temp_allocator is not the default temp allocator"
+		return
+	}
+	temp := (^runtime.Default_Temp_Allocator)(context.temp_allocator.data)
+	defer runtime.default_temp_allocator_destroy(temp)
+
+	listener, lerr := net.listen_tcp(net.Endpoint{address = net.IP4_Loopback, port = 0})
+	if lerr != nil {
+		c.setup_err = "listen_tcp failed"
+		return
+	}
+	defer net.close(listener)
+	ep, ep_err := net.bound_endpoint(listener)
+	if ep_err != nil {
+		c.setup_err = "bound_endpoint failed"
+		return
+	}
+
+	padding := strings.repeat("x", 2048)
+	defer delete(padding)
+	bad_host := fmt.aprintf("GET /state HTTP/1.1\r\nHost: evil.example\r\nX-Pad: %s\r\n\r\n", padding)
+	defer delete(bad_host)
+	no_token := fmt.aprintf("GET /state HTTP/1.1\r\nHost: %s\r\nX-Pad: %s\r\n\r\n", c.ds.expected_host_v4, padding)
+	defer delete(no_token)
+
+	stack_buf: [8192]u8
+	ITERATIONS :: 64
+	for i in 0 ..< ITERATIONS {
+		client, derr := net.dial_tcp(ep)
+		if derr != nil {
+			c.setup_err = "dial_tcp failed"
+			return
+		}
+		server, _, aerr := net.accept_tcp(listener)
+		if aerr != nil {
+			net.close(client)
+			c.setup_err = "accept_tcp failed"
+			return
+		}
+		req := bad_host if i % 2 == 0 else no_token
+		net.send_tcp(client, transmute([]u8)req)
+		handle_one_connection(c.ds, server, stack_buf[:]) // closes `server`
+		net.close(client)
+
+		used := temp.arena.total_used
+		if i == 0 do c.used_first = used
+		c.used_last = used
+		c.iterations += 1
+	}
+}
+
+@(test)
+test_handler_thread_temp_arena_bounded :: proc(t: ^testing.T) {
+	ds: Dev_Server
+	ds.expected_host_v4 = "127.0.0.1:1"
+	ds.expected_host_name = "localhost:1"
+	ds.auth_token = "0123456789abcdef"
+
+	c := Temp_Growth_Ctx {
+		ds = &ds,
+	}
+	th := thread.create_and_start_with_poly_data(&c, temp_growth_handler_thread, context)
+	thread.join(th)
+	thread.destroy(th)
+
+	if len(c.setup_err) > 0 do testing.fail_now(t, c.setup_err)
+	testing.expect_value(t, c.iterations, 64)
+	testing.expectf(t, c.used_last <= c.used_first,
+		"handler thread temp arena grew from %d to %d bytes over %d rejected requests (review S2)",
+		c.used_first, c.used_last, c.iterations)
 }

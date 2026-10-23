@@ -1,5 +1,6 @@
 package bridge
 
+import "base:runtime"
 import "core:container/queue"
 import "core:crypto"
 import "core:encoding/hex"
@@ -533,6 +534,13 @@ acceptor_thread_proc :: proc(ds: ^Dev_Server) {
 }
 
 handler_thread_proc :: proc(ds: ^Dev_Server) {
+	// Review S2: started with init_context = context, so core:thread rebinds
+	// temp_allocator to this thread's own default temp arena but leaves its
+	// teardown to us (see thread.create docs). handle_one_connection resets
+	// the arena per request; release its backing block on exit.
+	defer if context.temp_allocator.procedure == runtime.default_temp_allocator_proc {
+		runtime.default_temp_allocator_destroy((^runtime.Default_Temp_Allocator)(context.temp_allocator.data))
+	}
 	stack_buf: [8192]u8
 	for {
 		pc := conn_pop_blocking(&ds.accepted_conns)
@@ -545,6 +553,16 @@ handler_thread_proc :: proc(ds: ^Dev_Server) {
 // Per-request handling, called by each handler-pool worker thread.
 handle_one_connection :: proc(ds: ^Dev_Server, client: net.TCP_Socket, stack_buf: []u8) {
 	MAX_BODY :: 1024 * 1024
+
+	// Review S2: the header scans below (header_count, find_content_length,
+	// check_host_header, check_bearer_token) each ascii_lower the header
+	// block into context.temp_allocator — this handler thread's own arena,
+	// which nothing else resets. Without this every request, including
+	// rejected unauthenticated ones, leaked ~7x its header size for good.
+	// Safe: nothing that outlives this call lives in the temp arena —
+	// method/path/body alias `buf` (stack_buf / heap_buf), pending/channel
+	// are context.allocator, and the response body is main's allocation.
+	defer free_all(context.temp_allocator)
 
 	// Receive timeout on this client: each recv returns within
 	// CLIENT_RECV_TIMEOUT even if the peer sends nothing, so
