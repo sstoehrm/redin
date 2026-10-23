@@ -595,7 +595,7 @@ Calls into Lua (`view.get-last-push`) to retrieve the last pushed frame. Each no
 | GET    | `/state`       | --   | Full app-db (calls `redin_get_state` global) |
 | GET    | `/state/:path` | --   | Nested value at dot-separated path       |
 
-Path navigation: `/state/items.0.text` walks into the state table. Note: the `redin_get_state` global must be defined by the app for these endpoints to return data.
+Path navigation: `/state/items.0.text` walks into the state table. Each segment is looked up as a string key first; a segment that is a non-negative integer and finds no string key is retried as a **0-based** array index (so `items.0` is the first element, matching the JSON array `/state` returns). Note: the `redin_get_state` global must be defined by the app for these endpoints to return data.
 
 ### Selection
 

@@ -1720,6 +1720,47 @@ any_segment_too_long :: proc(segments: []string) -> bool {
 	return false
 }
 
+// Walks `segments` from the value on top of the Lua stack, replacing it with
+// the value found (nil when any step misses). Each segment is first looked up
+// as a string key. Review C15: when that misses and the segment is a
+// non-negative decimal integer, it is retried as a 0-based array index (Lua
+// index n+1) — /state serializes Lua sequences as JSON arrays, so
+// `items.0.text` addresses what the client sees at items[0].text. String keys
+// win, so a table with an explicit "0" key still resolves by string. rawget /
+// rawgeti only: no __index metamethods run (see the caller).
+@(private = "package")
+walk_state_path :: proc(L: ^Lua_State, segments: []string) {
+	for seg in segments {
+		if !lua_istable(L, -1) {
+			lua_pop(L, 1)
+			lua_pushnil(L)
+			return
+		}
+		lua_pushlstring(L, cstring(raw_data(seg)), uint(len(seg)))
+		lua_rawget(L, -2)
+		if lua_isnil(L, -1) {
+			if idx, ok := state_path_array_index(seg); ok {
+				lua_pop(L, 1)
+				lua_rawgeti(L, -1, idx)
+			}
+		}
+		lua_remove(L, -2)
+	}
+}
+
+// Parses a path segment as a 0-based array index and returns the matching
+// 1-based Lua index. Digits only, capped at 9 so the +1 can't overflow i32.
+@(private = "file")
+state_path_array_index :: proc(seg: string) -> (i32, bool) {
+	if len(seg) == 0 || len(seg) > 9 do return 0, false
+	n: i32 = 0
+	for c in transmute([]u8)seg {
+		if c < '0' || c > '9' do return 0, false
+		n = n * 10 + i32(c - '0')
+	}
+	return n + 1, true
+}
+
 handle_get_state_path :: proc(ds: ^Dev_Server, ch: ^Response_Channel, dot_path: string) {
 	L := ds.bridge.L
 	lua_getglobal(L, "redin_get_state")
@@ -1752,17 +1793,7 @@ handle_get_state_path :: proc(ds: ^Dev_Server, ch: ^Response_Channel, dot_path: 
 		respond_json_error(ch, 400, `{"error":"path segment too long"}`)
 		return
 	}
-	for seg in segments {
-		if lua_istable(L, -1) {
-			lua_pushlstring(L, cstring(raw_data(seg)), uint(len(seg)))
-			lua_rawget(L, -2)
-			lua_remove(L, -2)
-		} else {
-			lua_pop(L, 1)
-			lua_pushnil(L)
-			break
-		}
-	}
+	walk_state_path(L, segments)
 	b := strings.builder_make()
 	defer strings.builder_destroy(&b)
 	lua_value_to_json(&b, L, -1)
