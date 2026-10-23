@@ -1982,7 +1982,7 @@ load_font_faces :: proc(L: ^Lua_State, index: i32) {
 					cpath := strings.clone_to_cstring(path, context.temp_allocator)
 					loaded := font.load_file(cpath)
 					if loaded.texture.id > 0 {
-						font.register(strings.clone(font_name), sk.style, loaded)
+						font.register(font_name, sk.style, loaded)
 					} else {
 						fmt.eprintfln("Failed to load font: %s", path)
 					}
