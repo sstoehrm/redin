@@ -19,6 +19,11 @@ px :: proc(v: f32) -> f32 { return math.round(v) }
 // Later overrides earlier: base < #focus < #hover < #active. Matches
 // the order documented in docs/reference/theme.md.
 //
+// Composed aspects (`:aspect [:a :b]`) arrive here as the synthetic key
+// "a b"; the bridge keeps precomposed "a b" / "a b#hover" / ... entries
+// in the theme map (bridge/aspect_compose.odin), so no special casing is
+// needed.
+//
 // idx = -1 means "no state overlays" (used by the drag-preview draw
 // paths, where the source/clone aspect already encodes the dragging
 // visual and should not be further mutated).
@@ -35,22 +40,7 @@ resolve_themed_aspect :: proc(
 	if base, ok := theme[aspect]; ok do result = base
 	if idx < 0 do return result
 
-	overlay :: proc(out: ^types.Theme, src: types.Theme) {
-		if src.bg != {}          do out.bg = src.bg
-		if src.color != {}       do out.color = src.color
-		if src.border != {}      do out.border = src.border
-		if src.border_width > 0  do out.border_width = src.border_width
-		if src.radius > 0        do out.radius = src.radius
-		if src.padding != {}     do out.padding = src.padding
-		if src.font_size > 0     do out.font_size = src.font_size
-		if len(src.font) > 0     do out.font = src.font
-		if src.weight > 0        do out.weight = src.weight
-		if src.line_height > 0   do out.line_height = src.line_height
-		if src.opacity > 0       do out.opacity = src.opacity
-		if src.shadow != {}      do out.shadow = src.shadow
-		if src.selection != {}   do out.selection = src.selection
-		if src.text_align != .Auto do out.text_align = src.text_align
-	}
+	overlay :: types.overlay_theme
 
 	if idx == input.focused_idx {
 		if t, ok := theme[strings.concatenate({aspect, "#focus"}, context.temp_allocator)]; ok do overlay(&result, t)
@@ -982,24 +972,9 @@ scrollbar_color :: proc(t: types.Theme) -> rl.Color {
 	return rl.Color{r, g, b, alpha}
 }
 
-// Field-by-field non-zero overlay, same shape as resolve_themed_aspect's
-// inner `overlay` proc. Lifted out for reuse here.
-overlay_theme :: proc(out: ^types.Theme, src: types.Theme) {
-	if src.bg != {}            do out.bg = src.bg
-	if src.color != {}         do out.color = src.color
-	if src.border != {}        do out.border = src.border
-	if src.border_width > 0    do out.border_width = src.border_width
-	if src.radius > 0          do out.radius = src.radius
-	if src.padding != {}       do out.padding = src.padding
-	if src.font_size > 0       do out.font_size = src.font_size
-	if len(src.font) > 0       do out.font = src.font
-	if src.weight > 0          do out.weight = src.weight
-	if src.line_height > 0     do out.line_height = src.line_height
-	if src.opacity > 0         do out.opacity = src.opacity
-	if src.shadow != {}        do out.shadow = src.shadow
-	if src.selection != {}     do out.selection = src.selection
-	if src.text_align != .Auto do out.text_align = src.text_align
-}
+// Field-by-field non-zero overlay — lives in types so the bridge's
+// composed-aspect builder (`[:a :b]`) shares the exact same merge rule.
+overlay_theme :: types.overlay_theme
 
 draw_box_children :: proc(
 	idx: int,

@@ -204,6 +204,7 @@ canvas.register("my-provider", my_provider)
 ```
 
 - State variants use `#` notation: `button#hover`, `input#focus`
+- Compose aspects with a list: `{:aspect [:button :danger]}` merges left-to-right (later wins); on hover: `button`, `danger`, `button#hover`, `danger#hover`
 - Properties: `bg`, `color`, `border`, `border-width`, `radius`, `padding` [top right bottom left], `font-size`, `font`, `weight` (0=normal, 1=bold), `line-height` (ratio, e.g. 1.5), `opacity` (0-1, affects bg alpha), `shadow` `[x y blur [r g b a]]` (drop shadow; consumed by vbox/hbox/button/popout/canvas)
 - `:selection` controls the selection highlight color for both `:input` nodes and `:text` nodes (text selection added on feat/text-highlight)
 

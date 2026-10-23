@@ -189,7 +189,9 @@ For `{:aspect [:button :danger]}` when hovered, the merge sequence is:
 3. Merge `:button#hover` if it exists
 4. Merge `:danger#hover` if it exists
 
-Base aspects are applied first, then state variants for each in the same order.
+Base aspects are applied first, then state variants for each in the same order. When several states apply at once they stack in the usual order (`#focus` < `#hover` < `#active`), each state merging the listed aspects left-to-right.
+
+Implementation note: the host resolves a composed aspect to one synthetic theme entry per state (built when the list is first seen and rebuilt on every `set-theme` / `PUT /aspects`). These derived entries are not reported by `GET /aspects`, which returns only the app's own theme.
 
 ---
 

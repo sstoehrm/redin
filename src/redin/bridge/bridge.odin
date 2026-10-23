@@ -43,6 +43,9 @@ Bridge :: struct {
 	// with siblings. Keyed by the wrapper's flat index, value is N.
 	markdown_skips:  map[i32]i32,
 	theme:           map[string]types.Theme,
+	// Composed aspect keys ("a b" for `:aspect [:a :b]`) seen so far;
+	// owned keys. See aspect_compose.odin.
+	composed_aspects: map[string]struct{},
 	http_client:     Http_Client,
 	shell_client:    Shell_Client,
 	hot_reload:      Hot_Reload,
@@ -171,11 +174,8 @@ destroy :: proc(b: ^Bridge) {
 	delete(b.markdown_skips)
 	// Themes own a heap `font` string (set in redin_set_theme via
 	// lua_get_string_field). Delete both the key and the font value.
-	for k, v in b.theme {
-		delete(k)
-		if len(v.font) > 0 do delete(v.font)
-	}
-	delete(b.theme)
+	free_theme_map(&b.theme)
+	free_composed_aspects(b)
 	lua_close(b.L)
 }
 
@@ -521,12 +521,11 @@ redin_set_theme :: proc "c" (L: ^Lua_State) -> i32 {
 		lua_pop(L, 1)
 
 		// Clear old theme (keys and the per-entry `font` allocation).
-		for k, v in g_bridge.theme {
-			delete(k)
-			if len(v.font) > 0 do delete(v.font)
-		}
-		delete(g_bridge.theme)
+		free_theme_map(&g_bridge.theme)
 		g_bridge.theme = lua_to_theme(L, 1)
+		// Review C13: rebuild the synthetic entries for composed aspects
+		// (`:aspect [:a :b]`) against the new theme.
+		reinstall_composed_aspects(g_bridge)
 
 		// Theme params (font_size, lh_ratio, font atlas) feed cached
 		// intrinsic heights; invalidate since the cache is idx-keyed
@@ -1562,7 +1561,9 @@ lua_flatten_node :: proc(L: ^Lua_State, index: i32, cur: ^[dynamic]u8, b: ^Bridg
 			// Read string fields without cloning — flatten_subtree's
 			// Pass 1 deep-copies them into permanent storage. Cloning
 			// here too would leak the first copy.
-			attrs.aspect   = lua_get_string_field_raw(L, attrs_idx, "aspect")
+			// Temp-allocated (aspect lists are joined); flatten_subtree
+			// deep-copies it like the other raw fields.
+			attrs.aspect   = lua_get_aspect_field(L, attrs_idx, "aspect", context.temp_allocator)
 			attrs.id       = lua_get_string_field_raw(L, attrs_idx, "id")
 			attrs.width    = size_f32_to_f16(lua_get_size_f32(L, attrs_idx, "width"))
 			attrs.height   = size_f32_to_f16(lua_get_size_f32(L, attrs_idx, "height"))
@@ -1725,7 +1726,7 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 		c: types.NodeCanvas
 		if attrs_idx > 0 {
 			c.provider = lua_get_string_field(L, attrs_idx, "provider")
-			c.aspect = lua_get_string_field(L, attrs_idx, "aspect")
+			c.aspect = lua_get_aspect_field(L, attrs_idx, "aspect")
 			c.margin = lua_get_padding_field(L, attrs_idx, "margin")
 			lua_getfield(L, attrs_idx, "width")
 			if lua_isstring(L, -1) {
@@ -1750,7 +1751,7 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 		v: types.NodeVbox
 		if attrs_idx > 0 {
 			v.overflow = lua_get_string_field(L, attrs_idx, "overflow")
-			v.aspect = lua_get_string_field(L, attrs_idx, "aspect")
+			v.aspect = lua_get_aspect_field(L, attrs_idx, "aspect")
 			// vbox uses f16 unions — read as f32 then convert
 			lua_getfield(L, attrs_idx, "width")
 			if lua_isstring(L, -1) {
@@ -1786,7 +1787,7 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 		h: types.NodeHbox
 		if attrs_idx > 0 {
 			h.overflow = lua_get_string_field(L, attrs_idx, "overflow")
-			h.aspect = lua_get_string_field(L, attrs_idx, "aspect")
+			h.aspect = lua_get_aspect_field(L, attrs_idx, "aspect")
 			h.width = lua_get_size_f32(L, attrs_idx, "width")
 			h.height = lua_get_size_f32(L, attrs_idx, "height")
 			layout := lua_get_string_field_raw(L, attrs_idx, "layout")
@@ -1806,7 +1807,7 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 	case "input":
 		inp: types.NodeInput
 		if attrs_idx > 0 {
-			inp.aspect = lua_get_string_field(L, attrs_idx, "aspect")
+			inp.aspect = lua_get_aspect_field(L, attrs_idx, "aspect")
 			inp.change = lua_get_event_name(L, attrs_idx, "change")
 			inp.key = lua_get_event_name(L, attrs_idx, "key")
 			inp.width = lua_get_size_f32(L, attrs_idx, "width")
@@ -1821,7 +1822,7 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 	case "button":
 		btn: types.NodeButton
 		if attrs_idx > 0 {
-			btn.aspect = lua_get_string_field(L, attrs_idx, "aspect")
+			btn.aspect = lua_get_aspect_field(L, attrs_idx, "aspect")
 			btn.click = lua_get_event_name(L, attrs_idx, "click")
 			btn.click_ctx = lua_get_event_ctx(L, attrs_idx, "click")
 			btn.width = lua_get_size_f32(L, attrs_idx, "width")
@@ -1846,7 +1847,7 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 	case "text":
 		t: types.NodeText
 		if attrs_idx > 0 {
-			t.aspect = lua_get_string_field(L, attrs_idx, "aspect")
+			t.aspect = lua_get_aspect_field(L, attrs_idx, "aspect")
 			t.width = lua_get_size_f32(L, attrs_idx, "width")
 			t.height = lua_get_size_f32(L, attrs_idx, "height")
 			layout := lua_get_string_field_raw(L, attrs_idx, "layout")
@@ -1868,7 +1869,7 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 		img: types.NodeImage
 		img.fit = .keep
 		if attrs_idx > 0 {
-			img.aspect = lua_get_string_field(L, attrs_idx, "aspect")
+			img.aspect = lua_get_aspect_field(L, attrs_idx, "aspect")
 			img.width = lua_get_size_f32(L, attrs_idx, "width")
 			img.height = lua_get_size_f32(L, attrs_idx, "height")
 			img.margin = lua_get_padding_field(L, attrs_idx, "margin")
@@ -1892,7 +1893,7 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 	case "popout":
 		pop: types.NodePopout
 		if attrs_idx > 0 {
-			pop.aspect = lua_get_string_field(L, attrs_idx, "aspect")
+			pop.aspect = lua_get_aspect_field(L, attrs_idx, "aspect")
 			pop.width = lua_get_size_f32(L, attrs_idx, "width")
 			pop.height = lua_get_size_f32(L, attrs_idx, "height")
 			pop.x = lua_get_number_field(L, attrs_idx, "x")
@@ -1910,7 +1911,7 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 	case "modal":
 		mod: types.NodeModal
 		if attrs_idx > 0 {
-			mod.aspect = lua_get_string_field(L, attrs_idx, "aspect")
+			mod.aspect = lua_get_aspect_field(L, attrs_idx, "aspect")
 		}
 		return mod
 	}

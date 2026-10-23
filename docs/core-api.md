@@ -464,7 +464,10 @@ Define only the properties that change:
 3. Merge `:button#hover` (if exists)
 4. Merge `:danger#hover` (if exists)
 
-Missing aspects resolve to `{}` (no error).
+Missing aspects resolve to `{}` (no error). When several states apply at
+once, they stack in the usual order (`#focus` < `#hover` < `#active`), each
+state merging the listed aspects left-to-right. A one-element list is the
+same as the plain keyword; non-keyword entries are ignored.
 
 ### Naming conventions
 

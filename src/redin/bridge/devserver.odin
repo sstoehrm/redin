@@ -1807,6 +1807,9 @@ handle_get_aspects :: proc(ds: ^Dev_Server, ch: ^Response_Channel) {
 	json_begin_object(&b)
 	first := true
 	for name, t in ds.bridge.theme {
+		// Synthetic `:aspect [:a :b]` entries are derived, not part of
+		// the app's theme (review C13).
+		if is_composed_theme_key(ds.bridge, name) do continue
 		if !first do json_comma(&b)
 		first = false
 		json_key(&b, name)
