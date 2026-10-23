@@ -194,7 +194,7 @@ The flattening is a single pass when the frame enters the pipeline. No fragment 
 | `provider` | keyword                 | canvas (registered provider name, required) |
 | `click`    | event vector            | button (dispatched on click) |
 | `change`   | event vector            | input (dispatched on text change) |
-| `key`      | event vector            | input (dispatched on key press) |
+| `key`      | event vector            | input (dispatched on key press, ctx `{:key "enter" :mods {...}}`). When `key` is set, Enter is the handler's: it does **not** insert `"\n"` or fire `change`. Without `key`, Enter inserts `"\n"` and fires `change` (multi-line editing). |
 | `mode`     | `"mouse"` `"fixed"`     | popout (positioning mode) |
 | `x`        | number                  | popout (fixed position x) |
 | `y`        | number                  | popout (fixed position y) |

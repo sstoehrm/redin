@@ -190,7 +190,7 @@ An editable text field. Drives its displayed value from the `value` attribute.
 | --------- | ---- | ------- | ----- |
 | `value` | string | -- | Current field content. **Required.** |
 | `change` | keyword | -- | Event dispatched when the value changes. |
-| `key` | keyword | -- | Event dispatched on key press (e.g. enter). |
+| `key` | keyword | -- | Event dispatched on key press (e.g. enter), ctx `{:key "enter" :mods {...}}`. When set, Enter is the handler's: it does **not** insert `"\n"` or fire `change`. Without `key`, Enter inserts `"\n"` and fires `change` (multi-line editing). |
 | `placeholder` | string | `""` | Hint text shown when value is empty. |
 | `margin` | `[t r b l]` px | `[0 0 0 0]` | Outer spacing reserved by the parent around this element. Counts toward fill sizing, centering, scroll extents, and intrinsic height; the element's own rect (and hit-test area) excludes it. |
 | `:agent` | `:read \| :edit` | -- | Optional. Pairs with `:id` to expose the node to the agent channel (REDIN_AGENT only). |

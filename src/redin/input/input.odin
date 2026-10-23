@@ -405,8 +405,16 @@ process_user_events :: proc(
 			// Process editing keys
 			#partial switch e.key {
 			case .ENTER:
-				insert_char('\n')
-				text_changed = true
+				// Review C9: with a :key handler, Enter belongs to the
+				// handler (submit-style input) — inserting "\n" here too
+				// would fire a :change right after the Key event and
+				// overwrite whatever the handler did (e.g. clearing the
+				// field). Only inputs without :key treat Enter as a
+				// newline (multi-line editing).
+				if len(n.key) == 0 {
+					insert_char('\n')
+					text_changed = true
+				}
 			case .BACKSPACE:
 				if e.mods.ctrl {
 					delete_back_word()

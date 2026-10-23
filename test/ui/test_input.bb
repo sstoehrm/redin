@@ -105,7 +105,7 @@
 ;; -- Multi-line input --
 ;;
 ;; The `:multiline-input` has :change but no :key, so Enter inserts a
-;; literal \n in the buffer (host/input/input.odin:293) and the
+;; literal \n in the buffer (src/redin/input/input.odin) and the
 ;; resulting value arrives via the :change handler. These tests
 ;; exercise that path via the dispatch API — no real typing is
 ;; possible from the dev-server HTTP surface today.
@@ -200,3 +200,30 @@
   (wait-for (state= "last-key" "right") {:timeout 2000})
   (input-key :escape)
   (wait-for (state= "last-key" "escape") {:timeout 2000}))
+
+;; -- Enter on an input with / without :key (review C9) --
+;;
+;; With a :key handler, Enter belongs to the handler: it must not also
+;; insert "\n" and fire :change (which would overwrite whatever the
+;; submit handler did, e.g. clearing the field). Without :key, Enter
+;; inserts "\n" and fires :change (multi-line editing).
+
+(deftest real-enter-with-key-handler-submits-and-clears
+  (dispatch ["event/reset"])
+  (wait-ms 200)
+  (focus-by-click! :test-input)
+  (dispatch ["event/input-change" {:value "item one"}])
+  (wait-for (state= "input-value" "item one") {:timeout 2000})
+  (wait-ms 100)
+  (input-key :enter)
+  (wait-for (state-pred "submitted" #(= (count %) 1) "submitted has 1 item") {:timeout 2000})
+  (wait-ms 300)
+  (assert-state "submitted" #(= % ["item one"]) "submitted item must not carry a newline")
+  (assert-state "input-value" #(= % "") "submit handler's clear must not be overwritten by a :change"))
+
+(deftest real-enter-without-key-handler-inserts-newline
+  (dispatch ["event/reset"])
+  (wait-ms 200)
+  (focus-by-click! :multiline-input)
+  (input-key :enter)
+  (wait-for (state= "multiline-value" "\n") {:timeout 2000}))
