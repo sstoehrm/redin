@@ -119,6 +119,13 @@ Use in a frame:
 
 ### Command-buffer primitives
 
+The command buffer is executed by the host after the Fennel draw function
+returns. Malformed arguments never abort the process: a non-table `?opts`
+(e.g. `(ctx.rect 0 0 10 10 5)`) is treated as `{}`, and `ctx.polygon`
+needs a list of `[x y]` vertex tables — a flat list (`[0 0 10 0 5 10]`),
+any non-table or non-finite vertex, or fewer than 3 vertices skips that
+polygon. Other commands keep drawing.
+
 #### `ctx.pixels`
 
     (ctx.pixels x y w h data ?opts)
