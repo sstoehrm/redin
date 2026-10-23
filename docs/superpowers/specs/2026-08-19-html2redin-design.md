@@ -134,7 +134,11 @@ dropped.
 | `br` | newline in the flattened text |
 | `hr` | `:vbox` with height 1 and a border aspect |
 
-`id` attributes are preserved as `:id :name`. Elements with `click`ish
+`id` attributes are preserved as `:id :name`; characters outside
+`[A-Za-z0-9_-]` are replaced by `-` with a warning, and an id with no
+identifier characters left is dropped (the output is Fennel code, so an id
+must never reach it raw — the emitter also refuses any keyword that is not
+a plain identifier). Elements with `click`ish
 semantics beyond `<button>` (e.g. `<a href>`) become `:text`; the
 `href` is noted in a warning so the developer wires a `:click` by hand.
 
