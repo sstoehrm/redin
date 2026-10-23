@@ -1228,6 +1228,24 @@ intrinsic_height :: proc(
 		return 0
 	}
 
+	// Only containers use the per-node intrinsic cache here. A leaf's
+	// intrinsic height is its margin-inclusive outer height, while
+	// node_preferred_height caches the *inner* (margin-exclusive) text
+	// height in the same single per-node slot. Sharing that slot let the
+	// two values collide (review C12): with zero horizontal margin both
+	// keys are equal and the margin was added twice; with a non-zero one
+	// each call evicted the other's entry and its cached wrap lines. The
+	// leaf path is cheap and its text measurement is already cached
+	// inside node_preferred_height, so leaves skip this layer.
+	is_container := false
+	#partial switch _ in nodes[idx] {
+	case types.NodeVbox, types.NodeHbox, types.NodeStack:
+		is_container = true
+	}
+	if !is_container {
+		return intrinsic_height_impl(idx, nodes, children_list, theme, available_width, depth)
+	}
+
 	if cached, ok := text_pkg.lookup_intrinsic(idx, available_width); ok {
 		return cached
 	}
