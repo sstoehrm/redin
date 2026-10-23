@@ -93,6 +93,13 @@ Renders a string of text. The text content is the last positional argument, not 
 
 Typography (`font-size`, `weight`, `color`) comes from `aspect`.
 
+Text is UTF-8. Fonts carry printable ASCII, Latin-1 Supplement, Latin
+Extended-A (U+0020–U+007E, U+00A0–U+017F) and common punctuation /
+symbols (– — ‘ ’ “ ” „ • … € ™ …); any other character renders as `?`.
+The full list is in [theme.md → Glyph coverage](theme.md#glyph-coverage).
+This applies to every text-drawing element (`text`, `input`, `button`,
+`markdown`).
+
 ```fennel
 [:text {:aspect :body} "Hello, world"]
 

@@ -119,6 +119,9 @@ jobs:
       - name: Run Odin text tests
         run: odin test src/redin/text -collection:lib=lib -collection:luajit=vendor/luajit -define:ODIN_TEST_THREADS=1
 
+      - name: Run Odin font tests
+        run: odin test src/redin/font -collection:lib=lib -collection:luajit=vendor/luajit
+
       - name: html2redin unit tests
         run: bb --config tools/html2redin/bb.edn test
 

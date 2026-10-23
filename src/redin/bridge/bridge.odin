@@ -1880,7 +1880,7 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 }
 
 // Reject any font-face path that could reach outside the project
-// directory. `rl.LoadFont` opens and parses the file immediately, so
+// directory. The font loader (`font.load_file`) opens and parses the file immediately, so
 // an unvalidated path lets a theme source (including PUT /aspects)
 // pick any file on disk the redin user can read. Allowed shape:
 // relative path, no leading `/`, no `..` segments, no NUL bytes.
@@ -1980,7 +1980,7 @@ load_font_faces :: proc(L: ^Lua_State, index: i32) {
 						continue
 					}
 					cpath := strings.clone_to_cstring(path, context.temp_allocator)
-					loaded := rl.LoadFont(cpath)
+					loaded := font.load_file(cpath)
 					if loaded.texture.id > 0 {
 						font.register(strings.clone(font_name), sk.style, loaded)
 					} else {

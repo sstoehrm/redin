@@ -54,7 +54,7 @@ Register custom fonts via a `:font-face` block in the theme. Each font name maps
    :code      {:font :mono :font-size 13}})
 ```
 
-`:font-face` is not an aspect -- it's processed separately to load font files before the theme is applied. Font files are loaded via Raylib's `LoadFont`.
+`:font-face` is not an aspect -- it's processed separately to load font files before the theme is applied. TTF/OTF files are loaded via Raylib's `LoadFontEx` at a 32px atlas size with the glyph set listed under [Glyph coverage](#glyph-coverage); other formats Raylib accepts (BMFont `.fnt`, image fonts) go through `LoadFont` and carry their own glyphs.
 
 Paths are validated before load: they must be relative (no leading `/`), contain no `..` segments, and no NUL bytes, and — when the file exists — must resolve (after following any symlinks) to a location inside the project's working directory. A symlink placed under the project that points outside it is rejected. Rejected paths are logged but don't abort the theme — the rest still applies. This matters because themes can come from `PUT /aspects` as well as Fennel code; the check keeps arbitrary filesystem paths out of the font loader regardless of source.
 
@@ -64,11 +64,30 @@ Three font families are bundled in the binary and available without `:font-face`
 
 | Name | Font | Styles |
 |------|------|--------|
-| `sans` | Inter | Regular, Bold |
+| `sans` | Inter | Regular, Bold, Italic |
 | `mono` | Fira Code | Regular, Bold |
-| `serif` | Noto Serif | Regular, Bold |
+| `serif` | Noto Serif | Regular, Bold, Italic |
 
 `sans` is the default -- elements without a `:font` property use it.
+
+### Glyph coverage
+
+Every TTF/OTF font — bundled and `:font-face` alike — is loaded with
+this fixed glyph set (built once in `src/redin/font/codepoints.odin`):
+
+- U+0020–U+007E — Basic Latin (printable ASCII)
+- U+00A0–U+00FF — Latin-1 Supplement (ä ö ü ß é ñ ç © ° …)
+- U+0100–U+017F — Latin Extended-A (ā č ę ł ő š ž …)
+- punctuation / symbols: – — ‘ ’ ‚ “ ” „ † ‡ • … ‰ ‹ › € ™
+
+Any other codepoint (Greek, Cyrillic, CJK, emoji, …) renders as `?`,
+and so does a codepoint in the set that the font file itself lacks. Of
+the bundled fonts, Inter has no U+00AD (soft hyphen) or U+0149 (ŉ), and
+Fira Code has no U+017F (ſ); raylib logs a
+`FONT: Requested codepoints glyphs found: [N/336]` warning at startup
+for those. Text measurement, wrapping, and input caret / selection all
+work in codepoints, so multi-byte UTF-8 characters in the set measure
+and edit with their real advance widths.
 
 ### Fallback
 
