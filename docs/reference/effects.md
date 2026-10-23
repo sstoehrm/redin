@@ -164,8 +164,8 @@ Spawn a child process. The result is routed back as an event.
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `cmd` | array of strings | yes | -- | Argv (no shell interpolation). |
-| `stdin` | string | no | `nil` | Bytes piped to the child's stdin. |
-| `timeout` | number | no | `30000` | Per-call timeout in milliseconds (includes child-process startup latency). On expiry the child is killed and the call fails. |
+| `stdin` | string | no | `nil` | Bytes piped to the child's stdin, fed until fully written or the child exits (whichever comes first). |
+| `timeout` | number | no | `30000` | Per-call timeout in milliseconds (includes child-process startup latency). Enforced until the child exits, even if it closed stdout/stderr early. On expiry the child is killed and the call fails. |
 | `max-output` | number | no | `16` | Per-call cap on combined stdout + stderr in MiB. On exceedance the child is killed. |
 | `on-success` | keyword | yes | -- | Event dispatched on `exit-code == 0`. |
 | `on-error` | keyword | yes | -- | Event dispatched on non-zero exit, kill, or host-side failure. |

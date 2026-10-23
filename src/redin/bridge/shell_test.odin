@@ -450,3 +450,87 @@ test_shell_destroy_waits_for_inflight_worker :: proc(t: ^testing.T) {
 	thread.join(h)
 	thread.destroy(h)
 }
+
+// Review C7: the read loop ran only `for !stdout_done || !stderr_done`. A
+// child that closes both pipes early and keeps running fell out of the loop
+// into an unbounded os.process_wait — the timeout never fired and the call
+// reported on-success with exit 0 once the child finally exited.
+@(private = "file")
+run_sh :: proc(id: string, script: string, stdin: string, timeout_ms: int) -> (Shell_Response, time.Duration) {
+	cmd := make([]string, 3)
+	cmd[0] = strings.clone("/bin/sh")
+	cmd[1] = strings.clone("-c")
+	cmd[2] = strings.clone(script)
+	req := Shell_Request {
+		id         = strings.clone(id),
+		cmd        = cmd,
+		stdin      = strings.clone(stdin),
+		timeout_ms = timeout_ms,
+	}
+	defer {
+		delete(req.id)
+		delete(req.stdin)
+		for s in req.cmd do delete(s)
+		delete(req.cmd)
+	}
+	t0 := time.now()
+	resp := execute_shell(req)
+	return resp, time.diff(t0, time.now())
+}
+
+@(test)
+test_shell_timeout_after_pipes_closed :: proc(t: ^testing.T) {
+	sync.lock(&g_test_shell_state_mutex)
+	defer sync.unlock(&g_test_shell_state_mutex)
+
+	resp, elapsed := run_sh("closed-pipes-timeout",
+		"exec >/dev/null 2>&1; /usr/bin/sleep 3", "", 500)
+	defer shell_response_destroy(&resp)
+
+	testing.expectf(t, resp.exit_code == -1,
+		"expected exit_code -1 (timeout), got %d after %v (review C7)", resp.exit_code, elapsed)
+	testing.expectf(t, strings.contains(resp.error_msg, "timeout"),
+		"expected 'timeout' in error_msg, got %q", resp.error_msg)
+	testing.expectf(t, elapsed < 2 * time.Second,
+		"timeout of 500 ms took %v to fire after the child closed its pipes (review C7)", elapsed)
+}
+
+// Review C7: once both output pipes hit EOF the loop also stopped feeding
+// stdin and closed it after ~one pipe buffer, so a child that redirected its
+// output before reading saw a truncated stdin (65536 of 1,000,000 bytes) and
+// the call still reported success.
+@(test)
+test_shell_full_stdin_after_pipes_closed :: proc(t: ^testing.T) {
+	sync.lock(&g_test_shell_state_mutex)
+	defer sync.unlock(&g_test_shell_state_mutex)
+	ignore_sigpipe()
+
+	big := make([]u8, 1_000_000)
+	defer delete(big)
+	for i in 0 ..< len(big) do big[i] = 'x'
+
+	resp, elapsed := run_sh("closed-pipes-stdin",
+		`exec >/dev/null 2>&1; /usr/bin/sleep .2; n=$(/usr/bin/wc -c); [ "$n" -eq 1000000 ] || exit 7`,
+		string(big), 10_000)
+	defer shell_response_destroy(&resp)
+
+	testing.expectf(t, resp.exit_code == 0,
+		"child must receive all 1000000 stdin bytes; exit_code %d error %q after %v (review C7)",
+		resp.exit_code, resp.error_msg, elapsed)
+}
+
+// The child's real exit status still comes through once it is reaped in the
+// loop rather than by the trailing blocking wait.
+@(test)
+test_shell_nonzero_exit_code_preserved :: proc(t: ^testing.T) {
+	sync.lock(&g_test_shell_state_mutex)
+	defer sync.unlock(&g_test_shell_state_mutex)
+
+	resp, _ := run_sh("exit-3", "echo out; echo err >&2; exit 3", "", 5_000)
+	defer shell_response_destroy(&resp)
+
+	testing.expect_value(t, resp.exit_code, 3)
+	testing.expect_value(t, resp.stdout, "out\n")
+	testing.expect_value(t, resp.stderr, "err\n")
+	testing.expect_value(t, resp.error_msg, "")
+}
