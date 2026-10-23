@@ -251,11 +251,14 @@ remap_input_state :: proc(m: []int) {
 	if active_idx >= 0 do active_idx = remap_one(m, active_idx)
 
 	// Copy the variant out, update it, and store the whole union back.
-	// In-place writes through `switch &s in <package global>` (or
-	// `&global.(T)`) did not reach the global in this package's
-	// `odin test` build on the pinned toolchain (dev-2026-10) — they do
-	// in the app build, where process_drag relies on them — so this
-	// unit-tested path doesn't depend on them.
+	// Odin dev-2026-10 miscompiles in-place writes through
+	// `switch &s in <package global>` (or `&global.(T)`) when the switch
+	// is in a different file from the global's declaration and the build
+	// uses separate modules (the default for -o:none/-o:minimal, i.e.
+	// `odin build`, `build-dev.sh`, `odin test`): `&s` binds a stack copy
+	// and the write is dropped. -o:speed / -use-single-module are fine.
+	// process_drag (drag.odin) and apply_scrollbar (scrollbar.odin) only
+	// write in place from the global's own file, which is unaffected.
 	switch s in scrollbar {
 	case Scrollbar_Hovering:
 		v := s

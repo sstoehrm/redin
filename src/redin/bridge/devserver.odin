@@ -1,6 +1,5 @@
 package bridge
 
-import "base:runtime"
 import "core:container/queue"
 import "core:crypto"
 import "core:encoding/hex"
@@ -538,9 +537,7 @@ handler_thread_proc :: proc(ds: ^Dev_Server) {
 	// temp_allocator to this thread's own default temp arena but leaves its
 	// teardown to us (see thread.create docs). handle_one_connection resets
 	// the arena per request; release its backing block on exit.
-	defer if context.temp_allocator.procedure == runtime.default_temp_allocator_proc {
-		runtime.default_temp_allocator_destroy((^runtime.Default_Temp_Allocator)(context.temp_allocator.data))
-	}
+	defer destroy_thread_temp_arena()
 	stack_buf: [8192]u8
 	for {
 		pc := conn_pop_blocking(&ds.accepted_conns)

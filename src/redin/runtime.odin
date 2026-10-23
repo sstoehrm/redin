@@ -204,6 +204,9 @@ run :: proc(cfg: Config) {
 	listeners: [dynamic]types.Listener
 	defer delete(listeners)
 
+	// frame_gen last handed to remap_frame_state (review C4).
+	remapped_gen: u64
+
 	for !rl.WindowShouldClose() &&
 	    !bridge.is_shutdown_requested(&b) &&
 	    !g_user_requested_shutdown {
@@ -217,7 +220,10 @@ run :: proc(cfg: Config) {
 			delete(listeners)
 			bridge.validate_drag_handles(b.nodes[:], b.children_list[:])
 			listeners = input.extract_listeners(b.paths, b.nodes, b.children_list, b.theme)
-			remap_frame_state(b.nodes[:], b.children_list[:])
+			if b.frame_gen != remapped_gen {
+				remap_frame_state(b.nodes[:], b.children_list[:])
+				remapped_gen = b.frame_gen
+			}
 		}
 
 		// --- Input (1/4): raw poll + user filter ---
@@ -263,7 +269,10 @@ run :: proc(cfg: Config) {
 			delete(listeners)
 			bridge.validate_drag_handles(b.nodes[:], b.children_list[:])
 			listeners = input.extract_listeners(b.paths, b.nodes, b.children_list, b.theme)
-			remap_frame_state(b.nodes[:], b.children_list[:])
+			if b.frame_gen != remapped_gen {
+				remap_frame_state(b.nodes[:], b.children_list[:])
+				remapped_gen = b.frame_gen
+			}
 		}
 
 		// --- Input (2/4): listener / focus / drag computation ---

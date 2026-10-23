@@ -58,6 +58,8 @@ thumb_geometry :: proc(
 	}
 }
 
+// Never write through `switch &s in scrollbar` from another file: Odin
+// dev-2026-10 binds a copy there in separate-module builds (see remap.odin).
 scrollbar: Scrollbar_State
 
 // True for the rest of the frame after apply_scrollbar consumed a

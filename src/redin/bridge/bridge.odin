@@ -51,6 +51,10 @@ Bridge :: struct {
 	hot_reload:      Hot_Reload,
 	dev_server:      Dev_Server,
 	frame_changed:   bool,
+	// Bumped on every frame change. frame_changed stays true until the
+	// next render_tick, so the runtime uses this to remap per-index input
+	// state once per new tree rather than on every frame that sees the flag.
+	frame_gen:       u64,
 	source_tree:     bool,
 }
 
@@ -214,6 +218,7 @@ check_hotreload :: proc(b: ^Bridge) {
 		hotreload_arm_retry(&b.hot_reload)
 	}
 	b.frame_changed = true
+	b.frame_gen += 1
 }
 
 // Walk the flat tree once: for each draggable with handle_off, ensure at
@@ -505,6 +510,7 @@ redin_push :: proc "c" (L: ^Lua_State) -> i32 {
 	}
 
 	g_bridge.frame_changed = true
+	g_bridge.frame_gen += 1
 	return 0
 }
 
