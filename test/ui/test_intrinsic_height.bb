@@ -22,3 +22,15 @@
     (assert (= (+ (double (:y t2)) lh) (double (:y after)))
             (str "'after' starts where t2 ends (no overlap), got "
                  (:y after) " vs t2 end " (+ (double (:y t2)) lh)))))
+
+(deftest hbox-intrinsic-measures-children-at-laid-out-width
+  (let [wrap (rect :wrap) ref (rect :ref) row (rect :row) after2 (rect :after2)]
+    (assert (= 40.0 (double (:w wrap))) (str "fill text gets the 40px remainder, got " (:w wrap)))
+    (assert (= 40.0 (double (:w ref))) "reference text laid out at 40px")
+    (assert (> (double (:h ref)) (double (:h after2)))
+            "reference text wraps to more than one line at 40px")
+    (assert (= (double (:h ref)) (double (:h row)))
+            (str "hbox intrinsic height = wrapped text height at its laid-out width: row "
+                 (:h row) " vs ref " (:h ref)))
+    (assert (= (+ (double (:y row)) (double (:h row))) (double (:y after2)))
+            "'after2' follows the row")))

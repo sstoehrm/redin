@@ -1292,11 +1292,30 @@ intrinsic_height_impl :: proc(
 		}
 		ch := children_list[idx]
 		if ch.length == 0 do return f32(pad[0]) + f32(pad[2])
-		inner_w := available_width - f32(pad[1]) - f32(pad[3]) - n.gap * f32(int(ch.length) - 1)
-		share := inner_w / f32(ch.length)
+		// Measure each child at the width layout_node will actually give
+		// it: fixed-width children get their outer preferred width, fill
+		// children split what remains (none for scroll-x, which doesn't
+		// fill). An even inner_w/n share measured wrapped text at the
+		// wrong width whenever siblings had explicit widths.
+		inner_w := available_width - f32(pad[1]) - f32(pad[3])
+		fixed_total := n.gap * f32(int(ch.length) - 1)
+		fill_count := 0
+		for i in 0 ..< int(ch.length) {
+			w := outer_preferred_width(int(ch.value[i]), nodes)
+			if w > 0 do fixed_total += w
+			else     do fill_count += 1
+		}
+		fill_size: f32 = 0
+		if n.overflow != "scroll-x" && fill_count > 0 {
+			remaining := inner_w - fixed_total
+			if remaining > 0 do fill_size = remaining / f32(fill_count)
+		}
 		max_h: f32 = 0
 		for i in 0 ..< int(ch.length) {
-			ch_h := intrinsic_height(int(ch.value[i]), nodes, children_list, theme, share, depth + 1)
+			child := int(ch.value[i])
+			w := outer_preferred_width(child, nodes)
+			if w <= 0 do w = fill_size
+			ch_h := intrinsic_height(child, nodes, children_list, theme, w, depth + 1)
 			if ch_h > max_h do max_h = ch_h
 		}
 		return max_h + f32(pad[0]) + f32(pad[2])
