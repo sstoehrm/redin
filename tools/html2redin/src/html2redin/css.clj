@@ -99,11 +99,32 @@
                               " block skipped"))
                   (recur (skip-block text i) order rules))
               (let [open (str/index-of text "{" i)]
-                (if (nil? open)
+                (cond
+                  (nil? open)
                   {:rules rules :warnings @warnings}
+
+                  ;; A `;` before the next `{` means a declaration outside
+                  ;; any block (e.g. `color: red;` at top level): skip-block
+                  ;; stops just past that `;`, so close < open (review C14a).
+                  ;; Warn and resume after it instead of slicing a negative
+                  ;; range.
+                  (<= (skip-block text i) open)
+                  (let [close (skip-block text i)]
+                    (swap! warnings conj
+                           (str src ":" line " warning: \""
+                                (str/trim (subs text i (dec close)))
+                                "\" outside any rule — skipped"))
+                    (recur close order rules))
+
+                  :else
                   (let [close (skip-block text i)
                         sel-text (str/trim (subs text i open))
-                        decls (parse-decls (subs text (inc open) (dec close)))
+                        ;; close is just past the matching `}`, or the end of
+                        ;; text for an unterminated block -- whose last char
+                        ;; is then a declaration char (or the `{` itself),
+                        ;; not a brace to drop.
+                        body-end (if (= \} (nth text (dec close))) (dec close) close)
+                        decls (parse-decls (subs text (inc open) (max (inc open) body-end)))
                         parsed (for [sel (str/split sel-text #",")]
                                  [(str/trim sel) (parse-selector sel)])
                         good (for [[_ p] parsed :when p] p)

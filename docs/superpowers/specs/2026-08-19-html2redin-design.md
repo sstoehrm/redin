@@ -146,7 +146,10 @@ semantics beyond `<button>` (e.g. `<a href>`) become `:text`; the
 
 Aspects come from class names: a class whose merged declarations
 contain at least one mappable visual property becomes an aspect of the
-sanitized same name (`.card` → `:card`); `:hover`/`:focus`/`:active`
+sanitized same name (`.card` → `:card`; a class with no ASCII identifier
+characters, e.g. `.日本`, can't name an aspect and is ignored for naming
+with a warning — an element left without a usable class gets a numbered
+tag-derived aspect like `:p-1`); `:hover`/`:focus`/`:active`
 rules become `#` variants (`card#hover`). Multi-class elements get a
 composed aspect list (`[:card :highlight]`).
 
