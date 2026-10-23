@@ -260,6 +260,20 @@ run :: proc(cfg: Config) {
 
 		// --- Input (2/4): listener / focus / drag computation ---
 		s_input2a := profile.begin(.Input)
+
+		// Scrollbar first (review C6): it sets scrollbar_consumed_press for
+		// *this* frame's press, which gates CLICK/FOCUS (get_user_events),
+		// focus/#active (apply_listeners), app drags (process_drag), text
+		// selection and caret placement below. Running it after those
+		// phases let a thumb/gutter press also click whatever lies under
+		// the gutter. Content rects, not outer node rects — the drawn
+		// scrollbar lives inside the padding, so hit-testing must use the
+		// same rect.
+		input.apply_scrollbar(
+			input_events[:], b.nodes[:], node_content_rects[:],
+			node_scroll_info, &scroll_offsets, b.theme,
+		)
+
 		user_events := input.get_user_events(input_events, listeners, node_rects[:])
 		defer delete(user_events)
 		applied_events := input.apply_listeners(listeners, input_events, node_rects[:])
@@ -287,14 +301,6 @@ run :: proc(cfg: Config) {
 		defer delete(drag_events)
 
 		input.process_text_selection(input_events[:], listeners[:], b.nodes[:], b.paths[:], node_rects[:], b.theme)
-
-		// Content rects, not outer node rects — the drawn scrollbar lives
-		// inside the padding, so hit-testing must use the same rect.
-		scrollbar_consumed := input.apply_scrollbar(
-			input_events[:], b.nodes[:], node_content_rects[:],
-			node_scroll_info, &scroll_offsets, b.theme,
-		)
-		_ = scrollbar_consumed // hooked up by gating tasks (10) later
 
 		input.set_hover_cursor(listeners[:], node_rects[:])
 		profile.end(s_input2a)

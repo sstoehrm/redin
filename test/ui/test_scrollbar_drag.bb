@@ -155,3 +155,75 @@
       (input-mouse-up :left))
     (finally
       (input-release))))
+
+;; -- Review C6: a press consumed by the scrollbar must not reach the
+;;    full-width row buttons lying under the gutter. apply_scrollbar used
+;;    to run after get_user_events / apply_listeners, so the press frame
+;;    saw the previous frame's scrollbar_consumed_press (false) and the
+;;    row under the thumb fired one :click.
+
+(defn- clicks [] (get-state "clicks"))
+
+(deftest row-click-away-from-gutter-counts
+  ;; Control: the rows really are clickable, so the gated tests below
+  ;; prove gating rather than a dead fixture.
+  (input-scroll 640 150 100)
+  (wait-ms 100)
+  (let [before (clicks)]
+    (input-takeover)
+    (try
+      (input-mouse-move 640 100)
+      (wait-ms 80)
+      (input-mouse-down :left)
+      (wait-ms 80)
+      (input-mouse-up :left)
+      (wait-ms 80)
+      (finally
+        (input-release)))
+    (wait-for (state= "clicks" (inc before)) {:timeout 2000})))
+
+(deftest thumb-drag-does-not-click-row
+  (input-scroll 640 150 100)
+  (wait-ms 100)
+  (let [before (clicks)]
+    (input-takeover)
+    (try
+      (let [{:keys [y0 y1]} (thumb-rect)
+            ty (int (+ y0 (/ (- y1 y0) 2)))]
+        (input-mouse-move 1278 ty)
+        (wait-ms 80)
+        (input-mouse-down :left)
+        (wait-ms 80)
+        (input-mouse-move 1278 (+ ty 50))
+        (wait-ms 80)
+        (input-mouse-up :left)
+        (wait-ms 150)
+        (assert (> (offset) 200)
+                (str "thumb drag should scroll the pane; got " (offset)))
+        (assert (= before (clicks))
+                (str "thumb drag must not click the row under it; clicks "
+                     before " -> " (clicks))))
+      (finally
+        (input-release)))))
+
+(deftest gutter-page-click-does-not-click-row
+  (input-scroll 640 150 100)
+  (wait-ms 100)
+  (let [before (clicks)]
+    (input-takeover)
+    (try
+      (let [{:keys [y1]} (thumb-rect)
+            cy (int (+ y1 10))]
+        (input-mouse-move 1278 cy)
+        (wait-ms 80)
+        (input-mouse-down :left)
+        (wait-ms 80)
+        (input-mouse-up :left)
+        (wait-ms 150)
+        (assert (> (offset) 150)
+                (str "gutter click should page down; got " (offset)))
+        (assert (= before (clicks))
+                (str "gutter page-click must not click the row under it; clicks "
+                     before " -> " (clicks))))
+      (finally
+        (input-release)))))

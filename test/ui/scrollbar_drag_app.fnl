@@ -7,6 +7,9 @@
 ;; Layout:
 ;;   sibling above: y=0..50, red (smoke check that clipping holds)
 ;;   list:          y=50..250, scroll-y, 200px tall, content 900px
+;;   rows:          full-width buttons, so the scrollbar gutter overlaps
+;;                  them — a thumb press must not also click the row
+;;                  underneath (review C6). Clicks are counted in :clicks.
 ;;   thumb:         visible width 4px at x=1276 (window 1280 - 4)
 ;;     thumb_h = 200 * (200 / 900) ≈ 44px
 ;;     gutter is y=50..250 (200px tall)
@@ -20,8 +23,10 @@
                       :list    {:bg [40 40 40] :padding [0 0 0 0]}
                       :row     {:bg [70 70 70] :padding [0 0 0 0]}})
 
-(dataflow.init {})
+(dataflow.init {:clicks 0})
 (global redin_get_state (. dataflow :_get-raw-db))
+
+(reg-handler :event/row-click (fn [db _] (update db :clicks #(+ $1 1))))
 
 (global main_view
         (fn []
@@ -33,4 +38,6 @@
              (icollect [i v (ipairs [1 2 3 4 5 6 7 8 9 10
                                      11 12 13 14 15 16 17 18 19 20
                                      21 22 23 24 25 26 27 28 29 30])]
-               [:vbox {:aspect :row :width :full :height 30}])]]]))
+               [:button {:aspect :row :width :full :height 30
+                         :click [:event/row-click]}
+                (.. "row " v)])]]]))

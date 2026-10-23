@@ -480,6 +480,7 @@ process_user_events :: proc(
 			}
 
 		case types.MouseEvent:
+			if scrollbar_consumed_press do continue
 			if focused_idx >= 0 && focused_idx < len(node_rects) {
 				rect := node_rects[focused_idx]
 				pt := rl.Vector2{e.x, e.y}
