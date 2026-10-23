@@ -30,3 +30,17 @@ test/integration/testapp/
 
 # UI test screenshot artifacts
 test/ui/artifacts/
+
+# Local release.sh output
+dist/
+
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+
+# Editors / IDEs
+.idea/
+.vscode/
+*.swp
+*~

@@ -104,6 +104,8 @@ odin build src/cmd/redin -collection:lib=lib -collection:luajit=vendor/luajit -o
 
 The [Dev Server reference](docs/reference/dev-server.md#runtime-caveats) covers the filesystem-trust and token-as-capability caveats in more detail.
 
+To report a vulnerability, see [SECURITY.md](SECURITY.md).
+
 ## Test
 
 ```bash
@@ -160,3 +162,18 @@ docs/                    Documentation
 ### Specs
 - [Core API](docs/core-api.md) -- frame format, events, host functions, dev server
 - [App API](docs/app-api.md) -- dataflow, effects, view runner
+
+## Privacy
+
+redin collects no personal data: no telemetry, analytics, crash reporting or
+accounts. The only network traffic is what an app itself requests through the
+`:http` effect, and the dev server binds to loopback only.
+
+## License
+
+redin is released under the [MIT License](LICENSE). This covers the code and
+everything else in this repository not otherwise noted, including the
+documentation and the logos and icons in `docs/assets/` and `src/redin/assets/`.
+
+Bundled third-party software and the embedded fonts (SIL Open Font License
+1.1) keep their own licenses; see [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md).

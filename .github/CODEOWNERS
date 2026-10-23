@@ -1,0 +1,14 @@
+# Default owner for everything.
+*                       @sstoehrm
+
+# Called out explicitly: CI and release pipeline, dependency pins, and the
+# security-relevant bridge (dev server, HTTP client, shell, file loading).
+/.github/               @sstoehrm
+/lib/                   @sstoehrm
+/vendor/                @sstoehrm
+/.gitmodules            @sstoehrm
+/src/redin/bridge/      @sstoehrm
+/release.sh             @sstoehrm
+/build-dev.sh           @sstoehrm
+/scripts/               @sstoehrm
+/SECURITY.md            @sstoehrm
