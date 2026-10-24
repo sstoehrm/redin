@@ -194,7 +194,7 @@ The flattening is a single pass when the frame enters the pipeline. No fragment 
 | `provider` | keyword                 | canvas (registered provider name, required) |
 | `click`    | event vector            | button (dispatched on click) |
 | `change`   | event vector            | input (dispatched on text change) |
-| `key`      | event vector            | input (dispatched on key press) |
+| `key`      | event vector            | input (dispatched on key press, ctx `{:key "enter" :mods {...}}`). When `key` is set, Enter is the handler's: it does **not** insert `"\n"` or fire `change`. Without `key`, Enter inserts `"\n"` and fires `change` (multi-line editing). |
 | `mode`     | `"mouse"` `"fixed"`     | popout (positioning mode) |
 | `x`        | number                  | popout (fixed position x) |
 | `y`        | number                  | popout (fixed position y) |
@@ -227,12 +227,22 @@ A paragraph with **bold** and _italic_ and `code` text.
 | `:width`, `:height` | size | Sizing of the wrapper. |
 | `:overflow` | keyword | Forwarded to the wrapper. `:scroll-y` for tall blocks. |
 
-V1 syntax: paragraphs (blank line), soft breaks (two-space EOL),
-inline `**bold**` / `_italic_` / `*italic*` / `` `code` ``,
-ATX headings `#`–`######` at column 0, flat unordered lists (`-`,
-`*` at column 0) and flat ordered lists (`<digit>+. ` at column 0).
+V1 syntax: paragraphs (separated by a blank or whitespace-only line),
+soft breaks (two-space EOL), inline `**bold**` / `_italic_` / `*italic*` /
+`` `code` ``, ATX headings `#`–`######` at column 0, flat unordered lists
+(`-`, `*` at column 0) and flat ordered lists (`<digit>+. ` at column 0).
 Nested lists, code blocks, links, images, tables, and nested inline
 emphasis are not supported in v1.
+
+Block rules: CRLF / CR line endings are treated as LF. A heading is
+always exactly one line. A list may start directly after a paragraph line
+(no blank line needed); an indented line (leading space or tab) inside a
+list continues the current item, while any other non-marker line ends the
+list and starts a new paragraph. Switching between ordered and unordered
+markers starts a new list. `_` emphasis follows the CommonMark intraword
+rule — it only opens at the start of a word and closes at the end of one,
+so `snake_case_name` and `__init__` stay literal; `*` emphasis is not
+restricted.
 
 The styling of `:md/h1` … `:md/h6`, `:md/body`, `:md/list`,
 `:md/list-item`, `:md/list-marker`, and `:md/code` aspects ships
@@ -368,6 +378,10 @@ Each frame, after `redin.push(frame)` delivers a new tree, the host:
 
 A single global `focused_idx` tracks which node has keyboard focus. Clicking a `FocusListener` node sets focus; clicking elsewhere clears it. The renderer uses focus state to look up `aspect#focus` theme variants (e.g. changed border color on a focused input).
 
+### Node identity across re-renders
+
+Focus, the `#active` press state, scroll offsets, an in-progress scrollbar drag and an in-progress app drag are attached to a node, not to its position in the flattened tree. When a re-render inserts or removes nodes (e.g. `(when show [:text "banner"])` toggling before an input), the host aligns the previous tree with the new one and moves that state to the same node's new position. Siblings are matched by element type plus their behavioural attributes — event names (`:change`, `:key`, `:click`, `:draggable`/`:dropable`/`:drag-over` events), `:overflow`, canvas `:provider` — not by `:aspect`, `:value` or text content, so an input that switches to an error aspect while being typed into keeps its focus. If a node has no counterpart in the new tree, its state is dropped: the input loses focus (keystrokes go nowhere rather than to another input), a drag from it is cancelled, its scroll offset is forgotten. Siblings that are indistinguishable by those attributes (e.g. rows of a list sharing the same events) are matched by order.
+
 ---
 
 ## Theme (aspects)
@@ -450,7 +464,10 @@ Define only the properties that change:
 3. Merge `:button#hover` (if exists)
 4. Merge `:danger#hover` (if exists)
 
-Missing aspects resolve to `{}` (no error).
+Missing aspects resolve to `{}` (no error). When several states apply at
+once, they stack in the usual order (`#focus` < `#hover` < `#active`), each
+state merging the listed aspects left-to-right. A one-element list is the
+same as the plain keyword; non-keyword entries are ignored.
 
 ### Naming conventions
 
@@ -595,7 +612,7 @@ Calls into Lua (`view.get-last-push`) to retrieve the last pushed frame. Each no
 | GET    | `/state`       | --   | Full app-db (calls `redin_get_state` global) |
 | GET    | `/state/:path` | --   | Nested value at dot-separated path       |
 
-Path navigation: `/state/items.0.text` walks into the state table. Note: the `redin_get_state` global must be defined by the app for these endpoints to return data.
+Path navigation: `/state/items.0.text` walks into the state table. Each segment is looked up as a string key first; a segment that is a non-negative integer and finds no string key is retried as a **0-based** array index (so `items.0` is the first element, matching the JSON array `/state` returns). Note: the `redin_get_state` global must be defined by the app for these endpoints to return data.
 
 ### Selection
 

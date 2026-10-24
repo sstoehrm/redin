@@ -212,11 +212,19 @@ end)
 
 First run with `idx = 1`: depends on `[:selected-index]` and `[:items 1 :text]`. User selects item 3: `[:selected-index]` changes, sub recomputes, now depends on `[:selected-index]` and `[:items 3 :text]`. The old dependency on `[:items 1 :text]` is dropped.
 
+**Subscriptions built on subscriptions.** A query fn may call `subscribe` on another sub. The inner sub's dependencies (whether it was recomputed or served from cache) are added to the outer sub's dependencies, so the outer sub invalidates whenever any path it read transitively changes:
+
+```fennel
+(reg-sub :sub/counter (fn [db] (get db :counter)))
+(reg-sub :sub/double  (fn [db] (* 2 (subscribe :sub/counter))))
+;; :sub/double depends on [:counter] via :sub/counter.
+```
+
 No explicit subscription graph needed. No Layer 2/3 distinction. No wiring. You just read what you need and the framework figures out the dependencies.
 
 ### `subscribe(sub-key)`
 
-Read the current value of a subscription. Returns the cached value if none of the subscription's tracked paths have changed. Otherwise recomputes.
+Read the current value of a subscription. Returns the cached value if none of the subscription's tracked paths have changed. Otherwise recomputes. This holds between flushes too: a `subscribe` from an event handler after a write to one of the sub's tracked paths recomputes rather than returning the pre-write value.
 
 ```fennel
 (let [count (subscribe :sub/counter)

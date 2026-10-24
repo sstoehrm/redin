@@ -57,9 +57,12 @@
                            (str/replace #"^[\"']|[\"']$" "")))
           (get style :line-height)
           (as-> m (let [lh (get style :line-height)]
-                    (if (re-matches #"[\d.]+" lh)
+                    ;; One optional decimal point with digits after it --
+                    ;; `[\d.]+` let "1.2.3" / "." through to parseDouble,
+                    ;; whose NumberFormatException aborted the run (C14b).
+                    (if (re-matches #"\d+(?:\.\d+)?|\.\d+" lh)
                       (assoc m :line-height (Double/parseDouble lh))
-                      (do (warn! (str "line-height " lh " not unitless — dropped")) m))))
+                      (do (warn! (str "line-height " lh " not a unitless number — dropped")) m))))
           (get style :opacity)
           (as-> m (try (assoc m :opacity (Double/parseDouble (get style :opacity)))
                        (catch Exception _ m)))
@@ -153,8 +156,22 @@
             (let [ctx (str source ":" (:line el))
                   own-vis (visual-subset (:own-style el))
                   class-vis (visual-subset (:class-style el))
-                  classes (vec (remove str/blank?
-                                       (str/split (get-in el [:attrs "class"] "") #"\s+")))
+                  raw-classes (remove str/blank?
+                                      (str/split (get-in el [:attrs "class"] "") #"\s+"))
+                  ;; A class with no ASCII identifier characters (e.g.
+                  ;; `日本`) sanitizes to "" and would name the aspect `:`,
+                  ;; which isn't loadable Fennel (C14c). Such classes can't
+                  ;; name an aspect, so they're ignored for naming; an
+                  ;; element left with none is treated as classless and gets
+                  ;; a numbered tag-derived aspect (`:p-1`).
+                  {classes true unnamable false}
+                  (group-by #(boolean (seq (sanitize %))) raw-classes)
+                  classes (vec classes)
+                  _ (when (= mode :faithful)
+                      (doseq [c unnamable]
+                        (swap! warnings conj
+                               (str ctx " warning: class \"" c "\" has no identifier"
+                                    " characters — ignored for aspect naming"))))
                   faithful? (and (seq classes) (= own-vis class-vis))
                   ;; A classless leaf with no own declarations at all can
                   ;; still visually differ from "unstyled" via inheritance

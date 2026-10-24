@@ -93,6 +93,13 @@ Renders a string of text. The text content is the last positional argument, not 
 
 Typography (`font-size`, `weight`, `color`) comes from `aspect`.
 
+Text is UTF-8. Fonts carry printable ASCII, Latin-1 Supplement, Latin
+Extended-A (U+0020–U+007E, U+00A0–U+017F) and common punctuation /
+symbols (– — ‘ ’ “ ” „ • … € ™ …); any other character renders as `?`.
+The full list is in [theme.md → Glyph coverage](theme.md#glyph-coverage).
+This applies to every text-drawing element (`text`, `input`, `button`,
+`markdown`).
+
 ```fennel
 [:text {:aspect :body} "Hello, world"]
 
@@ -151,13 +158,23 @@ A paragraph with **bold** text.
 - second"]
 ```
 
-V1 supports: paragraphs (blank line), soft breaks (two-space EOL),
-inline `**bold**` / `_italic_` / `*italic*` / `` `inline code` ``,
-ATX headings `#`–`######` at column 0, flat unordered (`-`, `*`) and
-ordered (`<digit>+. `) lists at column 0. Nested lists, code blocks,
-links, images, tables, and nested inline emphasis are not supported
+V1 supports: paragraphs (separated by a blank or whitespace-only line),
+soft breaks (two-space EOL), inline `**bold**` / `_italic_` / `*italic*` /
+`` `inline code` ``, ATX headings `#`–`######` at column 0, flat unordered
+(`-`, `*`) and ordered (`<digit>+. `) lists at column 0. Nested lists, code
+blocks, links, images, tables, and nested inline emphasis are not supported
 in v1. Defaults for `:md/*` aspects ship with the framework; override
 via `(theme.set-theme {…})`.
+
+Block rules: CRLF / CR line endings are treated as LF. A heading is
+always exactly one line. A list may start directly after a paragraph line
+(no blank line needed); an indented line (leading space or tab) inside a
+list continues the current item, while any other non-marker line ends the
+list and starts a new paragraph. Switching between ordered and unordered
+markers starts a new list. `_` emphasis follows the CommonMark intraword
+rule — it only opens at the start of a word and closes at the end of one,
+so `snake_case_name` and `__init__` stay literal; `*` emphasis is not
+restricted.
 
 ---
 
@@ -173,7 +190,7 @@ An editable text field. Drives its displayed value from the `value` attribute.
 | --------- | ---- | ------- | ----- |
 | `value` | string | -- | Current field content. **Required.** |
 | `change` | keyword | -- | Event dispatched when the value changes. |
-| `key` | keyword | -- | Event dispatched on key press (e.g. enter). |
+| `key` | keyword | -- | Event dispatched on key press (e.g. enter), ctx `{:key "enter" :mods {...}}`. When set, Enter is the handler's: it does **not** insert `"\n"` or fire `change`. Without `key`, Enter inserts `"\n"` and fires `change` (multi-line editing). |
 | `placeholder` | string | `""` | Hint text shown when value is empty. |
 | `margin` | `[t r b l]` px | `[0 0 0 0]` | Outer spacing reserved by the parent around this element. Counts toward fill sizing, centering, scroll extents, and intrinsic height; the element's own rect (and hit-test area) excludes it. |
 | `:agent` | `:read \| :edit` | -- | Optional. Pairs with `:id` to expose the node to the agent channel (REDIN_AGENT only). |

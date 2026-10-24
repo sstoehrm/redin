@@ -126,3 +126,16 @@
     (is (= 200.0 (:width (second node))))
     (is (= 100.0 (:height (second node))))
     (is (some #(re-find #"width: 50% unmappable" %) warnings))))
+
+;; review S1: the single-quoted attr regex admits spaces/parens/quotes, so an
+;; id must be reduced to identifier characters before becoming a keyword.
+(deftest ids-sanitized
+  (let [{:keys [node warnings]}
+        (convert "<div id='x (os.execute \"touch pwned\") :z'><p>a</p></div>" "")]
+    (is (= :x-os-execute-touch-pwned-z (:id (second node))))
+    (is (some #(re-find #"id .* sanitized" %) warnings)))
+  (let [{:keys [node]} (convert "<div id=Main_box-2><p>a</p></div>" "")]
+    (is (= :Main_box-2 (:id (second node)))))
+  (let [{:keys [node warnings]} (convert "<div id='日本'><p>a</p></div>" "")]
+    (is (not (contains? (second node) :id)))
+    (is (some #(re-find #"id .* dropped" %) warnings))))

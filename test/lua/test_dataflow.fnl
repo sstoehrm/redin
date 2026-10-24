@@ -539,4 +539,92 @@
   (assert (= (dataflow._get-tracking) nil)
           "tracking restored to nil after a query error"))
 
+;; --- review C5: nested subscriptions and pre-flush subscribe ---
+;; A sub whose query fn calls subscribe must inherit the inner sub's deps,
+;; whether the inner sub was just recomputed or served from cache —
+;; otherwise the outer sub records no deps and never invalidates.
+
+(fn t.test-nested-sub-invalidates-when-inner-fresh []
+  (setup)
+  (dataflow.init {:counter 1})
+  (dataflow.reg-sub :sub/c (fn [d] (dataflow.get d :counter)))
+  (dataflow.reg-sub :sub/double (fn [d] (* 2 (dataflow.subscribe :sub/c))))
+  (assert (= (dataflow.subscribe :sub/double) 2) "initial")
+  (dataflow.reg-handler :inc (fn [d e] (dataflow.update d :counter #(+ $1 1))))
+  (dataflow.dispatch [:inc])
+  (dataflow.flush)
+  (let [v (dataflow.subscribe :sub/double)]
+    (assert (= v 4) (.. "outer sub recomputes after inner dep change; got "
+                        (tostring v)))))
+
+(fn t.test-nested-sub-invalidates-when-inner-cached []
+  (setup)
+  (let [db (dataflow.init {:counter 1})]
+    (dataflow.reg-sub :sub/c (fn [d] (dataflow.get d :counter)))
+    (dataflow.reg-sub :sub/double (fn [d] (* 2 (dataflow.subscribe :sub/c))))
+    ;; inner computed first, so the outer's first run hits the cache
+    (assert (= (dataflow.subscribe :sub/c) 1) "inner initial")
+    (assert (= (dataflow.subscribe :sub/double) 2) "outer initial")
+    (dataflow.assoc db :counter 5)
+    (dataflow.flush)
+    (let [v (dataflow.subscribe :sub/double)]
+      (assert (= v 10) (.. "outer sub recomputes with cached inner; got "
+                           (tostring v))))))
+
+(fn t.test-nested-sub-three-levels []
+  (setup)
+  (let [db (dataflow.init {:n 1 :unrelated 0})]
+    (dataflow.reg-sub :sub/n (fn [d] (dataflow.get d :n)))
+    (dataflow.reg-sub :sub/n2 (fn [d] (* 2 (dataflow.subscribe :sub/n))))
+    (dataflow.reg-sub :sub/n4 (fn [d] (* 2 (dataflow.subscribe :sub/n2))))
+    (assert (= (dataflow.subscribe :sub/n4) 4) "initial")
+    (dataflow.assoc db :n 3)
+    (dataflow.flush)
+    (assert (= (dataflow.subscribe :sub/n4) 12) "grand-outer recomputes")
+    ;; unrelated writes still leave it cached
+    (var calls 0)
+    (dataflow.reg-sub :sub/count-n
+      (fn [d] (set calls (+ calls 1)) (dataflow.subscribe :sub/n)))
+    (dataflow.subscribe :sub/count-n)
+    (dataflow.assoc db :unrelated 1)
+    (dataflow.flush)
+    (dataflow.subscribe :sub/count-n)
+    (assert (= calls 1) "unrelated write does not invalidate nested sub")))
+
+;; docs: subscribe "returns the cached value if none of the subscription's
+;; tracked paths have changed. Otherwise recomputes." — that must hold
+;; between a write and the next flush too (e.g. subscribe from a handler).
+(fn t.test-subscribe-in-handler-sees-pending-change []
+  (setup)
+  (dataflow.init {:a 1})
+  (dataflow.reg-sub :sub/a (fn [d] (dataflow.get d :a)))
+  (dataflow.subscribe :sub/a)
+  (dataflow.reg-handler :set (fn [d e] (dataflow.assoc d :a 5)))
+  (dataflow.reg-handler :read
+    (fn [d e] (dataflow.assoc d :seen (dataflow.subscribe :sub/a))))
+  (dataflow.dispatch [:set])
+  (dataflow.dispatch [:read])
+  (let [v (rawget (dataflow._get-raw-db) :seen)]
+    (assert (= v 5) (.. "subscribe in handler is fresh; got " (tostring v)))))
+
+(fn t.test-subscribe-pre-flush-recomputes-once []
+  (setup)
+  (var calls 0)
+  (let [db (dataflow.init {:a 1 :b 1})]
+    (dataflow.reg-sub :sub/a
+      (fn [d] (set calls (+ calls 1)) (dataflow.get d :a)))
+    (dataflow.subscribe :sub/a)
+    (dataflow.assoc db :a 2)
+    (assert (= (dataflow.subscribe :sub/a) 2) "pre-flush recompute")
+    (assert (= (dataflow.subscribe :sub/a) 2) "cached again")
+    (dataflow.assoc db :b 2)
+    (dataflow.subscribe :sub/a)
+    (assert (= calls 2) (.. "recomputed once per relevant change; calls "
+                            (tostring calls)))
+    ;; the flush after a pre-flush recompute must not force another one
+    (dataflow.flush)
+    (dataflow.subscribe :sub/a)
+    (assert (= calls 2) (.. "flush does not re-dirty an up-to-date sub; calls "
+                            (tostring calls)))))
+
 t

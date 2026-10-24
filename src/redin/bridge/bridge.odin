@@ -43,11 +43,18 @@ Bridge :: struct {
 	// with siblings. Keyed by the wrapper's flat index, value is N.
 	markdown_skips:  map[i32]i32,
 	theme:           map[string]types.Theme,
+	// Composed aspect keys ("a b" for `:aspect [:a :b]`) seen so far;
+	// owned keys. See aspect_compose.odin.
+	composed_aspects: map[string]struct{},
 	http_client:     Http_Client,
 	shell_client:    Shell_Client,
 	hot_reload:      Hot_Reload,
 	dev_server:      Dev_Server,
 	frame_changed:   bool,
+	// Bumped on every frame change. frame_changed stays true until the
+	// next render_tick, so the runtime uses this to remap per-index input
+	// state once per new tree rather than on every frame that sees the flag.
+	frame_gen:       u64,
 	source_tree:     bool,
 }
 
@@ -171,11 +178,8 @@ destroy :: proc(b: ^Bridge) {
 	delete(b.markdown_skips)
 	// Themes own a heap `font` string (set in redin_set_theme via
 	// lua_get_string_field). Delete both the key and the font value.
-	for k, v in b.theme {
-		delete(k)
-		if len(v.font) > 0 do delete(v.font)
-	}
-	delete(b.theme)
+	free_theme_map(&b.theme)
+	free_composed_aspects(b)
 	lua_close(b.L)
 }
 
@@ -214,6 +218,7 @@ check_hotreload :: proc(b: ^Bridge) {
 		hotreload_arm_retry(&b.hot_reload)
 	}
 	b.frame_changed = true
+	b.frame_gen += 1
 }
 
 // Walk the flat tree once: for each draggable with handle_off, ensure at
@@ -505,6 +510,7 @@ redin_push :: proc "c" (L: ^Lua_State) -> i32 {
 	}
 
 	g_bridge.frame_changed = true
+	g_bridge.frame_gen += 1
 	return 0
 }
 
@@ -521,12 +527,11 @@ redin_set_theme :: proc "c" (L: ^Lua_State) -> i32 {
 		lua_pop(L, 1)
 
 		// Clear old theme (keys and the per-entry `font` allocation).
-		for k, v in g_bridge.theme {
-			delete(k)
-			if len(v.font) > 0 do delete(v.font)
-		}
-		delete(g_bridge.theme)
+		free_theme_map(&g_bridge.theme)
 		g_bridge.theme = lua_to_theme(L, 1)
+		// Review C13: rebuild the synthetic entries for composed aspects
+		// (`:aspect [:a :b]`) against the new theme.
+		reinstall_composed_aspects(g_bridge)
 
 		// Theme params (font_size, lh_ratio, font atlas) feed cached
 		// intrinsic heights; invalidate since the cache is idx-keyed
@@ -705,9 +710,78 @@ sanitize_pixels_scale :: proc(v: f32) -> f32 {
 	return 1
 }
 
-// Read a color [r,g,b] or [r,g,b,a] from a table field. Returns ok=false if field missing.
+// Review C2: the canvas executor runs after the provider's pcall has
+// returned, i.e. *unprotected* — any Lua error raised here (indexing a
+// non-table, a throwing __index metamethod) is a LuaJIT PANIC that kills
+// the process, and lua_rawgeti on a non-table is a segfault. Every read
+// in the executor therefore (a) checks the container is a table and
+// (b) uses raw access so no metamethod can run.
+//
+// Push t[field] (raw) for the table at absolute index `idx`, or nil when
+// `idx` is not a table. Always pushes exactly one value.
+canvas_rawgetfield :: proc(L: ^Lua_State, idx: i32, field: cstring) {
+	if !lua_istable(L, idx) {
+		lua_pushnil(L)
+		return
+	}
+	lua_pushstring(L, field)
+	lua_rawget(L, idx)
+}
+
+// Push the opts table of a canvas command (cell `n` of the command at
+// absolute index `cmd_idx`) and return its absolute index. A missing or
+// non-table cell (e.g. `(ctx.rect 0 0 10 10 5)`) is replaced by a fresh
+// empty table, so callers always see a table and the stack shape (one
+// pushed slot) is the same either way.
+canvas_opts :: proc(L: ^Lua_State, cmd_idx: i32, n: i32) -> i32 {
+	lua_rawgeti(L, cmd_idx, n)
+	if !lua_istable(L, -1) {
+		lua_pop(L, 1)
+		lua_createtable(L, 0, 0)
+	}
+	return lua_gettop(L)
+}
+
+// Read a polygon's vertex list from the table at absolute index
+// `points_idx`: each vertex must itself be a `[x y]` table with finite
+// coordinates. A flat list (`[0 0 10 0 5 10]`), any non-table vertex, or
+// any non-finite coordinate poisons the whole polygon (ok=false) rather
+// than drawing a partial shape. Fewer than 3 vertices is also ok=false.
+// Caller owns (deletes) the returned slice. Stack is left unchanged.
+read_polygon_points :: proc(L: ^Lua_State, points_idx: i32, ox: f32, oy: f32) -> ([]rl.Vector2, bool) {
+	if !lua_istable(L, points_idx) do return nil, false
+	n_points := i32(lua_objlen(L, points_idx))
+	// #233 H2: cap the vertex count so an adversarial point table
+	// can't force a multi-GiB per-frame allocation.
+	if n_points > MAX_POLYGON_POINTS do n_points = MAX_POLYGON_POINTS
+	if n_points < 3 do return nil, false
+	points := make([]rl.Vector2, n_points)
+	for p: i32 = 1; p <= n_points; p += 1 {
+		lua_rawgeti(L, points_idx, p)
+		pt_idx := lua_gettop(L)
+		if !lua_istable(L, pt_idx) {
+			lua_pop(L, 1)
+			delete(points)
+			return nil, false
+		}
+		// #233 M5: any non-finite vertex poisons the whole polygon;
+		// skip the draw rather than feed NaN/Inf into DrawTriangle.
+		px, px_ok := canvas_coord(L, pt_idx, 1, ox)
+		py, py_ok := canvas_coord(L, pt_idx, 2, oy)
+		lua_pop(L, 1)
+		if !px_ok || !py_ok {
+			delete(points)
+			return nil, false
+		}
+		points[p - 1] = {px, py}
+	}
+	return points, true
+}
+
+// Read a color [r,g,b] or [r,g,b,a] from a table field. Returns ok=false
+// if the field is missing / not a table, or `idx` is not a table.
 read_color_field :: proc(L: ^Lua_State, idx: i32, field: cstring) -> (rl.Color, bool) {
-	lua_getfield(L, idx, field)
+	canvas_rawgetfield(L, idx, field)
 	defer lua_pop(L, 1)
 	if !lua_istable(L, -1) do return {}, false
 
@@ -726,9 +800,10 @@ read_color_field :: proc(L: ^Lua_State, idx: i32, field: cstring) -> (rl.Color, 
 	return rl.Color{r, g, b, a}, true
 }
 
-// Read a number field from a Lua table, default 0
+// Read a number field from a Lua table, default 0 (also when `idx` is
+// not a table).
 read_number_field :: proc(L: ^Lua_State, idx: i32, field: cstring) -> f32 {
-	lua_getfield(L, idx, field)
+	canvas_rawgetfield(L, idx, field)
 	defer lua_pop(L, 1)
 	if lua_isnumber(L, -1) {
 		return f32(lua_tonumber(L, -1))
@@ -847,8 +922,7 @@ execute_canvas_command :: proc(L: ^Lua_State, idx: i32, tag: string, ox: f32, oy
 		w, w_ok := sanitize_dim(f32(lua_rawgeti_number(L, idx, 4)))
 		h, h_ok := sanitize_dim(f32(lua_rawgeti_number(L, idx, 5)))
 		if !x_ok || !y_ok || !w_ok || !h_ok do return
-		lua_rawgeti(L, idx, 6)
-		opts := lua_gettop(L)
+		opts := canvas_opts(L, idx, 6)
 
 		r := rl.Rectangle{x, y, w, h}
 		radius := read_number_field(L, opts, "radius")
@@ -878,8 +952,7 @@ execute_canvas_command :: proc(L: ^Lua_State, idx: i32, tag: string, ox: f32, oy
 		cy, cy_ok := canvas_coord(L, idx, 3, oy)
 		cr, cr_ok := sanitize_dim(f32(lua_rawgeti_number(L, idx, 4)))
 		if !cx_ok || !cy_ok || !cr_ok do return
-		lua_rawgeti(L, idx, 5)
-		opts := lua_gettop(L)
+		opts := canvas_opts(L, idx, 5)
 
 		if fill, ok := read_color_field(L, opts, "fill"); ok {
 			rl.DrawCircleV({cx, cy}, cr, fill)
@@ -895,8 +968,7 @@ execute_canvas_command :: proc(L: ^Lua_State, idx: i32, tag: string, ox: f32, oy
 		rx, rx_ok := sanitize_dim(f32(lua_rawgeti_number(L, idx, 4)))
 		ry, ry_ok := sanitize_dim(f32(lua_rawgeti_number(L, idx, 5)))
 		if !cx_ok || !cy_ok || !rx_ok || !ry_ok do return
-		lua_rawgeti(L, idx, 6)
-		opts := lua_gettop(L)
+		opts := canvas_opts(L, idx, 6)
 
 		if fill, ok := read_color_field(L, opts, "fill"); ok {
 			rl.DrawEllipse(i32(cx), i32(cy), rx, ry, fill)
@@ -912,8 +984,7 @@ execute_canvas_command :: proc(L: ^Lua_State, idx: i32, tag: string, ox: f32, oy
 		x2, x2_ok := canvas_coord(L, idx, 4, ox)
 		y2, y2_ok := canvas_coord(L, idx, 5, oy)
 		if !x1_ok || !y1_ok || !x2_ok || !y2_ok do return
-		lua_rawgeti(L, idx, 6)
-		opts := lua_gettop(L)
+		opts := canvas_opts(L, idx, 6)
 
 		stroke_color: rl.Color
 		if s, ok := read_color_field(L, opts, "stroke"); ok {
@@ -938,8 +1009,7 @@ execute_canvas_command :: proc(L: ^Lua_State, idx: i32, tag: string, ox: f32, oy
 			return
 		}
 		text := lua_tostring_raw(L, -1)
-		lua_rawgeti(L, idx, 5)
-		opts := lua_gettop(L)
+		opts := canvas_opts(L, idx, 5)
 
 		size := read_number_field(L, opts, "size")
 		if size <= 0 do size = 16
@@ -950,7 +1020,7 @@ execute_canvas_command :: proc(L: ^Lua_State, idx: i32, tag: string, ox: f32, oy
 			text_color = rl.BLACK
 		}
 		font_name := "sans"
-		lua_getfield(L, opts, "font")
+		canvas_rawgetfield(L, opts, "font")
 		if lua_isstring(L, -1) {
 			font_name = string(lua_tostring_raw(L, -1))
 		}
@@ -964,45 +1034,20 @@ execute_canvas_command :: proc(L: ^Lua_State, idx: i32, tag: string, ox: f32, oy
 	case "polygon":
 		lua_rawgeti(L, idx, 2)
 		points_idx := lua_gettop(L)
-		lua_rawgeti(L, idx, 3)
-		opts := lua_gettop(L)
+		opts := canvas_opts(L, idx, 3)
 
-		if lua_istable(L, points_idx) {
-			n_points := i32(lua_objlen(L, points_idx))
-			// #233 H2: cap the vertex count so an adversarial point table
-			// can't force a multi-GiB per-frame allocation.
-			if n_points > MAX_POLYGON_POINTS do n_points = MAX_POLYGON_POINTS
-			if n_points >= 3 {
-				points := make([]rl.Vector2, n_points)
-				defer delete(points)
-				// #233 M5: any non-finite vertex poisons the whole polygon;
-				// skip the draw rather than feed NaN/Inf into DrawTriangle.
-				all_finite := true
-				for p: i32 = 1; p <= n_points; p += 1 {
-					lua_rawgeti(L, points_idx, p)
-					pt_idx := lua_gettop(L)
-					px, px_ok := canvas_coord(L, pt_idx, 1, ox)
-					py, py_ok := canvas_coord(L, pt_idx, 2, oy)
-					lua_pop(L, 1)
-					if !px_ok || !py_ok {
-						all_finite = false
-						break
-					}
-					points[p - 1] = {px, py}
+		if points, ok := read_polygon_points(L, points_idx, ox, oy); ok {
+			defer delete(points)
+			n_points := i32(len(points))
+			if fill, fok := read_color_field(L, opts, "fill"); fok {
+				for i: i32 = 1; i < n_points - 1; i += 1 {
+					rl.DrawTriangle(points[0], points[i], points[i + 1], fill)
 				}
-
-				if all_finite {
-					if fill, ok := read_color_field(L, opts, "fill"); ok {
-						for i: i32 = 1; i < n_points - 1; i += 1 {
-							rl.DrawTriangle(points[0], points[i], points[i + 1], fill)
-						}
-					}
-					if stroke, ok := read_color_field(L, opts, "stroke"); ok {
-						for i: i32 = 0; i < n_points; i += 1 {
-							next := (i + 1) % n_points
-							rl.DrawLineV(points[i], points[next], stroke)
-						}
-					}
+			}
+			if stroke, sok := read_color_field(L, opts, "stroke"); sok {
+				for i: i32 = 0; i < n_points; i += 1 {
+					next := (i + 1) % n_points
+					rl.DrawLineV(points[i], points[next], stroke)
 				}
 			}
 		}
@@ -1029,8 +1074,7 @@ execute_canvas_command :: proc(L: ^Lua_State, idx: i32, tag: string, ox: f32, oy
 			lua_pop(L, 1)
 			return
 		}
-		lua_rawgeti(L, idx, 7)
-		opts := lua_gettop(L)
+		opts := canvas_opts(L, idx, 7)
 		scale := sanitize_pixels_scale(read_number_field(L, opts, "scale"))
 		if tex, tok := texture.get_pixels(iw, ih, transmute([]u8)data); tok {
 			rl.DrawTextureEx(tex, {x, y}, 0, scale, rl.WHITE)
@@ -1523,7 +1567,9 @@ lua_flatten_node :: proc(L: ^Lua_State, index: i32, cur: ^[dynamic]u8, b: ^Bridg
 			// Read string fields without cloning — flatten_subtree's
 			// Pass 1 deep-copies them into permanent storage. Cloning
 			// here too would leak the first copy.
-			attrs.aspect   = lua_get_string_field_raw(L, attrs_idx, "aspect")
+			// Temp-allocated (aspect lists are joined); flatten_subtree
+			// deep-copies it like the other raw fields.
+			attrs.aspect   = lua_get_aspect_field(L, attrs_idx, "aspect", context.temp_allocator)
 			attrs.id       = lua_get_string_field_raw(L, attrs_idx, "id")
 			attrs.width    = size_f32_to_f16(lua_get_size_f32(L, attrs_idx, "width"))
 			attrs.height   = size_f32_to_f16(lua_get_size_f32(L, attrs_idx, "height"))
@@ -1686,7 +1732,7 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 		c: types.NodeCanvas
 		if attrs_idx > 0 {
 			c.provider = lua_get_string_field(L, attrs_idx, "provider")
-			c.aspect = lua_get_string_field(L, attrs_idx, "aspect")
+			c.aspect = lua_get_aspect_field(L, attrs_idx, "aspect")
 			c.margin = lua_get_padding_field(L, attrs_idx, "margin")
 			lua_getfield(L, attrs_idx, "width")
 			if lua_isstring(L, -1) {
@@ -1711,7 +1757,7 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 		v: types.NodeVbox
 		if attrs_idx > 0 {
 			v.overflow = lua_get_string_field(L, attrs_idx, "overflow")
-			v.aspect = lua_get_string_field(L, attrs_idx, "aspect")
+			v.aspect = lua_get_aspect_field(L, attrs_idx, "aspect")
 			// vbox uses f16 unions — read as f32 then convert
 			lua_getfield(L, attrs_idx, "width")
 			if lua_isstring(L, -1) {
@@ -1747,7 +1793,7 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 		h: types.NodeHbox
 		if attrs_idx > 0 {
 			h.overflow = lua_get_string_field(L, attrs_idx, "overflow")
-			h.aspect = lua_get_string_field(L, attrs_idx, "aspect")
+			h.aspect = lua_get_aspect_field(L, attrs_idx, "aspect")
 			h.width = lua_get_size_f32(L, attrs_idx, "width")
 			h.height = lua_get_size_f32(L, attrs_idx, "height")
 			layout := lua_get_string_field_raw(L, attrs_idx, "layout")
@@ -1767,7 +1813,7 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 	case "input":
 		inp: types.NodeInput
 		if attrs_idx > 0 {
-			inp.aspect = lua_get_string_field(L, attrs_idx, "aspect")
+			inp.aspect = lua_get_aspect_field(L, attrs_idx, "aspect")
 			inp.change = lua_get_event_name(L, attrs_idx, "change")
 			inp.key = lua_get_event_name(L, attrs_idx, "key")
 			inp.width = lua_get_size_f32(L, attrs_idx, "width")
@@ -1782,7 +1828,7 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 	case "button":
 		btn: types.NodeButton
 		if attrs_idx > 0 {
-			btn.aspect = lua_get_string_field(L, attrs_idx, "aspect")
+			btn.aspect = lua_get_aspect_field(L, attrs_idx, "aspect")
 			btn.click = lua_get_event_name(L, attrs_idx, "click")
 			btn.click_ctx = lua_get_event_ctx(L, attrs_idx, "click")
 			btn.width = lua_get_size_f32(L, attrs_idx, "width")
@@ -1807,7 +1853,7 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 	case "text":
 		t: types.NodeText
 		if attrs_idx > 0 {
-			t.aspect = lua_get_string_field(L, attrs_idx, "aspect")
+			t.aspect = lua_get_aspect_field(L, attrs_idx, "aspect")
 			t.width = lua_get_size_f32(L, attrs_idx, "width")
 			t.height = lua_get_size_f32(L, attrs_idx, "height")
 			layout := lua_get_string_field_raw(L, attrs_idx, "layout")
@@ -1829,7 +1875,7 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 		img: types.NodeImage
 		img.fit = .keep
 		if attrs_idx > 0 {
-			img.aspect = lua_get_string_field(L, attrs_idx, "aspect")
+			img.aspect = lua_get_aspect_field(L, attrs_idx, "aspect")
 			img.width = lua_get_size_f32(L, attrs_idx, "width")
 			img.height = lua_get_size_f32(L, attrs_idx, "height")
 			img.margin = lua_get_padding_field(L, attrs_idx, "margin")
@@ -1853,7 +1899,7 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 	case "popout":
 		pop: types.NodePopout
 		if attrs_idx > 0 {
-			pop.aspect = lua_get_string_field(L, attrs_idx, "aspect")
+			pop.aspect = lua_get_aspect_field(L, attrs_idx, "aspect")
 			pop.width = lua_get_size_f32(L, attrs_idx, "width")
 			pop.height = lua_get_size_f32(L, attrs_idx, "height")
 			pop.x = lua_get_number_field(L, attrs_idx, "x")
@@ -1871,7 +1917,7 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 	case "modal":
 		mod: types.NodeModal
 		if attrs_idx > 0 {
-			mod.aspect = lua_get_string_field(L, attrs_idx, "aspect")
+			mod.aspect = lua_get_aspect_field(L, attrs_idx, "aspect")
 		}
 		return mod
 	}
@@ -1880,7 +1926,7 @@ lua_read_node :: proc(L: ^Lua_State, tag: string, attrs_idx: i32, text_content: 
 }
 
 // Reject any font-face path that could reach outside the project
-// directory. `rl.LoadFont` opens and parses the file immediately, so
+// directory. The font loader (`font.load_file`) opens and parses the file immediately, so
 // an unvalidated path lets a theme source (including PUT /aspects)
 // pick any file on disk the redin user can read. Allowed shape:
 // relative path, no leading `/`, no `..` segments, no NUL bytes.
@@ -1980,9 +2026,9 @@ load_font_faces :: proc(L: ^Lua_State, index: i32) {
 						continue
 					}
 					cpath := strings.clone_to_cstring(path, context.temp_allocator)
-					loaded := rl.LoadFont(cpath)
+					loaded := font.load_file(cpath)
 					if loaded.texture.id > 0 {
-						font.register(strings.clone(font_name), sk.style, loaded)
+						font.register(font_name, sk.style, loaded)
 					} else {
 						fmt.eprintfln("Failed to load font: %s", path)
 					}
@@ -2185,11 +2231,26 @@ deliver_events :: proc(b: ^Bridge, events: []types.InputEvent) {
 	}
 }
 
+// Count of deliver_dispatch_events calls that left the Lua stack
+// unbalanced (and were restored). Stays 0 in a healthy build; asserted by
+// dispatch_delivery_test.odin.
+g_dispatch_stack_imbalances: int
+
 // Deliver input dispatch events to Fennel.
 // Each event is wrapped as [:dispatch [:event-name {context}]].
 deliver_dispatch_events :: proc(b: ^Bridge, events: []types.Dispatch_Event) {
 	if len(events) == 0 do return
 	L := b.L
+	// Review C1: every branch below must leave the stack exactly as it
+	// found it (redin_events + one events table, consumed by the pcall).
+	// A miscounted rawseti once left redin_events behind on every
+	// keypress; restore the baseline and complain loudly if that recurs.
+	base_top := lua_gettop(L)
+	defer if top := lua_gettop(L); top != base_top {
+		g_dispatch_stack_imbalances += 1
+		fmt.eprintfln("deliver_dispatch_events: Lua stack unbalanced (%d -> %d), restoring", base_top, top)
+		lua_settop(L, base_top)
+	}
 
 	for event in events {
 		lua_getglobal(L, "redin_events")
@@ -2275,6 +2336,7 @@ deliver_dispatch_events :: proc(b: ^Bridge, events: []types.Dispatch_Event) {
 			lua_pushboolean(L, e.mods.super ? 1 : 0)
 			lua_setfield(L, -2, "super")
 			lua_setfield(L, -2, "mods")
+			lua_rawseti(L, -2, 2) // ctx -> inner[2]
 
 			lua_rawseti(L, -2, 2) // set dispatch wrapper as event[2]
 			lua_rawseti(L, -2, 1) // set as events[1]

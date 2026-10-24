@@ -43,3 +43,22 @@
     (is (= 2 (count rs)))
     (is (= #{"a"} (:classes (first (:compounds (first rs))))))
     (is (= #{"b"} (:classes (first (:compounds (second rs))))))))
+
+;; review C14a: a declaration outside any block made skip-block stop at its
+;; `;` (before the next `{`), so (subs text (inc open) (dec close)) got
+;; close < open and threw StringIndexOutOfBoundsException.
+(deftest declaration-outside-block-is-skipped
+  (let [{:keys [rules warnings]} (css/parse "s.css" "color: red;\n.a { color: blue }")]
+    (is (= 1 (count rules)))
+    (is (= #{"a"} (:classes (first (:compounds (first rules))))))
+    (is (= [[:color "blue" false]] (:decls (first rules))))
+    (is (some #(re-find #"^s\.css:1 warning: .*outside" %) warnings))))
+
+;; Same slice, other end: a block left open at EOF (`.b {` as the last
+;; characters) also produced a negative range; an unterminated block with
+;; declarations lost its last character.
+(deftest unterminated-block-at-eof
+  (let [rs (rules ".a { color: red }\n.b {")]
+    (is (= 2 (count rs)))
+    (is (= [] (:decls (second rs)))))
+  (is (= [[:color "red" false]] (:decls (first (rules ".a { color: red"))))))

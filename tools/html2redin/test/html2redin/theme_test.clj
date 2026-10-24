@@ -95,3 +95,30 @@
     (is (= :card-2 (get assignments [1])))
     (is (= [0 0 255] (get-in theme [:card#hover :color])))
     (is (= [0 128 0] (get-in theme [:card-2#hover :color])))))
+
+;; review C14b: `[\d.]+` admitted "1.2.3" / "." and Double/parseDouble threw
+;; NumberFormatException, aborting the whole run.
+(deftest malformed-line-height-warns-not-throws
+  (doseq [lh ["1.2.3" "." "1."]]
+    (let [[props warns] (th/visual-props {:line-height lh} "t.css:1")]
+      (is (not (contains? props :line-height)) lh)
+      (is (seq warns) lh)))
+  (is (= 1.5 (:line-height (first (th/visual-props {:line-height "1.5"} "c")))))
+  (is (= 0.5 (:line-height (first (th/visual-props {:line-height ".5"} "c")))))
+  (is (= 2.0 (:line-height (first (th/visual-props {:line-height "2"} "c"))))))
+
+;; review C14c: a class with no ASCII identifier characters sanitized to ""
+;; and became the aspect `:`, which fails to load as Fennel.
+(deftest non-ascii-class-falls-back-to-tag-name
+  (let [{:keys [theme assignments warnings]}
+        (synth "<p class=\"日本\">hi</p><p class=\"x\">a</p>" "p { color: red }")]
+    (is (every? #(seq (name %)) (keys theme)))
+    (is (= :p-1 (get assignments [0])))
+    (is (= [255 0 0] (get-in theme [:p-1 :color])))
+    (is (some #(re-find #"class \"日本\" has no identifier characters" %) warnings))
+    ;; warned once, not once per synthesis pass
+    (is (= 1 (count (filter #(re-find #"日本" %) warnings)))))
+  ;; a blank-sanitizing class next to a usable one is ignored for naming
+  (let [{:keys [assignments]}
+        (synth "<p class=\"日本 card\">hi</p>" ".card { color: red }")]
+    (is (= :card (get assignments [0])))))

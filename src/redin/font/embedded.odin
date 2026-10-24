@@ -15,7 +15,9 @@ DEFAULT_FONT_SIZE :: 64
 
 load_embedded :: proc() {
 	load_font :: proc(name: string, style: Font_Style, data: []u8) {
-		f := rl.LoadFontFromMemory(".ttf", raw_data(data), i32(len(data)), DEFAULT_FONT_SIZE, nil, 0)
+		// Explicit glyph set (codepoints.odin): with nil/0 raylib loads
+		// ASCII 32..126 only and every other character renders as '?'.
+		f := rl.LoadFontFromMemory(".ttf", raw_data(data), i32(len(data)), DEFAULT_FONT_SIZE, raw_data(glyph_codepoints[:]), GLYPH_COUNT)
 		rl.GenTextureMipmaps(&f.texture)
 		rl.SetTextureFilter(f.texture, .TRILINEAR)
 		register(name, style, f)

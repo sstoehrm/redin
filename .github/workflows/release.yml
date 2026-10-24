@@ -31,7 +31,7 @@ jobs:
       # gitlink whenever odin-http is intentionally rolled forward (#221 L1).
       - name: Verify odin-http submodule SHA
         run: |
-          expected=5e4c44eb847f94a592b0416ba4fefb538fee4894
+          expected=5ec5c76e0c60869f524732329e972422c138003c
           actual=$(git -C lib/odin-http rev-parse HEAD)
           [ "$actual" = "$expected" ] || {
             echo "::error::odin-http submodule SHA mismatch (got $actual, expected $expected)"

@@ -35,10 +35,18 @@ process_text_selection :: proc(
 		if scrollbar_consumed_press do continue
 		pt := rl.Vector2{me.x, me.y}
 
+		// Same topmost-hit rule as clicks / focus / drag (review C11): only
+		// the deepest listener-bearing node under the pointer may start a
+		// selection. Accepting *any* selectable text under the point let
+		// page text lying behind a :modal steal the press from the modal's
+		// input and then clear its focus below.
+		winner := deepest_listener_idx(listeners, node_rects, pt)
+
 		hit := false
 		for listener in listeners {
 			tl, ok := listener.(types.Text_Select_Listener)
 			if !ok do continue
+			if tl.node_idx != winner do continue
 			if tl.node_idx >= len(node_rects) do continue
 			if !rl.CheckCollisionPointRec(pt, node_rects[tl.node_idx]) do continue
 

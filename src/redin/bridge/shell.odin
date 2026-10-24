@@ -364,8 +364,23 @@ execute_shell :: proc(req: Shell_Request, client: ^Shell_Client = nil) -> Shell_
 	// a descriptive error_msg (issue #99 M2 A). Subsequent reads would
 	// return EOF as the kernel closes the (now-orphaned) pipe ends, but
 	// we break out immediately and reap the child below.
+	//
+	// Review C7: the loop runs until both pipes hit EOF *and* the child has
+	// exited. Looping only on the pipes let a child that closed (or
+	// redirected) its stdout/stderr early fall through to an unbounded
+	// process_wait: the deadline stopped being enforced (on-success after
+	// the child's full runtime) and stdin stopped being fed, so the child
+	// saw a truncated stdin. `exited` is detected without reaping
+	// (WNOWAIT), so the pid stays ours and the kill paths stay safe; the
+	// trailing process_wait does the reap. The pidfd, when the runtime has
+	// one, joins the poll set so an exit wakes the loop immediately.
 	killed := false
-	for !stdout_done || !stderr_done {
+	exited := false
+	pidfd := linux.Fd(-1)
+	if process.handle != 0 && process.handle != ~uintptr(0) {
+		pidfd = linux.Fd(process.handle)
+	}
+	for !stdout_done || !stderr_done || !exited {
 		// Deadline check (issue #99 M2 B). time.diff(start, end) returns
 		// end - start, so <= 0 means now >= deadline. Checked before the
 		// poll so a deadline that has already elapsed kills the child
@@ -380,7 +395,7 @@ execute_shell :: proc(req: Shell_Request, client: ^Shell_Client = nil) -> Shell_
 			break
 		}
 
-		fds: [3]linux.Poll_Fd
+		fds: [4]linux.Poll_Fd
 		n_fds := 0
 		stdout_idx := -1
 		stderr_idx := -1
@@ -407,6 +422,16 @@ execute_shell :: proc(req: Shell_Request, client: ^Shell_Client = nil) -> Shell_
 				events = {.OUT},
 			}
 			stdin_idx = n_fds
+			n_fds += 1
+		}
+		// Wake-up only: a pidfd polls readable once the child terminates.
+		// `exited` itself is decided by child_has_exited below. Dropped once
+		// exited, or the permanently-readable pidfd would spin the loop.
+		if !exited && pidfd >= 0 {
+			fds[n_fds] = linux.Poll_Fd {
+				fd     = pidfd,
+				events = {.IN},
+			}
 			n_fds += 1
 		}
 
@@ -485,6 +510,8 @@ execute_shell :: proc(req: Shell_Request, client: ^Shell_Client = nil) -> Shell_
 			killed = true
 			break
 		}
+
+		if !exited do exited = child_has_exited(process.pid)
 	}
 
 	// Close the stdin pipe if the child never drained it (timeout/cap kill,
@@ -499,7 +526,9 @@ execute_shell :: proc(req: Shell_Request, client: ^Shell_Client = nil) -> Shell_
 		return response
 	}
 
-	// Wait for process
+	// Reap. Barring the fatal-poll-error bail-out above, the loop only ends
+	// here once the child has exited, so this returns immediately instead of
+	// blocking past the deadline (review C7).
 	state, wait_err := os.process_wait(process)
 	if wait_err != nil {
 		response.error_msg = fmt.aprintf("Failed to wait for process: %v", wait_err)
@@ -512,4 +541,21 @@ execute_shell :: proc(req: Shell_Request, client: ^Shell_Client = nil) -> Shell_
 	response.stderr = strings.clone(string(stderr_buf[:]))
 
 	return response
+}
+
+// Review C7: non-reaping exit probe for execute_shell's poll loop. WNOWAIT
+// leaves the child a zombie so its pid can't be recycled before the final
+// os.process_wait reaps it (keeping process_kill on the timeout/cap paths
+// safe). Any waitid error other than EINTR (e.g. ECHILD) counts as exited:
+// the loop must not spin on a child it can no longer observe; the trailing
+// process_wait then reports the error.
+@(private = "file")
+child_has_exited :: proc(pid: int) -> bool {
+	info: linux.Sig_Info
+	errno := linux.Errno.EINTR
+	for errno == .EINTR {
+		errno = linux.waitid(.PID, linux.Id(pid), &info, {.WEXITED, .WNOHANG, .WNOWAIT}, nil)
+	}
+	if errno != .NONE do return true
+	return info.signo == .SIGCHLD
 }

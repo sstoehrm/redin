@@ -117,7 +117,7 @@ A view function returns the frame tree directly as nested arrays. It calls `subs
 Event attributes on elements:
 - `:click` -- fires on mouse click, dispatches the given event vector
 - `:change` -- fires on input value change, passes `{:value ...}` as event arg
-- `:key` -- fires on Enter key in an input
+- `:key` -- fires on any key press (Enter, Escape, arrows, ...) in a focused input; with `:key` set, Enter does not insert a newline
 
 ---
 

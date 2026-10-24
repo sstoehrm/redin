@@ -64,10 +64,10 @@ Response: JSON-serialized Lua state table.
 
 ### `GET /state/:path` -- nested value
 
-Dot-separated path. Segments are string keys into the Lua state table.
+Dot-separated path into the Lua state table. Each segment is looked up as a string key first; a segment that is a non-negative integer and finds no string key is retried as a **0-based** array index into a Lua sequence (`items.0` is Lua `items[1]`, matching the JSON array `/state` returns). Lookups use raw access, so no `__index` metamethods run. A miss anywhere returns `null`.
 
 ```bash
-curl -H "$AUTH" http://localhost:$PORT/state/items.text
+curl -H "$AUTH" http://localhost:$PORT/state/items.0.text
 ```
 
 ### `GET /aspects` -- theme table

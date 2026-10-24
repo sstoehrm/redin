@@ -50,7 +50,9 @@
     (assoc db :input-value (or (. event 2) ""))))
 
 ;; Multi-line input: no :key handler, so Enter inserts \n in the buffer
-;; (host/input/input.odin:293) and the value comes back via :change.
+;; (src/redin/input/input.odin, KeyEvent .ENTER) and the value comes back
+;; via :change. The :test-input above has :key, so Enter there only
+;; dispatches the key event (no newline, no :change).
 (reg-handler :event/multiline-change
   (fn [db event]
     (let [ctx (. event 2)]

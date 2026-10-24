@@ -1,5 +1,6 @@
 package font
 
+import "core:strings"
 import rl "vendor:raylib"
 
 Font_Style :: enum {
@@ -23,18 +24,25 @@ init :: proc() {
 }
 
 destroy :: proc() {
-	for _, f in fonts {
+	for k, f in fonts {
 		rl.UnloadFont(f)
+		delete(k.name)
 	}
 	delete(fonts)
 }
 
+// The map owns its key names: `name` is cloned on first registration and
+// only borrowed when replacing an existing entry, so callers keep ownership
+// of what they pass. (The theme is pushed twice at startup, so a font-face
+// re-registers the same name; handing over a fresh clone each time leaked
+// every one but the first.)
 register :: proc(name: string, style: Font_Style, f: rl.Font) {
-	key := Font_Key{name = name, style = style}
-	if existing, ok := fonts[key]; ok {
-		rl.UnloadFont(existing)
+	if existing, ok := &fonts[Font_Key{name = name, style = style}]; ok {
+		rl.UnloadFont(existing^)
+		existing^ = f
+		return
 	}
-	fonts[key] = f
+	fonts[Font_Key{name = strings.clone(name), style = style}] = f
 }
 
 get :: proc(name: string, style: Font_Style) -> rl.Font {

@@ -75,6 +75,9 @@ Drag_State :: union { Drag_Idle, Drag_Pending, Drag_Active }
 // package-level `drag` variable therefore starts as nil, and `case Drag_Idle:`
 // never matches at runtime. The idle condition is `drag == nil`. All
 // transitions back to "idle" assign `drag = nil` (not `drag = Drag_Idle{}`).
+//
+// Never write through `switch &s in drag` from another file: Odin
+// dev-2026-10 binds a copy there in separate-module builds (see remap.odin).
 drag: Drag_State
 
 // True iff src and target share at least one tag.

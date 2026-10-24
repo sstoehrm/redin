@@ -7,6 +7,10 @@
 (var handlers {})
 (var subscriptions {})
 (var changed-paths [])
+;; Monotonic count of every change ever recorded. changed-paths[i] is change
+;; number (change-seq - #changed-paths + i); a sub stamps the change-seq it
+;; was computed at so subscribe/flush only compare it against newer writes.
+(var change-seq 0)
 (var tracking nil)
 (var effect-handler nil)
 
@@ -39,7 +43,8 @@
     (table.insert tracking path)))
 
 (fn record-change [path]
-  (table.insert changed-paths path))
+  (table.insert changed-paths path)
+  (set change-seq (+ change-seq 1)))
 
 ;; ===== Public API: init =====
 
@@ -192,7 +197,24 @@
 ;; ===== Public API: subscriptions =====
 
 (fn M.reg-sub [key query-fn]
-  (tset subscriptions key {:fn query-fn :deps [] :cached nil :dirty true}))
+  (tset subscriptions key {:fn query-fn :deps [] :cached nil :dirty true
+                           :seq 0}))
+
+;; Invalidation predicate shared by subscribe and flush: does any change
+;; recorded after this sub was last computed overlap one of its deps?
+;; Changes already flushed were checked by that flush (which marked the
+;; sub dirty if needed), so only the pending changed-paths are scanned.
+(fn changed-since? [sub]
+  (let [n (length changed-paths)
+        base (- change-seq n)]
+    (var hit false)
+    (for [i (math.max 1 (+ (- sub.seq base) 1)) n]
+      (when (not hit)
+        (let [changed (. changed-paths i)]
+          (each [_ dep (ipairs sub.deps)]
+            (when (and (not hit) (paths-overlap? dep changed))
+              (set hit true))))))
+    hit))
 
 (fn M.subscribe [key]
   (let [sub (. subscriptions key)]
@@ -200,8 +222,11 @@
       (do
         (print (.. "Warning: no subscription registered for: " (tostring key)))
         nil)
-      (do
-        (when sub.dirty
+      (let [caller-tracking tracking]
+        ;; Recompute when flagged by a flush, or when a tracked path changed
+        ;; since the last computation but before the next flush (e.g. a
+        ;; subscribe from an event handler right after a write).
+        (when (or sub.dirty (changed-since? sub))
           ;; #178: save/restore `tracking` (like M.dispatch) so a query fn
           ;; that itself calls subscribe doesn't clobber it to nil, which
           ;; would drop this sub's deps and later (ipairs nil) in flush.
@@ -217,10 +242,17 @@
                   (set sub.deps tracking)
                   (set tracking saved-tracking)
                   (set sub.cached value)
+                  (set sub.seq change-seq)
                   (set sub.dirty false))
                 (do
                   (set tracking saved-tracking)
                   (error value 0))))))
+        ;; A sub computed inside another sub's query fn hands its deps to
+        ;; the caller, cached or not, so the outer sub invalidates when any
+        ;; transitively-read path changes (no explicit sub graph needed).
+        (when caller-tracking
+          (each [_ dep (ipairs sub.deps)]
+            (table.insert caller-tracking dep)))
         sub.cached))))
 
 ;; ===== Public API: flush =====
@@ -228,14 +260,8 @@
 (fn M.flush []
   (when (M.has-changes?)
     (each [_ sub (pairs subscriptions)]
-      (when (not sub.dirty)
-        (var invalidated false)
-        (each [_ dep (ipairs sub.deps)]
-          (when (not invalidated)
-            (each [_ changed (ipairs changed-paths)]
-              (when (and (not invalidated) (paths-overlap? dep changed))
-                (set sub.dirty true)
-                (set invalidated true)))))))
+      (when (and (not sub.dirty) (changed-since? sub))
+        (set sub.dirty true)))
     (set changed-paths [])))
 
 (fn M.set-effect-handler [handler]
@@ -248,6 +274,7 @@
   (set handlers {})
   (set subscriptions {})
   (set changed-paths [])
+  (set change-seq 0)
   (set tracking nil)
   (set effect-handler nil)
   (set dispatch-depth 0))

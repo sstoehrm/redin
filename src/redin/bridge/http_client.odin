@@ -909,6 +909,9 @@ execute_http_request :: proc(req: Http_Request, client: ^Http_Client = nil) -> H
 	} else {
 		// #162 L4: generic to the caller, detail to stderr.
 		fmt.eprintfln("redin: http body read failed for %s: %v", url_host(req.url), body_err)
+		// Review C8: status 0, like the Too_Long branch above. Leaving the
+		// real 2xx here routed a truncated/failed body to on-success.
+		response.status = 0
 		response.error_msg = strings.clone("http request failed")
 	}
 

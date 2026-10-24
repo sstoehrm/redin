@@ -44,3 +44,11 @@
     (is (re-find #"\[:sep :hr-rule\]" view))
     (is (re-find #":hr-rule \{:bg \[128 128 128\]\}" theme))
     (is (re-find #":sep \{:bg \[255 0 0\]\}" theme))))
+
+;; review S1: an id carrying Fennel code must come out as an inert keyword.
+(deftest id-injection-emits-no-code
+  (let [{:keys [view]}
+        (cli/run {:html "<div id='x (os.execute \"touch pwned\") :z'><p>hello</p></div>"
+                  :html-path "page.html" :css-sources []})]
+    (is (not (clojure.string/includes? view "(")))
+    (is (re-find #"\{:id :x-os-execute-touch-pwned-z\}" view))))

@@ -63,11 +63,31 @@
         :else (do (warn! el (str (name style-key) ": " raw " unmappable — dropped"))
                   nil)))))
 
+(defn- id-attr
+  "HTML id -> safe :id keyword, nil if absent or nothing usable remains.
+   The id becomes a Fennel keyword in generated code, and the attr parser
+   admits any character in a quoted value (spaces, parens, quotes), so
+   non-identifier characters are replaced by `-` (like class names, but
+   case-preserving) with a warning (review S1)."
+  [el warn!]
+  (when-let [raw (get-in el [:attrs "id"])]
+    (let [safe (-> raw (str/replace #"[^A-Za-z0-9_-]" "-") (str/replace #"-+" "-")
+                   (str/replace #"^-|-$" ""))]
+      (cond
+        (str/blank? safe)
+        (do (warn! el (str "id " (pr-str raw) " has no identifier characters — dropped"))
+            nil)
+        (not= safe raw)
+        (do (warn! el (str "id " (pr-str raw) " sanitized to :" safe))
+            (keyword safe))
+        :else (keyword safe)))))
+
 (defn- node-attrs
   "Full redin attrs for an element. leaf? gates :margin; vertical? is the
    box orientation (nil for leaves other than text)."
   [el path assignments leaf? vertical? warn!]
-  (let [style (:style el)
+  (let [id (id-attr el warn!)
+        style (:style el)
         own (:own-style el)
         gap (when-let [g (get own :gap)]
               (let [p (v/parse-length g)] (when (number? p) p)))
@@ -87,7 +107,7 @@
                      (first (str/split (get-in el [:attrs "class"] "?") #"\s+"))
                      " dropped (redin has :gap/:padding)")))
     (cond-> {}
-      (get-in el [:attrs "id"]) (assoc :id (keyword (get-in el [:attrs "id"])))
+      id (assoc :id id)
       (get assignments path) (assoc :aspect (get assignments path))
       gap (assoc :gap gap)
       overflow (assoc :overflow overflow)

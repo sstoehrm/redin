@@ -1656,3 +1656,45 @@ test_tcp_connect_bounded_cancel :: proc(t: ^testing.T) {
 	testing.expectf(t, elapsed < 5 * time.Second,
 		"cancelled connect took %v — cancel flag was not honoured (#256 L3)", elapsed)
 }
+
+// Review C8: a body-read failure other than Too_Long (here: the server
+// announces Content-Length: 100, sends 3 bytes and closes) set error_msg but
+// left response.status at the real 2xx. effect.fnl routes any 2xx to
+// on-success, so the app saw a "successful" truncated response instead of the
+// documented on-error {:status 0 :error "http request failed"}.
+@(test)
+test_http_truncated_body_reports_status_zero :: proc(t: ^testing.T) {
+	sync.lock(&g_test_http_state_mutex)
+	defer sync.unlock(&g_test_http_state_mutex)
+	allow_open_http()
+	defer set_http_whitelist(nil)
+
+	m := mock_start("HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\nabc")
+	if m == nil do testing.fail_now(t, "could not bind a mock server port")
+	defer mock_stop(m)
+
+	url := fmt.tprintf("http://127.0.0.1:%d/", m.port)
+	req := Http_Request {
+		id     = strings.clone("short-body"),
+		url    = strings.clone(url),
+		method = strings.clone("GET"),
+	}
+	defer {
+		delete(req.id)
+		delete(req.url)
+		delete(req.method)
+	}
+
+	got := execute_http_request(req)
+	defer {
+		delete(got.body)
+		delete(got.error_msg)
+		for k, v in got.headers {delete(k);delete(v)}
+		delete(got.headers)
+	}
+
+	testing.expectf(t, got.status == 0,
+		"truncated body must surface status 0 (on-error), got %d", got.status)
+	testing.expectf(t, got.error_msg == "http request failed",
+		"expected generic 'http request failed', got %q", got.error_msg)
+}

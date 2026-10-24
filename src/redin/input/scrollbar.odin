@@ -58,13 +58,18 @@ thumb_geometry :: proc(
 	}
 }
 
+// Never write through `switch &s in scrollbar` from another file: Odin
+// dev-2026-10 binds a copy there in separate-module builds (see remap.odin).
 scrollbar: Scrollbar_State
 
 // True for the rest of the frame after apply_scrollbar consumed a
-// press. Other consumers (apply_listeners, process_text_selection,
-// drag_update) skip their MouseEvent paths so a press on the bar
-// doesn't also fire clicks / selections / app-drags on whatever sits
-// behind the scrollbar.
+// press. Other consumers (get_user_events, apply_listeners,
+// process_drag, process_text_selection, process_user_events' caret
+// placement) skip their MouseEvent paths so a press on the bar doesn't
+// also fire clicks / focus / selections / app-drags on whatever sits
+// behind the scrollbar. runtime.run calls apply_scrollbar *before* all
+// of them each frame (review C6) — otherwise they read the previous
+// frame's value.
 scrollbar_consumed_press: bool
 
 // container_idx of the scrollbar state, regardless of variant.

@@ -533,6 +533,11 @@ acceptor_thread_proc :: proc(ds: ^Dev_Server) {
 }
 
 handler_thread_proc :: proc(ds: ^Dev_Server) {
+	// Review S2: started with init_context = context, so core:thread rebinds
+	// temp_allocator to this thread's own default temp arena but leaves its
+	// teardown to us (see thread.create docs). handle_one_connection resets
+	// the arena per request; release its backing block on exit.
+	defer destroy_thread_temp_arena()
 	stack_buf: [8192]u8
 	for {
 		pc := conn_pop_blocking(&ds.accepted_conns)
@@ -545,6 +550,16 @@ handler_thread_proc :: proc(ds: ^Dev_Server) {
 // Per-request handling, called by each handler-pool worker thread.
 handle_one_connection :: proc(ds: ^Dev_Server, client: net.TCP_Socket, stack_buf: []u8) {
 	MAX_BODY :: 1024 * 1024
+
+	// Review S2: the header scans below (header_count, find_content_length,
+	// check_host_header, check_bearer_token) each ascii_lower the header
+	// block into context.temp_allocator — this handler thread's own arena,
+	// which nothing else resets. Without this every request, including
+	// rejected unauthenticated ones, leaked ~7x its header size for good.
+	// Safe: nothing that outlives this call lives in the temp arena —
+	// method/path/body alias `buf` (stack_buf / heap_buf), pending/channel
+	// are context.allocator, and the response body is main's allocation.
+	defer free_all(context.temp_allocator)
 
 	// Receive timeout on this client: each recv returns within
 	// CLIENT_RECV_TIMEOUT even if the peer sends nothing, so
@@ -1702,6 +1717,47 @@ any_segment_too_long :: proc(segments: []string) -> bool {
 	return false
 }
 
+// Walks `segments` from the value on top of the Lua stack, replacing it with
+// the value found (nil when any step misses). Each segment is first looked up
+// as a string key. Review C15: when that misses and the segment is a
+// non-negative decimal integer, it is retried as a 0-based array index (Lua
+// index n+1) — /state serializes Lua sequences as JSON arrays, so
+// `items.0.text` addresses what the client sees at items[0].text. String keys
+// win, so a table with an explicit "0" key still resolves by string. rawget /
+// rawgeti only: no __index metamethods run (see the caller).
+@(private = "package")
+walk_state_path :: proc(L: ^Lua_State, segments: []string) {
+	for seg in segments {
+		if !lua_istable(L, -1) {
+			lua_pop(L, 1)
+			lua_pushnil(L)
+			return
+		}
+		lua_pushlstring(L, cstring(raw_data(seg)), uint(len(seg)))
+		lua_rawget(L, -2)
+		if lua_isnil(L, -1) {
+			if idx, ok := state_path_array_index(seg); ok {
+				lua_pop(L, 1)
+				lua_rawgeti(L, -1, idx)
+			}
+		}
+		lua_remove(L, -2)
+	}
+}
+
+// Parses a path segment as a 0-based array index and returns the matching
+// 1-based Lua index. Digits only, capped at 9 so the +1 can't overflow i32.
+@(private = "file")
+state_path_array_index :: proc(seg: string) -> (i32, bool) {
+	if len(seg) == 0 || len(seg) > 9 do return 0, false
+	n: i32 = 0
+	for c in transmute([]u8)seg {
+		if c < '0' || c > '9' do return 0, false
+		n = n * 10 + i32(c - '0')
+	}
+	return n + 1, true
+}
+
 handle_get_state_path :: proc(ds: ^Dev_Server, ch: ^Response_Channel, dot_path: string) {
 	L := ds.bridge.L
 	lua_getglobal(L, "redin_get_state")
@@ -1734,17 +1790,7 @@ handle_get_state_path :: proc(ds: ^Dev_Server, ch: ^Response_Channel, dot_path: 
 		respond_json_error(ch, 400, `{"error":"path segment too long"}`)
 		return
 	}
-	for seg in segments {
-		if lua_istable(L, -1) {
-			lua_pushlstring(L, cstring(raw_data(seg)), uint(len(seg)))
-			lua_rawget(L, -2)
-			lua_remove(L, -2)
-		} else {
-			lua_pop(L, 1)
-			lua_pushnil(L)
-			break
-		}
-	}
+	walk_state_path(L, segments)
 	b := strings.builder_make()
 	defer strings.builder_destroy(&b)
 	lua_value_to_json(&b, L, -1)
@@ -1758,6 +1804,9 @@ handle_get_aspects :: proc(ds: ^Dev_Server, ch: ^Response_Channel) {
 	json_begin_object(&b)
 	first := true
 	for name, t in ds.bridge.theme {
+		// Synthetic `:aspect [:a :b]` entries are derived, not part of
+		// the app's theme (review C13).
+		if is_composed_theme_key(ds.bridge, name) do continue
 		if !first do json_comma(&b)
 		first = false
 		json_key(&b, name)

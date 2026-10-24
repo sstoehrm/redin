@@ -35,6 +35,9 @@ get_user_events :: proc(
 		case types.MouseEvent:
 			if e.button != .LEFT do continue
 			if is_dragging() do continue
+			// A press on a scrollbar thumb/gutter belongs to the scrollbar
+			// (review C6); apply_scrollbar runs first in the frame.
+			if scrollbar_consumed_press do continue
 			pt := rl.Vector2{e.x, e.y}
 
 			// Deepest node wins: compute the innermost listener-bearing

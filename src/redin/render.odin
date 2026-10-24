@@ -19,6 +19,11 @@ px :: proc(v: f32) -> f32 { return math.round(v) }
 // Later overrides earlier: base < #focus < #hover < #active. Matches
 // the order documented in docs/reference/theme.md.
 //
+// Composed aspects (`:aspect [:a :b]`) arrive here as the synthetic key
+// "a b"; the bridge keeps precomposed "a b" / "a b#hover" / ... entries
+// in the theme map (bridge/aspect_compose.odin), so no special casing is
+// needed.
+//
 // idx = -1 means "no state overlays" (used by the drag-preview draw
 // paths, where the source/clone aspect already encodes the dragging
 // visual and should not be further mutated).
@@ -35,22 +40,7 @@ resolve_themed_aspect :: proc(
 	if base, ok := theme[aspect]; ok do result = base
 	if idx < 0 do return result
 
-	overlay :: proc(out: ^types.Theme, src: types.Theme) {
-		if src.bg != {}          do out.bg = src.bg
-		if src.color != {}       do out.color = src.color
-		if src.border != {}      do out.border = src.border
-		if src.border_width > 0  do out.border_width = src.border_width
-		if src.radius > 0        do out.radius = src.radius
-		if src.padding != {}     do out.padding = src.padding
-		if src.font_size > 0     do out.font_size = src.font_size
-		if len(src.font) > 0     do out.font = src.font
-		if src.weight > 0        do out.weight = src.weight
-		if src.line_height > 0   do out.line_height = src.line_height
-		if src.opacity > 0       do out.opacity = src.opacity
-		if src.shadow != {}      do out.shadow = src.shadow
-		if src.selection != {}   do out.selection = src.selection
-		if src.text_align != .Auto do out.text_align = src.text_align
-	}
+	overlay :: types.overlay_theme
 
 	if idx == input.focused_idx {
 		if t, ok := theme[strings.concatenate({aspect, "#focus"}, context.temp_allocator)]; ok do overlay(&result, t)
@@ -112,7 +102,9 @@ node_content_rects: [dynamic]rl.Rectangle
 // render can match the selection path against this tree's paths.
 g_paths: []types.Path
 
-// Per-node scroll offsets for overflow containers.
+// Per-node scroll offsets for overflow containers. Keyed by node idx;
+// remap_frame_state moves them with their node when a re-flatten
+// shifts indices (review C4).
 scroll_offsets: map[int]f32
 scroll_offsets_x: map[int]f32
 
@@ -127,6 +119,51 @@ node_scroll_info: map[int]types.Scroll_Info
 // tree is unchanged. Bridge invalidates on re-flatten and theme swap.
 
 SCROLL_SPEED :: 30.0 // pixels per wheel tick
+
+// Review C4: call whenever the bridge may have re-flattened the view
+// (the runtime's `frame_changed` blocks), before any input phase reads
+// per-index state. input.remap_on_frame_change aligns the previous tree
+// with the new one and moves the input package's per-index state
+// (focus, #active, scrollbar, drag); this moves render's: scroll
+// offsets and the last layout's rects / scroll info, which input
+// hit-tests against until this frame's layout runs. State whose node
+// has no counterpart in the new tree is dropped.
+remap_frame_state :: proc(nodes: []types.Node, children_list: []types.Children) {
+	m, ok := input.remap_on_frame_change(nodes, children_list)
+	if !ok do return
+	n := len(nodes)
+
+	// Re-key an idx-keyed map through m; entries whose node is gone drop.
+	remap_keys :: proc(mp: ^map[int]$V, m: []int, n: int) {
+		if len(mp) == 0 do return
+		Moved :: struct { k: int, v: V }
+		moved := make([dynamic]Moved, 0, len(mp), context.temp_allocator)
+		for k, v in mp {
+			if k < 0 || k >= len(m) do continue
+			nk := m[k]
+			if nk < 0 || nk >= n do continue
+			append(&moved, Moved{nk, v})
+		}
+		clear(mp)
+		for e in moved do mp[e.k] = e.v
+	}
+	remap_keys(&scroll_offsets, m, n)
+	remap_keys(&scroll_offsets_x, m, n)
+	remap_keys(&node_scroll_info, m, n)
+
+	remap_rects :: proc(rects: ^[dynamic]rl.Rectangle, m: []int, n: int) {
+		old := make([]rl.Rectangle, len(rects), context.temp_allocator)
+		copy(old, rects[:])
+		resize(rects, n)
+		for i in 0 ..< n do rects[i] = {}
+		for nk, k in m {
+			if k >= len(old) || nk < 0 || nk >= n do continue
+			rects[nk] = old[k]
+		}
+	}
+	remap_rects(&node_rects, m, n)
+	remap_rects(&node_content_rects, m, n)
+}
 
 apply_scroll_events :: proc(events: []types.InputEvent, nodes: []types.Node) {
 	for event in events {
@@ -935,24 +972,9 @@ scrollbar_color :: proc(t: types.Theme) -> rl.Color {
 	return rl.Color{r, g, b, alpha}
 }
 
-// Field-by-field non-zero overlay, same shape as resolve_themed_aspect's
-// inner `overlay` proc. Lifted out for reuse here.
-overlay_theme :: proc(out: ^types.Theme, src: types.Theme) {
-	if src.bg != {}            do out.bg = src.bg
-	if src.color != {}         do out.color = src.color
-	if src.border != {}        do out.border = src.border
-	if src.border_width > 0    do out.border_width = src.border_width
-	if src.radius > 0          do out.radius = src.radius
-	if src.padding != {}       do out.padding = src.padding
-	if src.font_size > 0       do out.font_size = src.font_size
-	if len(src.font) > 0       do out.font = src.font
-	if src.weight > 0          do out.weight = src.weight
-	if src.line_height > 0     do out.line_height = src.line_height
-	if src.opacity > 0         do out.opacity = src.opacity
-	if src.shadow != {}        do out.shadow = src.shadow
-	if src.selection != {}     do out.selection = src.selection
-	if src.text_align != .Auto do out.text_align = src.text_align
-}
+// Field-by-field non-zero overlay — lives in types so the bridge's
+// composed-aspect builder (`[:a :b]`) shares the exact same merge rule.
+overlay_theme :: types.overlay_theme
 
 draw_box_children :: proc(
 	idx: int,
@@ -1228,6 +1250,24 @@ intrinsic_height :: proc(
 		return 0
 	}
 
+	// Only containers use the per-node intrinsic cache here. A leaf's
+	// intrinsic height is its margin-inclusive outer height, while
+	// node_preferred_height caches the *inner* (margin-exclusive) text
+	// height in the same single per-node slot. Sharing that slot let the
+	// two values collide (review C12): with zero horizontal margin both
+	// keys are equal and the margin was added twice; with a non-zero one
+	// each call evicted the other's entry and its cached wrap lines. The
+	// leaf path is cheap and its text measurement is already cached
+	// inside node_preferred_height, so leaves skip this layer.
+	is_container := false
+	#partial switch _ in nodes[idx] {
+	case types.NodeVbox, types.NodeHbox, types.NodeStack:
+		is_container = true
+	}
+	if !is_container {
+		return intrinsic_height_impl(idx, nodes, children_list, theme, available_width, depth)
+	}
+
 	if cached, ok := text_pkg.lookup_intrinsic(idx, available_width); ok {
 		return cached
 	}
@@ -1274,11 +1314,30 @@ intrinsic_height_impl :: proc(
 		}
 		ch := children_list[idx]
 		if ch.length == 0 do return f32(pad[0]) + f32(pad[2])
-		inner_w := available_width - f32(pad[1]) - f32(pad[3]) - n.gap * f32(int(ch.length) - 1)
-		share := inner_w / f32(ch.length)
+		// Measure each child at the width layout_node will actually give
+		// it: fixed-width children get their outer preferred width, fill
+		// children split what remains (none for scroll-x, which doesn't
+		// fill). An even inner_w/n share measured wrapped text at the
+		// wrong width whenever siblings had explicit widths.
+		inner_w := available_width - f32(pad[1]) - f32(pad[3])
+		fixed_total := n.gap * f32(int(ch.length) - 1)
+		fill_count := 0
+		for i in 0 ..< int(ch.length) {
+			w := outer_preferred_width(int(ch.value[i]), nodes)
+			if w > 0 do fixed_total += w
+			else     do fill_count += 1
+		}
+		fill_size: f32 = 0
+		if n.overflow != "scroll-x" && fill_count > 0 {
+			remaining := inner_w - fixed_total
+			if remaining > 0 do fill_size = remaining / f32(fill_count)
+		}
 		max_h: f32 = 0
 		for i in 0 ..< int(ch.length) {
-			ch_h := intrinsic_height(int(ch.value[i]), nodes, children_list, theme, share, depth + 1)
+			child := int(ch.value[i])
+			w := outer_preferred_width(child, nodes)
+			if w <= 0 do w = fill_size
+			ch_h := intrinsic_height(child, nodes, children_list, theme, w, depth + 1)
 			if ch_h > max_h do max_h = ch_h
 		}
 		return max_h + f32(pad[0]) + f32(pad[2])
